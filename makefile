@@ -1,5 +1,5 @@
 # ============================
-#   Kernel x86-64 – Makefile
+#    Kernel x86-64 – Makefile
 # ============================
 
 CC = clang
@@ -9,76 +9,77 @@ AS = nasm
 CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
-BOOT = boot/multiboot.asm
-KERNEL = kernel/kernel.c
+# 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
+C_SOURCES = $(wildcard *.c) $(wildcard kernel/*.c)
+C_OBJS = $(C_SOURCES:.c=.o)
 
-OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o timer.o timer_asm.o config.o shell.o
+# 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
+ASM_SOURCES = $(wildcard *.asm) $(wildcard boot/*.asm)
+
+# Convertim sursele asm în obiecte .o
+# Notă: Pentru boot/multiboot.asm vrem să genereze boot.o direct în root
+ASM_OBJS = $(notdir $(ASM_SOURCES:.asm=.o))
+# Dacă boot/multiboot.asm devine multiboot.o prin regulă automată, 
+# dar linkerul tău se așteaptă la boot.o, putem fie să redenumim fișierul asm în boot.asm, 
+# fie să tratăm boot.asm separat. 
+# Cel mai simplu: redenumim boot/multiboot.asm în boot/boot.asm sau tratăm excepția.
+
+# Toate obiectele pentru linkare
+OBJS = boot.o isr_keyboard.o timer_asm.o $(C_OBJS)
 
 all: kernel.bin
 
-boot.o: $(BOOT)
-	$(AS) -f elf64 $(BOOT) -o boot.o
+# Regulă automată pentru fișierele C din root
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel.o: $(KERNEL)
-	$(CC) $(CFLAGS) -c $(KERNEL) -o kernel.o
+# Regulă automată pentru fișierele C din folderul kernel/
+kernel/%.o: kernel/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel.bin: $(OBJS)
-	$(LD) $(LDFLAGS) $(OBJS) -o kernel.bin
+# Regulă automată pentru orice fișier .asm din folderul boot/
+boot/%.o: boot/%.asm
+	$(AS) -f elf64 $< -o $@
 
-isr_keyboard.o: isr_keyboard.asm
-	$(AS) -f elf64 isr_keyboard.asm -o isr_keyboard.o
+# Regulă automată pentru fișierele .asm din root (ex: isr_keyboard.asm, timer.asm)
+%.o: %.asm
+	$(AS) -f elf64 $< -o $@
 
-io.o: io.c io.h
-	$(CC) $(CFLAGS) -c io.c -o io.o
+boot.o: boot/multiboot.asm
+	$(AS) -f elf64 boot/multiboot.asm -o boot.o
 
-idt.o: idt.c 
-	$(CC) $(CFLAGS) -c idt.c -o idt.o
-
-interrupts.o: interrupts.c 
-	$(CC) $(CFLAGS) -c interrupts.c -o interrupts.o
-
-# Regulă pentru timer în C
-timer.o: timer.c timer.h
-	$(CC) $(CFLAGS) -c timer.c -o timer.o
-
-# Regulă pentru timer în limbaj de asamblare
 timer_asm.o: timer.asm
 	$(AS) -f elf64 timer.asm -o timer_asm.o
 
 
-config.o: config.c config.h
-	$(CC) $(CFLAGS) -c config.c -o config.o
-
-shell.o: shell.c shell.h
-	$(CC) $(CFLAGS) -c shell.c -o shell.o
-	
+# Linkarea kernel-ului
+kernel.bin: $(OBJS)
+	$(LD) $(LDFLAGS) $(OBJS) -o kernel.bin
 
 # ============================
-#   ISO cu GRUB
+#    ISO cu GRUB
 # ============================
 
 iso/boot/kernel.bin: kernel.bin
 	mkdir -p iso/boot/grub
 	cp kernel.bin iso/boot/kernel.bin
-    # grub.cfg trebuie să existe deja în iso/boot/grub/
-    # deci NU îl copiem peste el
 
 kernel.iso: iso/boot/kernel.bin
 	grub-mkrescue -o kernel.iso iso
 
 # ============================
-#   Rulare în QEMU
+#    Rulare în QEMU
 # ============================
 
 run: kernel.iso
-	qemu-system-x86_64 -cdrom kernel.iso
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk
+	#qemu-system-x86_64 -kernel kernel.bin -drive file=hda.img,format=raw,index=0,media=disk -cpu qemu64
+	#qemu-system-x86_64 -cdrom kernel.iso
 
 # ============================
-#   Curățare
+#    Curățare
 # ============================
 
 clean:
-	rm -f *.o kernel.bin kernel.iso
+	rm -f *.o kernel/*.o boot/*.o kernel.bin kernel.iso
 	rm -rf iso/boot/kernel.bin
-#	rm -f kernel/*.o
-

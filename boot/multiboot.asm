@@ -37,9 +37,17 @@ setup_page_tables:
     or eax, 0x03             ; Present + Writable
     mov [page_table_l3], eax
 
-    ; 3. Umple L2 cu pagini de 2MB (Identity mapping pentru primii 2MB)
-    mov eax, 0x00000083      ; Present + Writable + Huge Page (2MB)
-    mov [page_table_l2], eax
+    ; 3. Mapează identity primii 18 MiB în pagini de 2 MiB.
+    ; Heap-ul începe la 16 MiB și are 1 MiB, deci sunt necesare 9 intrări.
+    xor ecx, ecx
+.map_2mb:
+    mov eax, ecx
+    shl eax, 21
+    or eax, 0x00000083       ; Present + Writable + Huge Page
+    mov [page_table_l2 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 9
+    jne .map_2mb
 
     ret
 

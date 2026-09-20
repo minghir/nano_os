@@ -1,6 +1,8 @@
 #include "../io.h"
 #include "../config.h"
 #include "../shell.h"
+#include "../memory.h"
+#include "../fs.h"
 #include <stdint.h>
 
 typedef struct multiboot_info {
@@ -37,7 +39,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 
     // Inițializăm întreruperile (inclusiv tastatura)
     interrupts_init();
-
+    memory_init();
+    fs_init();
     // Lansăm shell-ul interactiv direct
     shell_init();
     shell_run();

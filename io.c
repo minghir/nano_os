@@ -181,8 +181,29 @@ void keyboard_irq() {
     if (character == 0) {
         return;
     }
-    if (shift_pressed && character >= 'a' && character <= 'z') {
-        character -= 'a' - 'A';
+    if (shift_pressed) {
+        if (character >= 'a' && character <= 'z') {
+            character -= 'a' - 'A';
+        } else if (character == '-')  { character = '_'; }
+        else if (character == '1')  { character = '!'; }
+        else if (character == '2')  { character = '@'; }
+        else if (character == '3')  { character = '#'; }
+        else if (character == '4')  { character = '$'; }
+        else if (character == '5')  { character = '%'; }
+        else if (character == '6')  { character = '^'; }
+        else if (character == '7')  { character = '&'; }
+        else if (character == '8')  { character = '*'; }
+        else if (character == '9')  { character = '('; }
+        else if (character == '0')  { character = ')'; }
+        else if (character == '=')  { character = '+'; }
+        else if (character == '[')  { character = '{'; }
+        else if (character == ']')  { character = '}'; }
+        else if (character == '\\') { character = '|'; }
+        else if (character == ';')  { character = ':'; }
+        else if (character == '\'') { character = '"'; }
+        else if (character == ',')  { character = '<'; }
+        else if (character == '.')  { character = '>'; }
+        else if (character == '/')  { character = '?'; }
     }
 
     keyboard_queue_push((uint8_t)character);

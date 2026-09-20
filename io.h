@@ -18,6 +18,16 @@ static inline void io_wait() {
     outb(0x80, 0);
 }
 
+static inline uint16_t inw(uint16_t port) {
+    uint16_t result;
+    __asm__ volatile ("inw %1, %0" : "=a" (result) : "Nd" (port));
+    return result;
+}
+
+static inline void outw(uint16_t port, uint16_t value) {
+    __asm__ volatile ("outw %0, %1" : : "a" (value), "Nd" (port));
+}
+
 // VGA text mode
 extern uint16_t* VGA;
 extern int cursor;
