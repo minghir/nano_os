@@ -1,0 +1,1 @@
+Nano OS is an educational 64-bit microkernel for the x86 architecture that runs in Long Mode via a Multiboot header. The project features keyboard support, hardware interrupts (IDT/PIC), and text output directly to VGA memory.
