@@ -1,6 +1,7 @@
 #include "../io.h"
 
 void kernel_main() {
+    cursor_init();
     print("Nano OS booted!");
     newline();
 

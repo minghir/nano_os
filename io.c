@@ -5,14 +5,62 @@ uint16_t* VGA = (uint16_t*)0xB8000;
 int cursor = 0;
 volatile uint8_t keyboard_running = 1;
 
+static void cursor_update() {
+    uint16_t position = (uint16_t)cursor;
+
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, position & 0xFF);
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, position >> 8);
+}
+
+void cursor_init() {
+    outb(0x3D4, 0x0A);
+    outb(0x3D5, 0x00);
+    outb(0x3D4, 0x0B);
+    outb(0x3D5, 0x0F);
+    cursor_update();
+}
+
 void print(const char* s) {
     while (*s) {
-        VGA[cursor++] = (0x0F << 8) | *s++;
+        char character = *s++;
+
+        if (character == '\n') {
+            cursor = (cursor / 80 + 1) * 80;
+            continue;
+        }
+
+        if (character == '\b') {
+            if (cursor > 0) {
+                cursor--;
+                VGA[cursor] = (0x0F << 8) | ' ';
+            }
+            continue;
+        }
+
+        VGA[cursor++] = (0x0F << 8) | character;
+        if (cursor >= 80 * 25) {
+            cursor = 0;
+        }
     }
+    cursor_update();
 }
 
 void newline() {
     cursor = (cursor / 80 + 1) * 80;
+    if (cursor >= 80 * 25) {
+        cursor = 0;
+    }
+    cursor_update();
+}
+
+void clear_screen() {
+    for (int index = 0; index < 80 * 25; index++) {
+        VGA[index] = (0x0F << 8) | ' ';
+    }
+    cursor = 0;
+    cursor_update();
 }
 
 void pic_remap() {
@@ -84,6 +132,7 @@ void keyboard_irq() {
     uint8_t scancode = inb(0x60);
     static uint8_t ctrl_pressed = 0;
     static uint8_t shift_pressed = 0;
+    static uint8_t alt_pressed = 0;
 
     if (scancode == 0xE0) {
         return;
@@ -95,6 +144,8 @@ void keyboard_irq() {
             ctrl_pressed = 0;
         } else if (released == 0x2A || released == 0x36) {
             shift_pressed = 0;
+        } else if (released == 0x38) {
+            alt_pressed = 0;
         }
         return;
     }
@@ -107,8 +158,16 @@ void keyboard_irq() {
         shift_pressed = 1;
         return;
     }
+    if (scancode == 0x38) {
+        alt_pressed = 1;
+        return;
+    }
     if (ctrl_pressed && scancode == 0x2E) {
         keyboard_running = 0;
+        return;
+    }
+    if (alt_pressed && scancode == 0x2E) {
+        clear_screen();
         return;
     }
 

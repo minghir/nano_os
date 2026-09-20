@@ -24,6 +24,8 @@ extern int cursor;
 
 void print(const char* s);
 void newline();
+void clear_screen();
+void cursor_init();
 
 // PIC + IRQ
 void pic_remap();
@@ -34,7 +36,7 @@ extern volatile uint8_t keyboard_running;
 
 // Interrupts
 extern void isr_keyboard();
-void idt_set_gate(int num, uint32_t base, uint16_t sel, uint8_t flags);
+void idt_set_gate(int num, uint64_t base, uint16_t sel, uint8_t flags);
 void interrupts_init();
 
 #endif
