@@ -13,5 +13,8 @@ typedef struct {
 
 void fs_init();
 void fs_list_files();
-int fs_create_file(const char* name, uint32_t start_sector, uint32_t size);
+int fs_create_file(const char* name, uint32_t size);
+int fs_delete_file(const char* name);
+int fs_write_file(const char* name, const uint8_t* data, uint32_t size);
+int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size);
 #endif

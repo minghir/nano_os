@@ -8,6 +8,14 @@
 
 #define SHELL_INPUT_SIZE 128
 
+int string_length(const char* str) {
+    int len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
 // Funcție simplă de comparare a șirurilor de caractere
 int strcmp(const char* s1, const char* s2) {
     while (*s1 && (*s1 == *s2)) {
@@ -246,21 +254,90 @@ static void execute_command(char* command) {
     }
     else if (starts_with(command, "ls")) {
         fs_list_files();
-    }  
-    else if (starts_with(command, "touch")) {
-        // Luăm numele fișierului de după comandă (ex: "touch test")
+    } 
+    else if (starts_with(command, "write")) {
+        // Exemplu simplu: "write <nume> <text>"
+        // Pentru simplitate, luăm textul de după numele fișierului
+        char* args = command + 6;
+        while (*args == ' ') args++; // Sărim peste spații
+
+        // Găsim primul spațiu care desparte numele de text
+        char* text = args;
+        while (*text != ' ' && *text != '\0') text++;
+
+        if (*text == '\0') {
+            print("Utilizare: write <fisier> <text>");
+            newline();
+        } else {
+            *text = '\0'; // Separăm numele
+            text++;       // Trecem la text
+
+            char* filename = args;
+            if (fs_write_file(filename, (uint8_t*)text, string_length(text))) {
+                print("Scriere reusita in fisier!");
+                newline();
+            } else {
+                print("Eroare: Fisierul nu a fost gasit sau nu s-a putut scrie.");
+                newline();
+            }
+        }
+    } else if (starts_with(command, "touch")) {
         char* filename = command + 6; 
+        while (*filename == ' ') filename++; // Sărim peste spații
+
         if (*filename == '\0') {
             print("Utilizare: touch <nume>");
             newline();
         } else {
-            // Pentru început, punem fișierul să înceapă la sectorul 2, mărime 512 octeți
-            if (fs_create_file(filename, 2, 512)) {
+            // Nu mai trimitem sectorul hardcodat; cerem crearea cu mărime inițială 0
+            if (fs_create_file(filename, 0)) {
                 print("Fisier creat cu succes!");
                 newline();
             } else {
-                print("Eroare la crearea fisierului (director plin sau neinit)!");
+                print("Eroare la crearea fisierului (director plin)!");
                 newline();
+            }
+        }
+    }else if (starts_with(command, "rm")) {
+        char* filename = command + 3; // Sărim peste "rm "
+        while (*filename == ' ') filename++;
+
+        if (*filename == '\0') {
+            print("Utilizare: rm <fisier>");
+            newline();
+        } else {
+            if (fs_delete_file(filename)) {
+                print("Fisier sters cu succes!");
+                newline();
+            } else {
+                print("Eroare: Fisierul nu a fost gasit.");
+                newline();
+            }
+        }
+    }
+    else if (starts_with(command, "cat")) {
+        char* filename = command + 4; // Sărim peste "cat "
+        while (*filename == ' ') filename++;
+
+        if (*filename == '\0') {
+            print("Utilizare: cat <fisier>");
+            newline();
+        } else {
+            uint8_t* file_buffer = (uint8_t*)malloc(512);
+            if (!file_buffer) {
+                print("Eroare de memorie!");
+                newline();
+            } else {
+                for (int i = 0; i < 512; i++) file_buffer[i] = 0;
+
+                int bytes_read = fs_read_file(filename, file_buffer, 511);
+                if (bytes_read > 0) {
+                    print((char*)file_buffer);
+                    newline();
+                } else {
+                    print("Fisierul nu a fost gasit sau este gol.");
+                    newline();
+                }
             }
         }
     }  

@@ -21,6 +21,8 @@ sudo apt install -y xorriso mtools
 echo "[Nano OS] Installing QEMU..."
 sudo apt install -y qemu-system-x86
 
+qemu-img create -f raw hda.img 10M
+
 echo "[Nano OS] All dependencies installed!"
 
 echo "[Nano OS] Cleaning old build..."
