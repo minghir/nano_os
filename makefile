@@ -12,7 +12,7 @@ LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 BOOT = boot/multiboot.asm
 KERNEL = kernel/kernel.c
 
-OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o
+OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o timer.o timer_asm.o
 
 all: kernel.bin
 
@@ -37,6 +37,13 @@ idt.o: idt.c
 interrupts.o: interrupts.c 
 	$(CC) $(CFLAGS) -c interrupts.c -o interrupts.o
 
+# Regulă pentru timer în C
+timer.o: timer.c timer.h
+	$(CC) $(CFLAGS) -c timer.c -o timer.o
+
+# Regulă pentru timer în limbaj de asamblare
+timer_asm.o: timer.asm
+	$(AS) -f elf64 timer.asm -o timer_asm.o
 
 
 # ============================

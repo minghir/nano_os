@@ -25,6 +25,7 @@ extern int cursor;
 void print(const char* s);
 void newline();
 void clear_screen();
+void print_at(int row, int col, const char* s);
 void cursor_init();
 
 // PIC + IRQ
@@ -38,6 +39,7 @@ extern volatile uint8_t keyboard_running;
 extern void isr_keyboard();
 void idt_set_gate(int num, uint64_t base, uint16_t sel, uint8_t flags);
 void interrupts_init();
+
 
 #endif
 
