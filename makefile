@@ -6,24 +6,38 @@ CC = clang
 LD = ld.lld
 AS = nasm
 
-CFLAGS = -target x86_64-elf -ffreestanding -O2 -Wall -Wextra
-LDFLAGS = -nostdlib -T linker.ld
+CFLAGS = -target i386-elf -ffreestanding -m32 -O2 -Wall -Wextra
+LDFLAGS = -m elf_i386 -nostdlib -T linker.ld
 
 BOOT = boot/multiboot.asm
 KERNEL = kernel/kernel.c
 
-OBJS = boot.o kernel.o
+OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o
 
 all: kernel.bin
 
 boot.o: $(BOOT)
-	$(AS) -f elf64 $(BOOT) -o boot.o
+	$(AS) -f elf32 $(BOOT) -o boot.o
 
 kernel.o: $(KERNEL)
 	$(CC) $(CFLAGS) -c $(KERNEL) -o kernel.o
 
 kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) $(OBJS) -o kernel.bin
+
+isr_keyboard.o: isr_keyboard.asm
+	$(AS) -f elf32 isr_keyboard.asm -o isr_keyboard.o
+
+io.o: io.c io.h
+	$(CC) $(CFLAGS) -c io.c -o io.o
+
+idt.o: idt.c 
+	$(CC) $(CFLAGS) -c idt.c -o idt.o
+
+interrupts.o: interrupts.c 
+	$(CC) $(CFLAGS) -c interrupts.c -o interrupts.o
+
+
 
 # ============================
 #   ISO cu GRUB
