@@ -32,6 +32,7 @@ void cursor_init();
 void pic_remap();
 void pic_enable_irq(int irq);
 void keyboard_irq();
+int keyboard_read_char();
 void keyboard_stop_message();
 extern volatile uint8_t keyboard_running;
 

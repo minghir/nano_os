@@ -12,7 +12,7 @@ LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 BOOT = boot/multiboot.asm
 KERNEL = kernel/kernel.c
 
-OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o timer.o timer_asm.o
+OBJS = boot.o kernel.o io.o isr_keyboard.o idt.o  interrupts.o timer.o timer_asm.o config.o shell.o
 
 all: kernel.bin
 
@@ -45,6 +45,13 @@ timer.o: timer.c timer.h
 timer_asm.o: timer.asm
 	$(AS) -f elf64 timer.asm -o timer_asm.o
 
+
+config.o: config.c config.h
+	$(CC) $(CFLAGS) -c config.c -o config.o
+
+shell.o: shell.c shell.h
+	$(CC) $(CFLAGS) -c shell.c -o shell.o
+	
 
 # ============================
 #   ISO cu GRUB

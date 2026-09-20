@@ -4,6 +4,9 @@
 uint16_t* VGA = (uint16_t*)0xB8000;
 int cursor = 0;
 volatile uint8_t keyboard_running = 1;
+static volatile uint8_t keyboard_queue[256];
+static volatile uint8_t keyboard_queue_read = 0;
+static volatile uint8_t keyboard_queue_write = 0;
 
 static void cursor_update() {
     uint16_t position = (uint16_t)cursor;
@@ -91,26 +94,6 @@ void pic_enable_irq(int irq) {
     outb(0x21, mask);
 }
 
-static void print_uint8(uint8_t value) {
-    char digits[4];
-    int length = 0;
-
-    if (value == 0) {
-        print("0");
-        return;
-    }
-
-    while (value > 0) {
-        digits[length++] = '0' + (value % 10);
-        value /= 10;
-    }
-
-    while (length > 0) {
-        char character[2] = { digits[--length], 0 };
-        print(character);
-    }
-}
-
 static const char keyboard_map[128] = {
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
     [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
@@ -127,6 +110,25 @@ static const char keyboard_map[128] = {
     [0x32] = 'm', [0x33] = ',', [0x34] = '.', [0x35] = '/',
     [0x39] = ' '
 };
+
+static void keyboard_queue_push(uint8_t character) {
+    uint8_t next = keyboard_queue_write + 1;
+    if (next == keyboard_queue_read) {
+        return;
+    }
+    keyboard_queue[keyboard_queue_write] = character;
+    keyboard_queue_write = next;
+}
+
+int keyboard_read_char() {
+    if (keyboard_queue_read == keyboard_queue_write) {
+        return -1;
+    }
+
+    uint8_t character = keyboard_queue[keyboard_queue_read];
+    keyboard_queue_read++;
+    return character;
+}
 
 void keyboard_irq() {
     uint8_t scancode = inb(0x60);
@@ -163,7 +165,7 @@ void keyboard_irq() {
         return;
     }
     if (ctrl_pressed && scancode == 0x2E) {
-        keyboard_running = 0;
+        keyboard_queue_push(3);
         return;
     }
     if (alt_pressed && scancode == 0x2E) {
@@ -183,13 +185,7 @@ void keyboard_irq() {
         character -= 'a' - 'A';
     }
 
-    print("ASCII: ");
-    print_uint8((uint8_t)character);
-    print(" (");
-    char output[2] = { character, 0 };
-    print(output);
-    print(")");
-    newline();
+    keyboard_queue_push((uint8_t)character);
 }
 
 void keyboard_stop_message() {
@@ -197,3 +193,11 @@ void keyboard_stop_message() {
     newline();
 }
 
+void print_at(int row, int col, const char* s) {
+    uint16_t* vga = (uint16_t*)0xB8000;
+    int index = row * 80 + col;
+    
+    while (*s) {
+        vga[index++] = (0x0F << 8) | *s++;
+    }
+}
