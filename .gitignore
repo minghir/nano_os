@@ -1,0 +1,12 @@
+# Ignoră build artifacts
+bin/
+obj/
+kernel/
+*.so
+
+*.o
+*.obj
+*.iso
+
+# Ignoră VS Code
+.vscode/
