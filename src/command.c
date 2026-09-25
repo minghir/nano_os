@@ -1,3 +1,4 @@
+#include "shell.h"
 #include "io.h"
 #include "config.h"
 #include "shell.h"
@@ -5,78 +6,10 @@
 #include "memory.h"
 #include "ata.h"
 #include "fs.h"
+#include "string.h"
 
-#define SHELL_INPUT_SIZE 128
 
-int string_length(const char* str) {
-    int len = 0;
-    while (str[len] != '\0') {
-        len++;
-    }
-    return len;
-}
-
-// Funcție simplă de comparare a șirurilor de caractere
-int strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
-}
-
-void shell_init() {
-    print("Nano OS Shell v0.1");
-    newline();
-    print("Type 'help' for available commands.");
-    newline();
-}
-
-static void print_number(uint32_t value) {
-    char buffer[11];
-    int index = 10;
-    buffer[index] = 0;
-
-    do {
-        buffer[--index] = '0' + (value % 10);
-        value /= 10;
-    } while (value != 0);
-
-    print(&buffer[index]);
-}
-
-static void print_time() {
-    DateTime time = get_current_time();
-
-    print("20");
-    if (time.year < 10) print("0");
-    print_number(time.year);
-    print("-");
-    if (time.month < 10) print("0");
-    print_number(time.month);
-    print("-");
-    if (time.day < 10) print("0");
-    print_number(time.day);
-    print(" ");
-    if (time.hour < 10) print("0");
-    print_number(time.hour);
-    print(":");
-    if (time.minute < 10) print("0");
-    print_number(time.minute);
-    print(":");
-    if (time.second < 10) print("0");
-    print_number(time.second);
-    newline();
-}
-
-static int starts_with(const char* text, const char* prefix) {
-    while (*prefix) {
-        if (*text++ != *prefix++) return 0;
-    }
-    return 1;
-}
-
-static void execute_command(char* command) {
+void execute_command(char* command) {
     if (strcmp(command, "") == 0) {
         return;
     }
@@ -340,55 +273,98 @@ static void execute_command(char* command) {
                 }
             }
         }
-    }  
+    } 
+    else if (starts_with(command, "mkdir ")) {
+        char* dirname = command + 6;
+        while (*dirname == ' ') dirname++;
+
+        if (fs_mkdir(dirname)) {
+            print("Director creat cu succes!");
+            newline();
+        } else {
+            print("Eroare: Nume deja existent sau director plin.");
+            newline();
+        }
+    } else if (starts_with(command, "cd ")) {
+        char* path = command + 3;
+        while (*path == ' ') path++;
+
+        // Dacă sistemul de fișiere ne validează că există calea
+        if (fs_cd(path)) {
+            // Abia acum modificăm vizual textul din consolă
+            update_prompt_path(path);
+            // (Opțional: poți scoate print("Calea a fost schimbata") 
+            // pentru a se comporta ca Linux, unde cd e silențios)
+        } else {
+            print("Eroare: Calea nu exista.");
+            newline();
+        }
+    }
+     else if (starts_with(command, "rmdir ")) {
+        char* dirname = command + 6;
+        while (*dirname == ' ') dirname++;
+
+        if (fs_rmdir(dirname)) {
+            print("Director sters.");
+            newline();
+        } else {
+            print("Eroare la stergere (probabil nu e director sau nu exista).");
+            newline();
+        }
+    } 
+    else if (starts_with(command, "exec ")) {
+        char* filename = command + 5;
+        while (*filename == ' ') filename++;
+
+        // 1. Alocăm memoria la adresa fixă (8 MB)
+        uint8_t* prog_memory = (uint8_t*)0x800000;
+
+        // 2. Citim programul de pe disc
+        int bytes_read = fs_read_file(filename, prog_memory, 16384);
+        
+        if (bytes_read > 0) {
+            // --- AICI PUNEM DEBUG-UL ---
+            print("Fisier citit, dimensiune: ");
+            print_number(bytes_read); 
+            print(" bytes");
+            newline();
+            // ---------------------------
+
+            print("Executam programul..."); 
+            newline();
+            
+            // 3. Transformăm adresa în pointer de funcție și o executăm
+            void (*program_start)(void) = (void (*)(void))prog_memory;
+            program_start();
+
+        } else {
+            print("Eroare: Fisierul nu exista sau nu a putut fi citit."); newline();
+        }
+    }
+    else if (strcmp(command, "make_app") == 0) {
+        // Codul mașină pur (x86-64) pentru: mov eax, 42; ret;
+        uint8_t machine_code[] = { 0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3 };
+        
+        // Creăm fișierul și scriem programul în el
+        if (fs_create_file("app.bin", sizeof(machine_code))) {
+            fs_write_file("app.bin", machine_code, sizeof(machine_code));
+            print("Programul 'app.bin' a fost compilat pe disc!"); newline();
+        }
+    }
+    else if (strcmp(command, "fdisk") == 0) {
+        fs_fdisk();
+    }else if (strcmp(command, "format") == 0) {
+        // Avertizăm utilizatorul
+        print("ATENTIE: Aceasta actiune va sterge IREREVERSIBIL toate fisierele!"); newline();
+        print("Pentru a continua, tasteaza comanda: format y"); newline();
+        
+    } else if (strcmp(command, "format y") == 0 || strcmp(command, "format yes") == 0) {
+        // Executăm formatarea doar dacă a confirmat clar
+        fs_format();
+    }
     else {
         print("Unknown command: ");
         print(command);
         newline();
-    }
-}
-
-void shell_run() {
-    char input_buffer[SHELL_INPUT_SIZE];
-    int length = 0;
-
-    while (1) {
-        print("nano> ");
-
-        length = 0;
-        input_buffer[0] = 0;
-        while (1) {
-            int value;
-            while ((value = keyboard_read_char()) < 0) {
-                __asm__ volatile ("hlt");
-            }
-
-            if (value == 3) {
-                print("^C");
-                newline();
-                break;
-            }
-            if (value == '\b') {
-                if (length > 0) {
-                    length--;
-                    input_buffer[length] = 0;
-                    print("\b");
-                }
-                continue;
-            }
-            if (value == '\n') {
-                newline();
-                execute_command(input_buffer);
-                break;
-            }
-            if (value < 32 || length >= SHELL_INPUT_SIZE - 1) {
-                continue;
-            }
-
-            input_buffer[length++] = (char)value;
-            input_buffer[length] = 0;
-            char output[2] = { (char)value, 0 };
-            print(output);
-        }
     }
 }

@@ -1,12 +1,28 @@
 #include "io.h"
 #include "idt.h"
 
+//#define FONT_COLOR (0x0F << 8)
+
+
 uint16_t* VGA = (uint16_t*)0xB8000;
 int cursor = 0;
 volatile uint8_t keyboard_running = 1;
 static volatile uint8_t keyboard_queue[256];
 static volatile uint8_t keyboard_queue_read = 0;
 static volatile uint8_t keyboard_queue_write = 0;
+
+/*
+void set_vga_color_palette() {
+    // Portul 0x3C8 este folosit pentru a selecta indexul culorii pe care vrem să o modificăm.
+    // Noi vrem să modificăm culoarea 15 (0x0F), care momentan este Alb.
+    outb(0x3C8, 0x0F);
+
+    // Portul 0x3C9 primește pe rând 3 valori: cantitatea de Roșu, Verde și Albastru (0 - 63).
+    outb(0x3C9, 63); // Red   (Maxim)
+    outb(0x3C9, 42); // Green (Mediu)
+    outb(0x3C9, 0);  // Blue  (Zero)
+}
+*/
 
 static void cursor_update() {
     uint16_t position = (uint16_t)cursor;
@@ -25,46 +41,73 @@ void cursor_init() {
     cursor_update();
 }
 
+// --- 1. Funcția nouă pentru Scroll ---
+static void scroll_screen() {
+    // Mutăm caracterele de pe liniile 1-24 pe liniile 0-23
+    for (int i = 0; i < 80 * 24; i++) {
+        VGA[i] = VGA[i + 80];
+    }
+    
+    // Curățăm complet ultima linie (linia 24)
+    for (int i = 80 * 24; i < 80 * 25; i++) {
+        VGA[i] = FONT_COLOR| ' ';
+    }
+}
+
+// --- 2. Print modificat pentru a face scroll ---
 void print(const char* s) {
     while (*s) {
         char character = *s++;
 
         if (character == '\n') {
             cursor = (cursor / 80 + 1) * 80;
+            // Dacă am depășit ecranul, facem scroll și ținem cursorul pe ultima linie
+            if (cursor >= 80 * 25) {
+                scroll_screen();
+                cursor = 80 * 24;
+            }
             continue;
         }
 
         if (character == '\b') {
             if (cursor > 0) {
                 cursor--;
-                VGA[cursor] = (0x0F << 8) | ' ';
+                VGA[cursor] = (FONT_COLOR) | ' ';
             }
             continue;
         }
 
-        VGA[cursor++] = (0x0F << 8) | character;
+        VGA[cursor++] = (FONT_COLOR) | character;
+        
+        // Word wrap: dacă am depășit ecranul scriind un caracter, scroll
         if (cursor >= 80 * 25) {
-            cursor = 0;
+            scroll_screen();
+            cursor = 80 * 24;
         }
     }
     cursor_update();
 }
 
+// --- 3. Newline modificat pentru a face scroll ---
 void newline() {
     cursor = (cursor / 80 + 1) * 80;
+    
+    // Nu mai resetăm la 0, facem scroll în schimb
     if (cursor >= 80 * 25) {
-        cursor = 0;
+        scroll_screen();
+        cursor = 80 * 24;
     }
     cursor_update();
 }
 
 void clear_screen() {
     for (int index = 0; index < 80 * 25; index++) {
-        VGA[index] = (0x0F << 8) | ' ';
+        VGA[index] = (FONT_COLOR) | ' ';
     }
     cursor = 0;
     cursor_update();
 }
+
 
 void pic_remap() {
     outb(0x20, 0x11);
@@ -128,6 +171,43 @@ int keyboard_read_char() {
     uint8_t character = keyboard_queue[keyboard_queue_read];
     keyboard_queue_read++;
     return character;
+}
+
+void keyboard_read_line(char* buffer, uint32_t max_length) {
+    uint32_t index = 0;
+    
+    while (1) {
+        char c = keyboard_read_char();
+        
+        // Dacă e Enter, închidem textul și ieșim din buclă
+        if (c == '\n' || c == '\r') {
+            buffer[index] = '\0';
+            newline();
+            break;
+        } 
+        // Dacă e Backspace, ștergem ultima literă (dacă există)
+        else if (c == '\b') {
+            if (index > 0) {
+                index--;
+                print("\b"); // Ștergem de pe ecran
+            }
+        } 
+        // FILTRUL MAGIC: Acceptăm doar text real (Litere, cifre, simboluri, spațiu)
+        else if (c >= 32 && c <= 126) {
+            // Mai avem loc în buffer? (Păstrăm 1 loc pentru '\0' la final)
+            if (index < max_length - 1) {
+                buffer[index++] = c;
+                
+                // Afișăm pe ecran ca să vedem ce tastăm
+                char temp_str[2] = {c, 0};
+                print(temp_str);
+            }
+        } 
+        // Orice altceva (0, 0xFF, taste speciale) este IGNORAT, iar procesorul se odihnește
+        else {
+            __asm__ volatile ("hlt");
+        }
+    }
 }
 
 void keyboard_irq() {
@@ -219,6 +299,6 @@ void print_at(int row, int col, const char* s) {
     int index = row * 80 + col;
     
     while (*s) {
-        vga[index++] = (0x0F << 8) | *s++;
+        vga[index++] = FONT_COLOR | *s++;
     }
 }

@@ -10,11 +10,11 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard *.c) $(wildcard kernel/*.c)
+C_SOURCES = $(wildcard src/*.c) $(wildcard kernel/*.c)
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
-ASM_SOURCES = $(wildcard *.asm) $(wildcard boot/*.asm)
+ASM_SOURCES = $(wildcard asm/*.asm) $(wildcard boot/*.asm)
 
 # Convertim sursele asm în obiecte .o
 # Notă: Pentru boot/multiboot.asm vrem să genereze boot.o direct în root
@@ -25,7 +25,7 @@ ASM_OBJS = $(notdir $(ASM_SOURCES:.asm=.o))
 # Cel mai simplu: redenumim boot/multiboot.asm în boot/boot.asm sau tratăm excepția.
 
 # Toate obiectele pentru linkare
-OBJS = boot.o isr_keyboard.o timer_asm.o $(C_OBJS)
+OBJS = boot.o isr_keyboard.o timer_asm.o isr_syscall.o $(C_OBJS)
 
 all: kernel.bin
 
@@ -48,9 +48,14 @@ boot/%.o: boot/%.asm
 boot.o: boot/multiboot.asm
 	$(AS) -f elf64 boot/multiboot.asm -o boot.o
 
-timer_asm.o: timer.asm
-	$(AS) -f elf64 timer.asm -o timer_asm.o
+timer_asm.o: asm/timer.asm
+	$(AS) -f elf64 asm/timer.asm -o timer_asm.o
 
+isr_keyboard.o: asm/isr_keyboard.asm
+	$(AS) -f elf64 asm/isr_keyboard.asm -o isr_keyboard.o
+
+isr_syscall.o: asm/isr_syscall.asm
+	$(AS) -f elf64 asm/isr_syscall.asm -o isr_syscall.o
 
 # Linkarea kernel-ului
 kernel.bin: $(OBJS)
@@ -81,5 +86,5 @@ run: kernel.iso
 # ============================
 
 clean:
-	rm -f *.o kernel/*.o boot/*.o kernel.bin kernel.iso
+	rm -f *.o kernel/*.o boot/*.o kernel.bin kernel.iso *.bin
 	rm -rf iso/boot/kernel.bin

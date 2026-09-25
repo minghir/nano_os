@@ -3,13 +3,17 @@
 
 #include <stdint.h>
 
+#define ATTR_FILE      0x01
+#define ATTR_DIRECTORY 0x02
+
 // O structură de intrare în director, inspirată deja din FAT (8+3 format pentru nume)
 typedef struct {
-    char filename[11];    // Nume + Extensie (ex: "TEST    TXT")
-    uint32_t start_sector; // Sectorul de unde începe fișierul pe disc
-    uint32_t size;        // Dimensiunea fișierului în octeți
-    uint8_t flags;        // Atribute (fișier, director etc.)
+    char filename[12];     // Numele fișierului sau al folderului
+    uint32_t start_sector; // Sectorul de start (date pentru fișier / tabel de intrări pentru folder)
+    uint32_t size;         // Dimensiunea fișierului în octeți (0 pentru directoare)
+    uint8_t flags;         // Atribute: ATTR_FILE sau ATTR_DIRECTORY
 } __attribute__((packed)) DirectoryEntry;
+
 
 void fs_init();
 void fs_list_files();

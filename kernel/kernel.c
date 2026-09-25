@@ -1,8 +1,8 @@
-#include "../io.h"
-#include "../config.h"
-#include "../shell.h"
-#include "../memory.h"
-#include "../fs.h"
+#include "../src/io.h"
+#include "../src/config.h"
+#include "../src/shell.h"
+#include "../src/memory.h"
+#include "../src/fs.h"
 #include <stdint.h>
 
 typedef struct multiboot_info {
@@ -42,6 +42,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     memory_init();
     fs_init();
     // Lansăm shell-ul interactiv direct
+    
+    // clear_screen();
     shell_init();
     shell_run();
 

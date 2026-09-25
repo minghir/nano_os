@@ -3,6 +3,14 @@
 
 #include <stdint.h>
 
+#define FONT_COLOR (0x0A << 8)
+// 0x0F - Alb (White)
+// 0x0A - Verde deschis (Light Green)
+// 0x06 - Maro (Brown)
+// 0x0E - Galben deschis (Yellow)
+// 0x0C - Roșu deschis (Light Red)
+
+
 // I/O port access
 static inline uint8_t inb(uint16_t port) {
     uint8_t ret;
@@ -43,6 +51,7 @@ void pic_remap();
 void pic_enable_irq(int irq);
 void keyboard_irq();
 int keyboard_read_char();
+void keyboard_read_line(char* buffer, uint32_t max_length);
 void keyboard_stop_message();
 extern volatile uint8_t keyboard_running;
 
@@ -51,6 +60,7 @@ extern void isr_keyboard();
 void idt_set_gate(int num, uint64_t base, uint16_t sel, uint8_t flags);
 void interrupts_init();
 
+//void set_vga_color_palette();
 
 #endif
 
