@@ -77,7 +77,7 @@ kernel.iso: iso/boot/kernel.bin
 # ============================
 
 run: kernel.iso
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk -display curses
 	#qemu-system-x86_64 -kernel kernel.bin -drive file=hda.img,format=raw,index=0,media=disk -cpu qemu64
 	#qemu-system-x86_64 -cdrom kernel.iso
 
