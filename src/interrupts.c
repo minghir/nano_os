@@ -35,7 +35,7 @@ void interrupts_init() {
     outb(0x21, mask);
 
     // 5. Inițializează PIT-ul (Programmable Interval Timer) la 100 Hz
-    timer_init(100);
+    timer_init(1000);
 
     // 6. Pornește întreruperile global
     __asm__ volatile ("sti");

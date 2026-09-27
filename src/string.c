@@ -95,3 +95,28 @@ void* memcpy(void* dest, const void* src, int count) {
     }
     return dest;
 }
+
+char* string_copy(char* dest, const char* src) {
+    char* original_dest = dest;
+    while (*src != '\0') {
+        *dest = *src;
+        dest++;
+        src++;
+    }
+    *dest = '\0'; // Nu uităm terminatorul de șir!
+    return original_dest;
+}
+
+void string_concat(char* dest, const char* src) {
+    // Mergem până la sfârșitul primului șir
+    while (*dest != '\0') {
+        dest++;
+    }
+    // Copiem al doilea șir peste terminatorul primului
+    while (*src != '\0') {
+        *dest = *src;
+        dest++;
+        src++;
+    }
+    *dest = '\0'; // Punem terminatorul final
+}

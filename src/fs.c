@@ -91,7 +91,7 @@ void fs_init() {
     }
     current_dir_sector = 1; // Resetăm locația la root
 }
-
+/*
 void fs_list_files() {
     uint8_t buffer[512];
     disk_read_sector(current_dir_sector, buffer);
@@ -118,6 +118,58 @@ void fs_list_files() {
 
     if (!found_any) { print(" (Director gol)"); newline(); }
 }
+*/
+
+// Asigură-te că ai declarația externă pentru print_number dacă nu o ai deja sus în fs.c
+//extern void print_number(uint32_t n);
+
+void fs_list_files() {
+    uint8_t buffer[512];
+    disk_read_sector(current_dir_sector, buffer);
+
+    int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+    int found_any = 0;
+    
+    print("Continut director:"); newline();
+
+    for (int i = 0; i < max_entries; i++) {
+        DirectoryEntry* entry = (DirectoryEntry*)(buffer + 8 + (i * sizeof(DirectoryEntry)));
+
+        if (entry->filename[0] != 0 && entry->filename[0] != ' ') {
+            found_any = 1;
+            
+            // Copiem numele
+            char name_buf[12];
+            for (int j = 0; j < 11; j++) name_buf[j] = entry->filename[j];
+            name_buf[11] = '\0';
+
+            // Curățăm spațiile goale de la sfârșitul numelui pentru un afișaj frumos
+            for (int k = 10; k >= 0; k--) {
+                if (name_buf[k] == ' ') {
+                    name_buf[k] = '\0';
+                } else {
+                    break;
+                }
+            }
+
+            // Afișăm tipul [DIR] sau [FILE] și numele
+            print(entry->flags == FS_FLAG_DIR ? "[DIR]  " : "[FILE] ");
+            print(name_buf);
+
+            // Dacă este fișier, afișăm și dimensiunea în octeți
+            if (entry->flags != FS_FLAG_DIR) {
+                print(" - ");
+                print_number(entry->size);
+                print(" bytes");
+            }
+
+            newline();
+        }
+    }
+
+    if (!found_any) { print(" (Director gol)"); newline(); }
+}
+
 
 // --- Gestiunea Directoarelor ---
 
@@ -287,11 +339,95 @@ int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
     return 1;
 }
 
-int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
-    uint8_t dir_buffer[512];
-    disk_read_sector(current_dir_sector, dir_buffer);
+// Rezolvă o cale absolută sau relativă (ex: "/bin/date") 
+// Returnează sectorul directorului părinte și plasează numele final în 'filename_out'.
+// Dacă ceva eșuează, returnează 0.
+static uint32_t fs_resolve_path(const char* full_path, char* filename_out) {
+    if (!full_path || !full_path[0]) return 0;
+
+    char path_copy[128];
+    int p = 0;
+    while (full_path[p] && p < 127) {
+        path_copy[p] = full_path[p];
+        p++;
+    }
+    path_copy[p] = '\0';
+
+    // 1. Găsim unde este ultimul slash (pentru a separa calea de numele fișierului)
+    int last_slash_idx = -1;
+    for (int i = 0; path_copy[i] != '\0'; i++) {
+        if (path_copy[i] == '/') last_slash_idx = i;
+    }
+
+    uint32_t search_sector = current_dir_sector;
+
+    // 2. Dacă NU există niciun slash (ex: "date"), căutăm în directorul curent
+    if (last_slash_idx == -1) {
+        int i = 0;
+        while (path_copy[i]) {
+            filename_out[i] = path_copy[i];
+            i++;
+        }
+        filename_out[i] = '\0';
+        return search_sector;
+    }
+
+    // 3. Dacă există slash-uri (ex: "/bin/date" sau "bin/date")
+    char dir_path[128];
     
-    DirectoryEntry* entry = find_file_entry(dir_buffer, name);
+    // Extragem numele fișierului (ce e după ultimul slash)
+    int i = 0;
+    int fn_start = last_slash_idx + 1;
+    while (path_copy[fn_start + i]) {
+        filename_out[i] = path_copy[fn_start + i];
+        i++;
+    }
+    filename_out[i] = '\0';
+
+    // Extragem calea directorului
+    if (last_slash_idx == 0) {
+        // Cazul: "/date" (fișier în rădăcină)
+        dir_path[0] = '/';
+        dir_path[1] = '\0';
+    } else {
+        // Cazul: "/bin/apps/date"
+        for (i = 0; i < last_slash_idx; i++) {
+            dir_path[i] = path_copy[i];
+        }
+        dir_path[i] = '\0';
+    }
+
+    // 4. Folosim fs_cd temporar pentru a găsi sectorul directorului părinte
+    uint32_t original_dir = current_dir_sector; // Salvăm unde suntem
+    
+    if (fs_cd(dir_path)) { // Încercăm să navigăm acolo
+        search_sector = current_dir_sector; // Am ajuns! Salvăm sectorul.
+    } else {
+        search_sector = 0; // Folderul nu există
+    }
+    
+    current_dir_sector = original_dir; // Ne întoarcem de unde am plecat, ca userul să nu știe!
+    
+    return search_sector;
+}
+
+int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
+    char target_filename[128];
+    
+    // Găsim sectorul directorului în care trebuie să căutăm
+    uint32_t target_dir_sector = fs_resolve_path(name, target_filename);
+    
+    if (target_dir_sector == 0 || target_filename[0] == '\0') {
+        return 0; // Calea invalidă sau folderul nu există
+    }
+
+    // Citim sectorul directorului corect
+    uint8_t dir_buffer[512];
+    disk_read_sector(target_dir_sector, dir_buffer);
+    
+    // Căutăm doar numele (ex: "date")
+    DirectoryEntry* entry = find_file_entry(dir_buffer, target_filename);
+    
     if (!entry || entry->flags == FS_FLAG_DIR || entry->start_sector == 0) return 0;
 
     uint32_t bytes_to_read = entry->size < max_size ? entry->size : max_size;
@@ -299,7 +435,7 @@ int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
     // Calculăm câte sectoare ocupă fișierul
     uint32_t sectors_to_read = (bytes_to_read + 511) / 512;
     
-    // Citim sector cu sector direct în bufferul țintă (ex: în memorie la 0x800000)
+    // Citim sector cu sector direct în bufferul țintă
     uint32_t total_read = 0;
     for (uint32_t s = 0; s < sectors_to_read; s++) {
         uint8_t sector_data[512];

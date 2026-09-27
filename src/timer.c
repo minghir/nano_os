@@ -12,7 +12,7 @@ static void int_to_str_padded(uint8_t n, char* buf) {
     buf[2] = '\0';
 }
 
-
+/*
 void sleep_ms(uint32_t milliseconds) {
     // Calculăm câte tick-uri trebuie să așteptăm (presupunând 100 Hz: 1 tick = 10ms)
     // milliseconds / 10 sau (milliseconds * frequency) / 1000
@@ -25,7 +25,18 @@ void sleep_ms(uint32_t milliseconds) {
         __asm__ volatile ("hlt");
     }
 }
+    */
 
+void sleep_ms(uint32_t milliseconds) {
+    uint32_t start_ticks = timer_ticks;
+
+    // Așteptăm activ (busy-wait) până trece timpul cerut
+    while ((timer_ticks - start_ticks) < milliseconds) {
+        __asm__ volatile ("hlt"); // CPU-ul stă pe bară până la următorul IRQ0
+    }
+}
+
+/*
 void timer_irq() {
     timer_ticks++;
 
@@ -71,6 +82,60 @@ void timer_irq() {
         vga[index++] = (0x0F << 8) | p[0];
         vga[index++] = (0x0F << 8) | p[1];
         vga[index++] = (0x0F << 8) | ':'; // Separator pentru secunde
+        
+        p = second_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+    }
+}
+*/
+
+void timer_irq() {
+    timer_ticks++;
+
+    // Actualizăm o dată pe secundă (la fiecare 1000 de tick-uri acum!)
+    if (timer_ticks % 1000 == 0) {
+        DateTime dt = get_current_time();
+        
+        char day_str[3], month_str[3], year_str[3];
+        char hour_str[3], minute_str[3], second_str[3];
+
+        int_to_str_padded(dt.day, day_str);
+        // ... (restul codului tău de printare VGA rămâne identic) ...
+        int_to_str_padded(dt.month, month_str);
+        int_to_str_padded(dt.year, year_str);
+        int_to_str_padded(dt.hour, hour_str);
+        int_to_str_padded(dt.minute, minute_str);
+        int_to_str_padded(dt.second, second_str);
+
+        uint16_t* vga = (uint16_t*)0xB8000;
+        int index = 0 * 80 + 62;
+
+        char* p = day_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+        vga[index++] = (0x0F << 8) | '/';
+        
+        p = month_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+        vga[index++] = (0x0F << 8) | '/';
+        
+        p = year_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+        
+        vga[index++] = (0x0F << 8) | ' ';
+        
+        p = hour_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+        vga[index++] = (0x0F << 8) | ':';
+        
+        p = minute_str;
+        vga[index++] = (0x0F << 8) | p[0];
+        vga[index++] = (0x0F << 8) | p[1];
+        vga[index++] = (0x0F << 8) | ':';
         
         p = second_str;
         vga[index++] = (0x0F << 8) | p[0];

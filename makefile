@@ -25,7 +25,7 @@ ASM_OBJS = $(notdir $(ASM_SOURCES:.asm=.o))
 # Cel mai simplu: redenumim boot/multiboot.asm în boot/boot.asm sau tratăm excepția.
 
 # Toate obiectele pentru linkare
-OBJS = boot.o isr_keyboard.o timer_asm.o isr_syscall.o $(C_OBJS)
+OBJS = boot.o isr_keyboard.o isr_timer.o isr_syscall.o $(C_OBJS)
 
 all: kernel.bin
 
@@ -48,8 +48,8 @@ boot/%.o: boot/%.asm
 boot.o: boot/multiboot.asm
 	$(AS) -f elf64 boot/multiboot.asm -o boot.o
 
-timer_asm.o: asm/timer.asm
-	$(AS) -f elf64 asm/timer.asm -o timer_asm.o
+isr_timer.o: asm/isr_timer.asm
+	$(AS) -f elf64 asm/isr_timer.asm -o isr_timer.o
 
 isr_keyboard.o: asm/isr_keyboard.asm
 	$(AS) -f elf64 asm/isr_keyboard.asm -o isr_keyboard.o

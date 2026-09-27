@@ -2,6 +2,14 @@
 #define SYSCALL_H
 #include <stdint.h>
 
+
+// Codurile pentru Syscall-uri (System Call Numbers)
+#define SYSCALL_PRINT     1
+#define SYSCALL_READLINE  2
+#define SYSCALL_MALLOC    3
+#define SYSCALL_SLEEP     4
+#define SYSCALL_DATETIME  5
+
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;

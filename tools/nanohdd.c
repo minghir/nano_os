@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
         printf("  %s <disk.img> ls [cale]\n", argv[0]);
         printf("  %s <disk.img> push <fisier_linux> <cale_in_nano>\n", argv[0]);
         printf("  %s <disk.img> get <cale_in_nano> <fisier_linux>\n", argv[0]);
+        printf("  %s <disk.img> mkdir <cale_noua>\n", argv[0]); // Adăugat la help
         return 1;
     }
 
@@ -138,7 +139,6 @@ int main(int argc, char** argv) {
         const char* linux_file = argv[3];
         const char* nano_path = argv[4];
 
-        // Extragem directorul părinte și numele fișierului din calea dată (ex: /test/app.bin)
         char path_copy[256];
         strncpy(path_copy, nano_path, sizeof(path_copy));
         
@@ -173,87 +173,16 @@ int main(int argc, char** argv) {
         fseek(local_f, 0, SEEK_END);
         uint32_t size = ftell(local_f);
         fseek(local_f, 0, SEEK_SET);
-        /*
+
         uint32_t sectors_needed = (size + SECTOR_SIZE - 1) / SECTOR_SIZE;
 
         uint8_t dir_buffer[SECTOR_SIZE];
         read_sector(disk, dir_sector, dir_buffer);
 
         int max_entries = (SECTOR_SIZE - 8) / sizeof(DirectoryEntry);
-        DirectoryEntry* existing_entry = NULL;
         char formatted_name[11];
         format_name(file_name, formatted_name);
 
-        // Verificăm dacă fișierul există deja în director pentru a-l suprascrie
-        
-        for (int i = 0; i < max_entries; i++) {
-            DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
-            if (entry->filename[0] != 0 && entry->filename[0] != ' ') {
-                if (memcmp(entry->filename, formatted_name, 11) == 0) {
-                    existing_entry = entry;
-                    break;
-                }
-            }
-        }
-        
-       
-        uint32_t target_sector;
-        if (existing_entry != NULL) {
-            target_sector = existing_entry->start_sector;
-            existing_entry->size = size;
-            printf("Notă: Fișierul '%s' există deja. Se suprascrie...\n", file_name);
-        } else {
-            uint32_t* next_free_ptr = (uint32_t*)(root_buffer + 4);
-            target_sector = *next_free_ptr;
-
-            int success = 0;
-            for (int i = 0; i < max_entries; i++) {
-                DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
-                if (entry->filename[0] == 0 || entry->filename[0] == ' ') {
-                    memcpy(entry->filename, formatted_name, 11);
-                    entry->start_sector = target_sector;
-                    entry->size = size;
-                    entry->flags = 0; // FILE
-                    success = 1;
-                    break;
-                }
-            }
-
-            if (!success) {
-                printf("Eroare: Directorul este plin!\n");
-                fclose(local_f);
-                fclose(disk);
-                return 1;
-            }
-
-            *next_free_ptr += sectors_needed;
-            write_sector(disk, 1, root_buffer); // Salvăm noul pointer liber în Root
-        }
-
-        // Scriem datele efective pe disc
-        uint8_t temp_buf[SECTOR_SIZE];
-        for (uint32_t i = 0; i < sectors_needed; i++) {
-            memset(temp_buf, 0, SECTOR_SIZE);
-            fread(temp_buf, 1, SECTOR_SIZE, local_f);
-            write_sector(disk, target_sector + i, temp_buf);
-        }
-
-        write_sector(disk, dir_sector, dir_buffer);
-        printf("Succes: '%s' copiat ca '%s' (%d bytes).\n", linux_file, nano_path, size);
-
-        fclose(local_f);
-        */
-       uint32_t sectors_needed = (size + SECTOR_SIZE - 1) / SECTOR_SIZE;
-
-        // Folosim un singur buffer comun pentru sectorul 1 (care e și root și conține next_free)
-        uint8_t dir_buffer[SECTOR_SIZE];
-        read_sector(disk, dir_sector, dir_buffer);
-
-        int max_entries = (SECTOR_SIZE - 8) / sizeof(DirectoryEntry);
-        char formatted_name[11];
-        format_name(file_name, formatted_name);
-
-        // Curățăm intrarea veche dacă există deja (suprascriere curată)
         for (int i = 0; i < max_entries; i++) {
             DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
             if (entry->filename[0] != 0 && entry->filename[0] != ' ') {
@@ -265,9 +194,8 @@ int main(int argc, char** argv) {
         }
 
         uint32_t target_sector;
-        
-        // Dacă dir_sector este 1, pointerul next_free se află chiar în acest buffer la offset 4!
-        uint32_t* next_free_ptr = (uint32_t*)(dir_buffer + 4);
+        read_sector(disk, 1, root_buffer); // Ne asigurăm că avem root actualizat pentru next_free
+        uint32_t* next_free_ptr = (uint32_t*)(root_buffer + 4);
         target_sector = *next_free_ptr;
 
         int success = 0;
@@ -290,10 +218,9 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // Avansăm pointerul global de sectoare libere direct în buffer
         *next_free_ptr += sectors_needed;
+        write_sector(disk, 1, root_buffer); // Actualizăm root_buffer pe disc (cu noul next_free)
 
-        // Scriem datele efective ale fișierului pe disc la target_sector
         uint8_t temp_buf[SECTOR_SIZE];
         for (uint32_t i = 0; i < sectors_needed; i++) {
             memset(temp_buf, 0, SECTOR_SIZE);
@@ -301,16 +228,7 @@ int main(int argc, char** argv) {
             write_sector(disk, target_sector + i, temp_buf);
         }
 
-        // Scriem o singură dată sectorul 1 (care conține acum și noul next_free și noua intrare de fișier)
-        write_sector(disk, dir_sector, dir_buffer);
-        
-        // Dacă directorul era diferit de 1, trebuie să actualizăm și sectorul 1 separat pentru next_free
-        if (dir_sector != 1) {
-            read_sector(disk, 1, root_buffer);
-            uint32_t* root_next_free = (uint32_t*)(root_buffer + 4);
-            *root_next_free += sectors_needed;
-            write_sector(disk, 1, root_buffer);
-        }
+        write_sector(disk, dir_sector, dir_buffer); // Salvăm modificările directorului
 
         printf("Succes: '%s' copiat ca '%s' (%d bytes la sectorul %d).\n", linux_file, nano_path, size, target_sector);
         fclose(local_f);
@@ -375,7 +293,6 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // Citim conținutul fișierului de pe disc și îl salvăm pe Linux
         uint32_t bytes_remaining = target_entry->size;
         uint32_t current_sec = target_entry->start_sector;
         uint8_t sector_buf[SECTOR_SIZE];
@@ -390,6 +307,95 @@ int main(int argc, char** argv) {
 
         fclose(local_f);
         printf("Succes: S-a extras '%s' în '%s' (%d bytes).\n", nano_path, linux_file, target_entry->size);
+    }
+    // --- COMANDA: MKDIR (Creează un director) ---
+    else if (strcmp(command, "mkdir") == 0 && argc == 4) {
+        const char* nano_path = argv[3];
+
+        char path_copy[256];
+        strncpy(path_copy, nano_path, sizeof(path_copy));
+        
+        char* last_slash = strrchr(path_copy, '/');
+        char dir_path[256] = "/";
+        const char* dir_name = nano_path;
+
+        if (last_slash != NULL) {
+            if (last_slash == path_copy) {
+                dir_path[1] = '\0';
+            } else {
+                *last_slash = '\0';
+                strncpy(dir_path, path_copy, sizeof(dir_path));
+            }
+            dir_name = last_slash + 1;
+        }
+
+        uint32_t parent_dir_sector = find_dir_sector_by_path(disk, dir_path);
+        if (parent_dir_sector == 0) {
+            printf("Eroare: Directorul părinte '%s' nu există!\n", dir_path);
+            fclose(disk);
+            return 1;
+        }
+
+        uint8_t dir_buffer[SECTOR_SIZE];
+        read_sector(disk, parent_dir_sector, dir_buffer);
+
+        int max_entries = (SECTOR_SIZE - 8) / sizeof(DirectoryEntry);
+        char formatted_name[11];
+        format_name(dir_name, formatted_name);
+
+        // Verificăm dacă există deja ceva cu acest nume
+        for (int i = 0; i < max_entries; i++) {
+            DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
+            if (entry->filename[0] != 0 && entry->filename[0] != ' ') {
+                if (memcmp(entry->filename, formatted_name, 11) == 0) {
+                    printf("Eroare: Un fișier sau director cu numele '%s' există deja!\n", dir_name);
+                    fclose(disk);
+                    return 1;
+                }
+            }
+        }
+
+        uint32_t target_sector;
+        read_sector(disk, 1, root_buffer); 
+        uint32_t* next_free_ptr = (uint32_t*)(root_buffer + 4);
+        target_sector = *next_free_ptr;
+
+        int success = 0;
+        for (int i = 0; i < max_entries; i++) {
+            DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
+            if (entry->filename[0] == 0 || entry->filename[0] == ' ') {
+                memcpy(entry->filename, formatted_name, 11);
+                entry->start_sector = target_sector;
+                entry->size = 0; // Directoarele au size 0 (în implementarea actuală)
+                entry->flags = 1; // 1 = DIR
+                success = 1;
+                break;
+            }
+        }
+
+        if (!success) {
+            printf("Eroare: Directorul părinte este plin!\n");
+            fclose(disk);
+            return 1;
+        }
+
+        *next_free_ptr += 1; // Alocăm un sector pentru noul director
+        write_sector(disk, 1, root_buffer);
+
+        // Scriem un sector gol (toate intrările libere) pentru noul director
+        uint8_t temp_buf[SECTOR_SIZE];
+        memset(temp_buf, 0, SECTOR_SIZE);
+        
+        // *Opțional:* Putem pune magic-ul NAN2 și în sectoarele directoarelor 
+        // pentru a fi consistent, dar depinde cum e implementat FS-ul tău în kernel.
+        // Pentru simplitate, îl lăsăm gol, zero-izat, ceea ce înseamnă intrări libere.
+        
+        write_sector(disk, target_sector, temp_buf);
+
+        // Actualizăm directorul părinte
+        write_sector(disk, parent_dir_sector, dir_buffer);
+
+        printf("Succes: Directorul '%s' a fost creat (Sector alocat: %d).\n", nano_path, target_sector);
     }
     else {
         printf("Comandă necunoscută sau argumente lipsă.\n");

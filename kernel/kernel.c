@@ -97,7 +97,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     // clear_screen();
     shell_init();
     shell_run();
-
+    //timer_init(1000);
     // Fallback de siguranță (în caz că shell-ul s-ar opri vreodată)
     for (;;) {
         __asm__ volatile ("hlt");

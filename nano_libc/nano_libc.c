@@ -5,7 +5,7 @@ void nano_print(const char* str) {
     __asm__ volatile (
         "int $0x80"
         : /* Fără variabile de ieșire */
-        : "a" ((uint64_t)1), "D" ((uint64_t)str)
+        : "a" ((uint64_t)SYSCALL_PRINT), "D" ((uint64_t)str)
         : "memory"
     );
 }
@@ -15,7 +15,7 @@ void nano_readline(char* buffer, uint32_t max_len) {
     __asm__ volatile (
         "int $0x80"
         : /* Fără variabile de ieșire */
-        : "a" ((uint64_t)2), "D" ((uint64_t)buffer), "S" ((uint64_t)max_len)
+        : "a" ((uint64_t)SYSCALL_READLINE), "D" ((uint64_t)buffer), "S" ((uint64_t)max_len)
         : "memory"
     );
 }
@@ -156,13 +156,19 @@ char* itoa(int value, char* str, int base) {
 }
 
 void sleep(uint32_t milliseconds) {
-    // Exemplu bazat pe convenția ta (RAX = 4, RDI = milliseconds)
     __asm__ volatile (
-        "mov $4, %%rax\n\t"
-        "mov %0, %%rdi\n\t"
-        "int $0x80\n\t" // Sau instrucțiunea ta de syscall (ex: 'syscall')
-        :
-        : "r" ((uint64_t)milliseconds)
-        : "rax", "rdi", "cc", "memory"
+        "int $0x80"
+        : // Nu avem variabile de ieșire
+        : "a" ((uint64_t)SYSCALL_SLEEP), "D" ((uint64_t)milliseconds) // "a" forțează RAX = 4, "D" forțează RDI = milliseconds
+        : "cc", "memory"
+    );
+}
+
+void get_time(DateTime* dt) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a" ((uint64_t)SYSCALL_DATETIME), "D" ((uint64_t)dt) // RAX = 5 (syscall nr 5), RDI = adresa structurii 'dt'
+        : "cc", "memory"
     );
 }

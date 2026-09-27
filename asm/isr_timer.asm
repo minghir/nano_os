@@ -18,6 +18,7 @@ isr_timer:
     push r13
     push r14
     push r15
+    
     sub rsp, 8
     sub rsp, 16
     movdqu [rsp], xmm0
@@ -27,6 +28,13 @@ isr_timer:
     movdqu xmm0, [rsp]
     add rsp, 16
     add rsp, 8
+
+    ; --- MUTAT AICI SUS! ---
+    ; Trimite EOI către PIC Master
+    mov al, 0x20
+    out 0x20, al
+    ; -----------------------
+
     pop r15
     pop r14
     pop r13
@@ -41,10 +49,6 @@ isr_timer:
     pop rbx
     pop rdx
     pop rcx
-    pop rax
-
-    ; Trimite EOI către PIC Master (deoarece IRQ 0 este pe Master)
-    mov al, 0x20
-    out 0x20, al
+    pop rax  ; Acum RAX este recuperat perfect curat, la final!
 
     iretq

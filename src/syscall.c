@@ -4,34 +4,59 @@
 #include "memory.h"  // Pentru funcția malloc()
 #include "syscall.h"
 #include "io.h"
-
+#include "timer.h"
+#include "shell.h"
 
 void syscall_handler(SyscallRegisters* regs) {
     // 1. RE-ACTIVĂM ÎNTRERUPERILE HARDWARE!
-    // Fără asta, tastatura (IRQ 1) nu ne poate trimite taste cât timp suntem în Syscall.
     __asm__ volatile ("sti");
 
-    // Verificăm ce comandă cere programul în RAX
-    if (regs->rax == 1) {
-        // RAX = 1 înseamnă print string
-        char* str = (char*)regs->rdi; // RDI conține adresa textului trimis de program
-        print(str);
-    }else if (regs->rax == 2) {
-        // RAX = 2: Read string de la tastatură
-        char* buffer = (char*)regs->rdi;
-        uint32_t max_length = regs->rsi;
+    // 2. Rutăm apelul folosind un switch bazat pe macrourile definite
+    // 2. Rutăm apelul tăind "gunoiul" din partea superioară a lui RAX
+    switch ((uint32_t)regs->rax) {
         
-        // Aici apelăm funcția kernel-ului care așteaptă un rând de text.
-        // Presupun că ai o funcție asemănătoare folosită de shell.
-        keyboard_read_line(buffer, max_length); 
-    }else if (regs->rax == 3) {
-        // RAX = 3: Alocare memorie (malloc pentru user-space)
-        size_t size = (size_t)regs->rdi;
+        case SYSCALL_PRINT: {
+            char* str = (char*)regs->rdi;
+            print(str);
+            break;
+        }
         
-        // Apelăm funcția ta de kernel malloc
-        void* ptr = malloc(size);
+        case SYSCALL_READLINE: {
+            char* buffer = (char*)regs->rdi;
+            uint32_t max_length = regs->rsi;
+            keyboard_read_line(buffer, max_length); 
+            break;
+        }
         
-        // Returnăm adresa pointerului în RAX
-        regs->rax = (uint64_t)ptr;
+        case SYSCALL_MALLOC: {
+            size_t size = (size_t)regs->rdi;
+            void* ptr = malloc(size);
+            regs->rax = (uint64_t)ptr; // Returnăm adresa pointerului
+            break;
+        }
+        
+        case SYSCALL_SLEEP: {
+            uint32_t milliseconds = (uint32_t)regs->rdi;
+            print("Sleep cerut pt ms: "); 
+            print_number(milliseconds);
+            print("\n");
+            sleep_ms(milliseconds); 
+            break;
+        }
+        
+        case SYSCALL_DATETIME: {
+            DateTime* user_dt = (DateTime*)regs->rdi;
+            DateTime kernel_dt = get_current_time();
+            *user_dt = kernel_dt; // Copiem direct rezultatul
+            break;
+        }
+        
+        default: {
+            // Un mic mecanism de protecție dacă programul cere un syscall inexistent
+            print("Kernel Warning: Syscall necunoscut apelat: ");
+            print_number(regs->rax);
+            print("\n");
+            break;
+        }
     }
 }

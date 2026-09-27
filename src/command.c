@@ -8,6 +8,43 @@
 #include "fs.h"
 #include "string.h"
 
+// Variabila globală (cu o valoare default în caz că fișierul nu există)
+char env_path[128] = "/;/bin";
+
+void load_environment() {
+    uint8_t* buffer = (uint8_t*)malloc(512);
+    if (!buffer) return;
+    
+    for (int i = 0; i < 512; i++) buffer[i] = 0;
+
+    // Încercăm să citim fișierul de configurare
+    int bytes = fs_read_file("/conf/env.txt", buffer, 511);
+    
+    if (bytes > 0) {
+        char* text = (char*)buffer;
+        
+        // Dacă fișierul începe cu PATH=
+        if (starts_with(text, "PATH=")) {
+            string_copy(env_path, text + 5); // Copiem tot de după "PATH="
+            
+            // Curățăm posibilele caractere de Enter (newline) de la finalul fișierului
+            for (int i = 0; env_path[i] != '\0'; i++) {
+                if (env_path[i] == '\n' || env_path[i] == '\r') {
+                    env_path[i] = '\0';
+                    break;
+                }
+            }
+            print("Config loaded! PATH=");
+            print(env_path);
+            newline();
+        }
+    } else {
+        print("Avertisment: /conf/env.txt nu a fost gasit. Folosesc PATH implicit.");
+        newline();
+    }
+}
+
+
 
 void execute_command(char* command) {
     if (strcmp(command, "") == 0) {
@@ -19,8 +56,8 @@ void execute_command(char* command) {
         newline();
     } else if (strcmp(command, "clear") == 0) {
         clear_screen();
-    } else if (strcmp(command, "time") == 0) {
-        print_time();
+    //} else if (strcmp(command, "time") == 0) {
+      //  print_time();
     } else if (starts_with(command, "echo ")) {
         print(command + 5);
         newline();
@@ -363,8 +400,82 @@ void execute_command(char* command) {
         fs_format();
     }
     else {
-        print("Unknown command: ");
-        print(command);
-        newline();
+        char paths_to_try[6][64]; // Am redus numărul de încercări la 6 (e suficient)
+        int try_count = 0;
+        int file_found = 0;
+        uint8_t* prog_memory = (uint8_t*)0x800000;
+
+        // Curățăm bufferele
+        for(int i=0; i<6; i++) {
+            for(int j=0; j<64; j++) {
+                paths_to_try[i][j] = '\0';
+            }
+        }
+
+        // Dacă utilizatorul a scris o cale absolută (ex: "/apps/date" sau "./date")
+        // Dacă începe cu '/' sau '.', considerăm că a dat o cale exactă.
+        if (command[0] == '/' || command[0] == '.') {
+            string_copy(paths_to_try[try_count], command);
+            try_count++;
+        } 
+        else {
+            // Dacă a scris doar numele (ex: "date"), îl căutăm în toate folderele din PATH
+            char path_copy[128];
+            string_copy(path_copy, env_path);
+            
+            int start_idx = 0;
+            int len = string_length(path_copy);
+            
+            for (int i = 0; i <= len; i++) {
+                // Sparge string-ul la fiecare punct și virgulă sau la sfârșit
+                if (path_copy[i] == ';' || path_copy[i] == '\0') {
+                    path_copy[i] = '\0'; 
+                    char* current_dir = &path_copy[start_idx];
+                    start_idx = i + 1;
+                    
+                    if (string_length(current_dir) == 0) continue;
+
+                    // Formăm: "director" + "/" + "nume_comanda"
+                    string_copy(paths_to_try[try_count], current_dir);
+                    
+                    // Adăugăm '/' dacă directorul nu se termină deja în el
+                    int dirlen = string_length(paths_to_try[try_count]);
+                    if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
+                        string_concat(paths_to_try[try_count], "/");
+                    }
+                    string_concat(paths_to_try[try_count], command);
+                    try_count++;
+                    
+                    if (try_count >= 5) break; // Protecție
+                }
+            }
+        }
+
+        // --- Testăm efectiv pe disc căile generate ---
+        for (int i = 0; i < try_count; i++) {
+
+            //print("Incerc sa citesc: "); print(paths_to_try[i]); newline();
+
+            int bytes_read = fs_read_file(paths_to_try[i], prog_memory, 16384);
+            if (bytes_read > 0) {
+                file_found = 1;
+                
+                // Debug opțional ca să vezi de unde a fost rulat
+                //print("Se executa: "); print(paths_to_try[i]); newline();
+                
+                void (*program_start)(void) = (void (*)(void))prog_memory;
+                program_start();
+                
+                break; // Programul a rulat, oprim căutarea
+            }
+        }
+
+        if (!file_found) {
+            print("Comanda necunoscuta: ");
+            print(command);
+            newline();
+        }
     }
 }
+
+
