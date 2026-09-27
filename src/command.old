@@ -9,7 +9,7 @@
 #include "string.h"
 
 // Variabila globală (cu o valoare default în caz că fișierul nu există)
-char env_path[128] = "/;/bin";
+//char env_path[128] = "/;/bin";
 
 void load_environment() {
     uint8_t* buffer = (uint8_t*)malloc(512);
@@ -418,6 +418,22 @@ void execute_command(char* command) {
             string_copy(paths_to_try[try_count], command);
             try_count++;
         } 
+        else if (strcmp(command, "shutdown") == 0) {
+            print("Se inchide sistemul...");
+            newline();
+            
+            // Trimitem semnalul de power-off către QEMU prin porturile standard ACPI
+            // Portul 0x604 (standard pentru PIIX4 / i440fx)
+            outw(0x604, 0x2000);
+            
+            // Portul 0xB004 (standard pentru Q35 sau versiuni mai noi de QEMU)
+            outw(0xB004, 0x2000);
+            
+            // Dacă din anumite motive nu se închide instant, oprim procesorul într-o buclă infinită
+            while(1) {
+                __asm__ volatile("cli; hlt");
+            }
+        }
         else {
             // Dacă a scris doar numele (ex: "date"), îl căutăm în toate folderele din PATH
             char path_copy[128];
@@ -469,6 +485,7 @@ void execute_command(char* command) {
                 break; // Programul a rulat, oprim căutarea
             }
         }
+        
 
         if (!file_found) {
             print("Comanda necunoscuta: ");

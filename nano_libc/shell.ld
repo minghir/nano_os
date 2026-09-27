@@ -2,7 +2,7 @@ OUTPUT_FORMAT("binary")
 ENTRY(_start)
 SECTIONS
 {
-    . = 0x900000;
+    . = 0x800000;
     .text   : { *(.text) }
     .rodata : { *(.rodata) }
     .data   : { *(.data) }

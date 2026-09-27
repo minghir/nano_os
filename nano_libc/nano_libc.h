@@ -22,6 +22,26 @@ typedef struct {
 } DateTime;
 
 
+static inline int nano_exec(const char* filename) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)6), "D" ((uint64_t)filename) // 6 este numărul pentru SYSCALL_EXEC
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_shutdown(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a" ((uint64_t)7) // 7 este SYSCALL_SHUTDOWN
+        : "cc", "memory"
+    );
+}
+
 void nano_print(const char* str);
 void nano_readline(char* buffer, uint32_t max_len);
 

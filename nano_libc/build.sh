@@ -27,5 +27,16 @@ make APP=mandel
 ../nanohdd ../hda.img push mandel.bin /bin/mandel
 make clean
 
-#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk file:qemu_output.log
-qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -serial file:qemu_output.log
+make clean
+make APP=shell
+../nanohdd ../hda.img push shell.bin /bin/sh
+make clean
+
+
+make APP=shutdown
+../nanohdd ../hda.img push shutdown.bin /bin/shutdown
+make clean
+
+
+
+qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses

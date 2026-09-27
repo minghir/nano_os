@@ -1,8 +1,9 @@
 #include "../src/io.h"
 #include "../src/config.h"
-#include "../src/shell.h"
+//#include "../src/shell.h"
 #include "../src/memory.h"
 #include "../src/fs.h"
+#include "../src/string.h"
 #include <stdint.h>
 /*
 typedef struct multiboot_info {
@@ -60,6 +61,43 @@ typedef struct mod_list {
     uint32_t pad;
 } mod_list_t;
 
+char env_path[128] = "/;/bin";
+
+void load_kernel_environment() {
+    uint8_t* buffer = (uint8_t*)malloc(512);
+    if (!buffer) return;
+    
+    for (int i = 0; i < 512; i++) buffer[i] = 0;
+
+    int bytes = fs_read_file("/conf/env.txt", buffer, 511);
+    if (bytes > 0) {
+        char* text = (char*)buffer;
+        if (starts_with(text, "PATH=")) { // Asigură-te că ai funcția starts_with sau o verifici manual
+            // Copiem PATH-ul
+            int i = 0;
+            while (text[5 + i] != '\0' && i < 127) {
+                env_path[i] = text[5 + i];
+                i++;
+            }
+            env_path[i] = '\0';
+            
+            // Curățăm caracterele newline
+            for (int j = 0; env_path[j] != '\0'; j++) {
+                if (env_path[j] == '\n' || env_path[j] == '\r') {
+                    env_path[j] = '\0';
+                    break;
+                }
+            }
+            print("Kernel: PATH setat la: ");
+            print(env_path);
+            newline();
+        }
+    } else {
+        print("Kernel: /conf/env.txt negasit. Folosesc PATH implicit (/;/bin).");
+        newline();
+    }
+}
+
 void kernel_main(unsigned long magic, unsigned long addr) {
     cursor_init();
     print("Nano OS booted!");
@@ -94,10 +132,33 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     fs_init();
     // Lansăm shell-ul interactiv direct
     
+    // Încărcăm variabilele de mediu (PATH)
+    load_kernel_environment();
+
     // clear_screen();
-    shell_init();
-    shell_run();
+    //shell_init();
+    //shell_run();
     //timer_init(1000);
+
+
+    // --- LANSAREA SHELL-ULUI DIN USER SPACE ---
+    print("Se incarca Shell-ul din User Space (/bin/sh)...\n");
+    
+    uint8_t* shell_memory = (uint8_t*)0x800000;
+    int bytes = fs_read_file("/bin/sh", shell_memory, 32768);
+    
+    if (bytes > 0) {
+        print("Shell incarcat cu succes! Se ruleaza...\n");
+        // Dat fiind că adresa 0x800000 conține codul compilat al shell-ului, 
+        // îl transformăm în pointer de funcție și îi dăm controlul (Ring 3 / User Space)
+        void (*shell_entry)(void) = (void (*)(void))shell_memory;
+        shell_entry();
+    } else {
+        print("EROARE CRITICA: Nu s-a putut gasi /bin/sh pe disc!\n");
+    }
+    // ------------------------------------------
+
+
     // Fallback de siguranță (în caz că shell-ul s-ar opri vreodată)
     for (;;) {
         __asm__ volatile ("hlt");

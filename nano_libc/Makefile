@@ -5,10 +5,16 @@ LD = ld
 
 CFLAGS = -m64 -ffreestanding -fno-pie -c -Wall -Wextra
 ASFLAGS = -f elf64
-LDFLAGS = -T app.ld
 
 # Poți schimba aplicația implicită aici sau din consolă (ex: make APP=test_malloc)
 APP ?= app
+
+# Selectăm dinamic linker script-ul în funcție de aplicație
+ifeq ($(APP),shell)
+    LDFLAGS = -T shell.ld
+else
+    LDFLAGS = -T app.ld
+endif
 
 all: $(APP).bin
 
@@ -24,8 +30,8 @@ nano_libc.o: nano_libc.c nano_libc.h
 $(APP).o: $(APP).c nano_libc.h
 	$(CC) $(CFLAGS) $(APP).c -o $(APP).o
 
-# 4. Link final în binar pur
-$(APP).bin: crt0.o nano_libc.o $(APP).o app.ld
+# 4. Link final în binar pur (folosește LDFLAGS dinamic)
+$(APP).bin: crt0.o nano_libc.o $(APP).o
 	$(LD) $(LDFLAGS) crt0.o nano_libc.o $(APP).o -o $(APP).bin
 	@echo "Succes! S-a creat binarul: $(APP).bin"
 

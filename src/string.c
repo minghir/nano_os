@@ -1,4 +1,5 @@
 #include "string.h"
+#include "io.h"
 
 // Funcție utilitară pentru a detecta spațiile (înlocuiește isspace din ctype.h)
 static inline int is_space(char c) {
@@ -119,4 +120,32 @@ void string_concat(char* dest, const char* src) {
         src++;
     }
     *dest = '\0'; // Punem terminatorul final
+}
+
+int starts_with(const char* text, const char* prefix) {
+    while (*prefix) {
+        if (*text++ != *prefix++) return 0;
+    }
+    return 1;
+}
+
+void print_number(uint32_t value) {
+    char buffer[11];
+    int index = 10;
+    buffer[index] = 0;
+
+    do {
+        buffer[--index] = '0' + (value % 10);
+        value /= 10;
+    } while (value != 0);
+
+    print(&buffer[index]);
+}
+
+int string_length(const char* str) {
+    int len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
 }

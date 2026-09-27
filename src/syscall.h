@@ -9,6 +9,8 @@
 #define SYSCALL_MALLOC    3
 #define SYSCALL_SLEEP     4
 #define SYSCALL_DATETIME  5
+#define SYSCALL_EXEC      6
+#define SYSCALL_SHUTDOWN  7
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {

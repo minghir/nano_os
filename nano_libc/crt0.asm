@@ -4,5 +4,5 @@ extern main
 
 section .text
 _start:
-    call main       ; Sari în funcția main() din C
-    ret             ; Când main() face return 0, ajungem aici și ne întoarcem în Kernel
+    call main       ; Apelăm funcția main() din C
+    ret             ; Ne întoarcem elegant în kernel (sau în handler-ul de syscall)
