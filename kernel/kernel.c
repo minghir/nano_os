@@ -142,10 +142,10 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 
 
     // --- LANSAREA SHELL-ULUI DIN USER SPACE ---
-    print("Se incarca Shell-ul din User Space (/bin/sh)...\n");
+    print("Se incarca Shell-ul din User Space (/bin/shell)...\n");
     
     uint8_t* shell_memory = (uint8_t*)0x800000;
-    int bytes = fs_read_file("/bin/sh", shell_memory, 32768);
+    int bytes = fs_read_file("/bin/shell", shell_memory, 32768);
     
     // Definiția structurii header-ului (trebuie să fie vizibilă sau definită și în kernel)
     typedef struct {
@@ -166,10 +166,10 @@ void kernel_main(unsigned long magic, unsigned long addr) {
             void (*shell_entry)(void) = (void (*)(void))(shell_memory + hdr->entry_offset);
             shell_entry();
         } else {
-            print("EROARE CRITICA: /bin/sh nu are semnatura valida NAS1!\n");
+            print("EROARE CRITICA: /bin/shell nu are semnatura valida NAS1!\n");
         }
     } else {
-        print("EROARE CRITICA: Nu s-a putut gasi /bin/sh pe disc sau este prea mic!\n");
+        print("EROARE CRITICA: Nu s-a putut gasi /bin/shell pe disc sau este prea mic!\n");
     }
     // ------------------------------------------
 

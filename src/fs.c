@@ -56,13 +56,49 @@ static DirectoryEntry* find_file_entry(uint8_t* dir_buffer, const char* name) {
     return 0;
 }
 
+#define FS_MAX_DIR_DEPTH 16
+
+static uint32_t highest_allocated_sector(uint32_t dir_sector, uint32_t depth) {
+    if (dir_sector == 0 || depth >= FS_MAX_DIR_DEPTH) return UINT32_MAX;
+
+    uint8_t dir_buffer[512];
+    disk_read_sector(dir_sector, dir_buffer);
+
+    uint32_t highest = dir_sector;
+    int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+
+    for (int i = 0; i < max_entries; i++) {
+        DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
+        if (entry->filename[0] == 0 || entry->filename[0] == ' ' || entry->start_sector == 0) continue;
+
+        uint32_t last_sector = entry->start_sector;
+        if (entry->flags == FS_FLAG_DIR) {
+            uint32_t child_highest = highest_allocated_sector(entry->start_sector, depth + 1);
+            if (child_highest > highest) highest = child_highest;
+        } else {
+            uint32_t sector_count = entry->size / 512 + (entry->size % 512 != 0);
+            if (sector_count == 0) sector_count = 1;
+            if (sector_count - 1 > UINT32_MAX - last_sector) return UINT32_MAX;
+            last_sector += sector_count - 1;
+            if (last_sector > highest) highest = last_sector;
+        }
+    }
+
+    return highest;
+}
+
 // Alocă N sectoare de pe disc folosind metadatele din Sectorul 1 (Root)
 static uint32_t allocate_sectors(uint32_t count) {
     uint8_t root_buffer[512];
     disk_read_sector(1, root_buffer);
     
     uint32_t* next_free = (uint32_t*)(root_buffer + 4);
+    uint32_t highest = highest_allocated_sector(1, 0);
+    if (highest == UINT32_MAX || highest == UINT32_MAX - 1) return 0;
+    if (*next_free <= highest) *next_free = highest + 1;
+
     uint32_t allocated = *next_free;
+    if (count == 0 || count > UINT32_MAX - allocated) return 0;
     *next_free += count;
     
     disk_write_sector(1, root_buffer);
@@ -176,6 +212,7 @@ void fs_list_files() {
 int fs_mkdir(const char* name) {
     // 1. ALOCĂM ÎNTÂI SECTORUL! (Asta actualizează Sectorul 1 direct pe disc)
     uint32_t new_dir_sec = allocate_sectors(1);
+    if (new_dir_sec == 0) return 0;
 
     // 2. ABIA ACUM citim directorul curent în buffer (acum va conține noile valori de sistem)
     uint8_t buffer[512];
@@ -293,7 +330,7 @@ int fs_rmdir(const char* name) {
 }
 
 // --- Gestiunea Fișierelor (Adaptate) ---
-
+/*
 int fs_create_file(const char* name, uint32_t size) {
     uint32_t sectors_needed = size > 0 ? (size + 511) / 512 : 1;
     
@@ -321,6 +358,8 @@ int fs_create_file(const char* name, uint32_t size) {
     }
     return 0;
 }
+    */
+
 
 int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
     uint8_t buffer[512];
@@ -409,6 +448,49 @@ static uint32_t fs_resolve_path(const char* full_path, char* filename_out) {
     current_dir_sector = original_dir; // Ne întoarcem de unde am plecat, ca userul să nu știe!
     
     return search_sector;
+}
+
+
+
+int fs_create_file(const char* name, uint32_t size) {
+    char target_filename[128];
+    uint32_t target_dir_sector = fs_resolve_path(name, target_filename);
+    
+    if (target_dir_sector == 0 || target_filename[0] == '\0') {
+        return 0; 
+    }
+
+    uint32_t sectors_needed = size > 0 ? (size + 511) / 512 : 1;
+    
+    // 1. ALOCĂM ÎNTÂI SECTOARELE! (Asta actualizează corect next_free în Sectorul 1)
+    uint32_t new_file_sec = allocate_sectors(sectors_needed);
+    if (new_file_sec == 0) return 0;
+
+    // 2. ABIA ACUM citim directorul țintă în buffer (preluând noul next_free de pe disc)
+    uint8_t buffer[512];
+    disk_read_sector(target_dir_sector, buffer);
+    
+    // VERIFICARE OVERWRITE: Dacă fișierul există deja, îi invalidăm vechea intrare
+    DirectoryEntry* existing_entry = find_file_entry(buffer, target_filename);
+    if (existing_entry) {
+        existing_entry->filename[0] = 0; // Ștergem intrarea veche din director
+    }
+
+    int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+    for (int i = 0; i < max_entries; i++) {
+        DirectoryEntry* entry = (DirectoryEntry*)(buffer + 8 + (i * sizeof(DirectoryEntry)));
+        if (entry->filename[0] == 0 || entry->filename[0] == ' ') {
+            
+            set_entry_filename(entry, target_filename);
+            entry->start_sector = new_file_sec;
+            entry->size = size;
+            entry->flags = FS_FLAG_FILE;
+
+            disk_write_sector(target_dir_sector, buffer);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {

@@ -212,6 +212,49 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = ok;   // 1 = succes, 0 = eroare
             break;
         }
+        case SYSCALL_CREATE_FILE: {
+            const char* name = (const char*)regs->rdi;
+            uint32_t size = (uint32_t)regs->rsi;
+            regs->rax = fs_create_file(name, size); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+
+        case SYSCALL_WRITE_FILE: {
+            // Presupunem că transmitem: RDI = nume, RSI = pointer date, RDX = dimensiune
+            const char* name = (const char*)regs->rdi;
+            const uint8_t* data = (const uint8_t*)regs->rsi;
+            uint32_t size = (uint32_t)regs->rdx;
+            regs->rax = fs_write_file(name, data, size); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+        case SYSCALL_FORMAT: {
+            fs_format();
+            break;
+        }
+
+        case SYSCALL_DELETE_FILE: {
+            const char* name = (const char*)regs->rdi;
+            regs->rax = fs_delete_file(name); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+        case SYSCALL_READ_FILE: {
+            const char* name = (const char*)regs->rdi;
+            uint8_t* buffer = (uint8_t*)regs->rsi;
+            uint32_t max_size = (uint32_t)regs->rdx;
+            regs->rax = fs_read_file(name, buffer, max_size); // Returnează numărul de octeți citiți
+            break;
+        }
+        case SYSCALL_MKDIR: {
+            const char* name = (const char*)regs->rdi;
+            regs->rax = fs_mkdir(name); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+        case SYSCALL_PRINT_INT: {
+            uint64_t val = regs->rdi;
+            print_number(val);
+            newline();
+            break;
+        }
         default: {
             print("Kernel Warning: Syscall necunoscut apelat: ");
             print_number(regs->rax);

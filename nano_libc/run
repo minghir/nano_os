@@ -1,0 +1,1 @@
+qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses

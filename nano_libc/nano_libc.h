@@ -69,6 +69,79 @@ static inline void nano_ls(void) {
     );
 }
 
+static inline int nano_create_file(const char* name, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)10), "D" ((uint64_t)name), "S" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_write_file(const char* name, const uint8_t* data, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)11), "D" ((uint64_t)name), "S" ((uint64_t)data), "d" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_format(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a" ((uint64_t)12)
+        : "cc", "memory"
+    );
+}
+
+static inline int nano_delete_file(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)13), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)14), "D" ((uint64_t)name), "S" ((uint64_t)buffer), "d" ((uint64_t)max_size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_mkdir(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)15), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_print_int(uint32_t val) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a" ((uint64_t)16), "D" ((uint64_t)val) // RAX = 16 (SYSCALL_PRINT_INT), RDI = valoarea
+        : "cc", "memory"
+    );
+}
+
 void nano_print(const char* str);
 void nano_readline(char* buffer, uint32_t max_len);
 

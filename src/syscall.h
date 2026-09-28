@@ -13,6 +13,13 @@
 #define SYSCALL_SHUTDOWN  7
 #define SYSCALL_LIST_FILES 8
 #define SYSCALL_CD 9
+#define SYSCALL_CREATE_FILE 10
+#define SYSCALL_WRITE_FILE  11
+#define SYSCALL_FORMAT      12
+#define SYSCALL_DELETE_FILE 13
+#define SYSCALL_READ_FILE 14
+#define SYSCALL_MKDIR 15
+#define SYSCALL_PRINT_INT 16
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
