@@ -1,6 +1,6 @@
 #include "fs.h"
 #include "io.h"
-#include "shell.h"
+#include "string.h"
 #include "ata.h"
 #include "memory.h"
 
