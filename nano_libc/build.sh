@@ -34,6 +34,8 @@ make clean
 
 make APP=shutdown
 ../nanohdd ../hda.img push shutdown.bin /bin/shutdown
+../nanohdd ../hda.img push shutdown.bin /bin/quit
+../nanohdd ../hda.img push shutdown.bin /bin/q
 make clean
 
 make APP=ls

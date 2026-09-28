@@ -5,20 +5,22 @@
 #include "syscall.h"
 #include "io.h"
 #include "timer.h"
-//#include "shell.h"
 #include "fs.h"
 #include "string.h"
 
 extern char env_path[];
 
 void syscall_handler(SyscallRegisters* regs) {
+    // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
+    uint32_t syscall_num = (uint32_t)regs->rax;
+
     // 1. RE-ACTIVĂM ÎNTRERUPERILE HARDWARE!
     __asm__ volatile ("sti");
 
     // 2. Rutăm apelul folosind un switch bazat pe macrourile definite
     // 2. Rutăm apelul tăind "gunoiul" din partea superioară a lui RAX
-    switch ((uint32_t)regs->rax) {
-        
+    //switch ((uint32_t)regs->rax) {
+    switch (syscall_num) {
         case SYSCALL_PRINT: {
             char* str = (char*)regs->rdi;
             print(str);
@@ -54,6 +56,7 @@ void syscall_handler(SyscallRegisters* regs) {
             *user_dt = kernel_dt; // Copiem direct rezultatul
             break;
         }
+        /*
         case SYSCALL_EXEC: {
             char* command = (char*)regs->rdi;
             uint8_t* prog_memory = (uint8_t*)0x900000; // Aplicațiile rulează la 9 MB
@@ -115,6 +118,83 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = file_found ? 1 : 0; // Returnează 1 dacă s-a executat, 0 altfel
             break;
         }
+            */
+
+        case SYSCALL_EXEC: {
+            char* command = (char*)regs->rdi;
+            uint8_t* prog_memory = (uint8_t*)0x900000;
+            int file_found = 0;
+
+            char paths_to_try[6][64];
+            int try_count = 0;
+
+            // Resetăm bufferele
+            for (int i = 0; i < 6; i++) {
+                for (int j = 0; j < 64; j++) {
+                    paths_to_try[i][j] = '\0';
+                }
+            }
+
+            // Dacă s-a dat o cale absolută sau relativă directă
+            if (command[0] == '/' || command[0] == '.') {
+                string_copy(paths_to_try[try_count++], command);
+            } else {
+                // Căutăm folosind variabila PATH din kernel (env_path)
+                char path_copy[128];
+                string_copy(path_copy, env_path); 
+                
+                int start_idx = 0;
+                int len = string_length(path_copy);
+                
+                for (int i = 0; i <= len; i++) {
+                    if (path_copy[i] == ';' || path_copy[i] == '\0') {
+                        path_copy[i] = '\0'; 
+                        char* current_dir = &path_copy[start_idx];
+                        start_idx = i + 1;
+                        
+                        if (string_length(current_dir) == 0) continue;
+
+                        string_copy(paths_to_try[try_count], current_dir);
+                        int dirlen = string_length(paths_to_try[try_count]);
+                        if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
+                            string_concat(paths_to_try[try_count], "/");
+                        }
+                        string_concat(paths_to_try[try_count], command);
+                        try_count++;
+                        
+                        if (try_count >= 5) break;
+                    }
+                }
+            }
+
+            // Testăm pe disc rând pe rând căile generate
+            for (int i = 0; i < try_count; i++) {
+                int bytes_read = fs_read_file(paths_to_try[i], prog_memory, 32768);
+                if (bytes_read > (int)sizeof(NanoHeader)) {
+                    NanoHeader* hdr = (NanoHeader*)prog_memory;
+                    
+                    // Verificăm semnătura magică "NAS1"
+                    if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
+                        hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
+                        
+                        file_found = 1;
+                        // Sărim exact la offset-ul indicat de header
+                        void (*program_start)(void) = (void (*)(void))(prog_memory + hdr->entry_offset);
+                        program_start();
+                        break;
+                    } else {
+                        print("Kernel Error: Fisierul nu este un executabil valid (lipseste semnatura NAS1): ");
+                        print(paths_to_try[i]);
+                        print("\n");
+                        file_found = 1; // Am găsit fișierul, dar am refuzat rularea
+                        break;
+                    }
+                }
+            }
+
+            regs->rax = file_found ? 1 : 0;
+            break;
+        }
         case SYSCALL_SHUTDOWN: {
             print("Kernel: Shutdown cerut din User Space...\n");
             // Trimitem semnalul de oprire ACPI prin porturile standard QEMU/Bochs
@@ -133,9 +213,10 @@ void syscall_handler(SyscallRegisters* regs) {
             break;
         }
         default: {
-            // Un mic mecanism de protecție dacă programul cere un syscall inexistent
             print("Kernel Warning: Syscall necunoscut apelat: ");
             print_number(regs->rax);
+            print(" | Parametru (RDI): ");
+            print_number(regs->rdi);
             print("\n");
             break;
         }

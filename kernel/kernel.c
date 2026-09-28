@@ -147,17 +147,31 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     uint8_t* shell_memory = (uint8_t*)0x800000;
     int bytes = fs_read_file("/bin/sh", shell_memory, 32768);
     
-    if (bytes > 0) {
-        print("Shell incarcat cu succes! Se ruleaza...\n");
-        // Dat fiind că adresa 0x800000 conține codul compilat al shell-ului, 
-        // îl transformăm în pointer de funcție și îi dăm controlul (Ring 3 / User Space)
-        void (*shell_entry)(void) = (void (*)(void))shell_memory;
-        shell_entry();
+    // Definiția structurii header-ului (trebuie să fie vizibilă sau definită și în kernel)
+    typedef struct {
+        char magic[4];       // "NAS1"
+        uint32_t entry_offset;
+    } __attribute__((packed)) NanoHeader;
+
+    if (bytes > (int)sizeof(NanoHeader)) {
+        NanoHeader* hdr = (NanoHeader*)shell_memory;
+        
+        // Verificăm semnătura magică "NAS1"
+        if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
+            hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
+            
+            print("Shell incarcat cu succes! Se ruleaza...\n");
+            
+            // Sărim exact peste header, la adresa de început a codului
+            void (*shell_entry)(void) = (void (*)(void))(shell_memory + hdr->entry_offset);
+            shell_entry();
+        } else {
+            print("EROARE CRITICA: /bin/sh nu are semnatura valida NAS1!\n");
+        }
     } else {
-        print("EROARE CRITICA: Nu s-a putut gasi /bin/sh pe disc!\n");
+        print("EROARE CRITICA: Nu s-a putut gasi /bin/sh pe disc sau este prea mic!\n");
     }
     // ------------------------------------------
-
 
     // Fallback de siguranță (în caz că shell-ul s-ar opri vreodată)
     for (;;) {

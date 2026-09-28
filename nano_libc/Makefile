@@ -33,6 +33,7 @@ $(APP).o: $(APP).c nano_libc.h
 # 4. Link final în binar pur (folosește LDFLAGS dinamic)
 $(APP).bin: crt0.o nano_libc.o $(APP).o
 	$(LD) $(LDFLAGS) crt0.o nano_libc.o $(APP).o -o $(APP).bin
+	../nanohdd ../hda.img push $(APP).bin /bin/$(APP)
 	@echo "Succes! S-a creat binarul: $(APP).bin"
 
 # Curățarea fișierelor oprite la compilare

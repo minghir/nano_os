@@ -20,5 +20,12 @@ typedef struct {
     uint64_t rdi, rsi, rbp, rbx, rdx, rcx, rax;
 } __attribute__((packed)) SyscallRegisters;
 
+//header executabil NAS1
+
+typedef struct {
+    char magic[4];       // "NAS1"
+    uint32_t entry_offset;
+} __attribute__((packed)) NanoHeader;
+
 void syscall_handler(SyscallRegisters* regs);
 #endif
