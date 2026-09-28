@@ -122,6 +122,16 @@ void syscall_handler(SyscallRegisters* regs) {
             __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x0160), "Nd"((uint16_t)0xB004));
             break;
         }
+        case SYSCALL_LIST_FILES: {
+            fs_list_files();   // Folosește directorul curent din kernel
+            break;
+        }
+        case SYSCALL_CD: {
+            const char* path = (const char*)regs->rdi;
+            int ok = fs_cd(path);
+            regs->rax = ok;   // 1 = succes, 0 = eroare
+            break;
+        }
         default: {
             // Un mic mecanism de protecție dacă programul cere un syscall inexistent
             print("Kernel Warning: Syscall necunoscut apelat: ");

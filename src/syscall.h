@@ -11,6 +11,8 @@
 #define SYSCALL_DATETIME  5
 #define SYSCALL_EXEC      6
 #define SYSCALL_SHUTDOWN  7
+#define SYSCALL_LIST_FILES 8
+#define SYSCALL_CD 9
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {

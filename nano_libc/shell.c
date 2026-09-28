@@ -33,10 +33,24 @@ int main() {
             nano_print("La revedere!\n");
             break;
         } 
+        else if (strcmp(command_buffer, "about") == 0) {
+            nano_print("Nano OS: educational x86-64 kernel");
+        } 
         else if (strcmp(command_buffer, "help") == 0) {
             nano_print("Comenzi interne: help, exit\n");
             nano_print("Programe externe: date, time, mandel\n");
-        } 
+        }
+        
+        else if (starts_with(command_buffer, "cd ")) {
+            const char* path = command_buffer + 3;
+
+            if (nano_cd(path)) {
+                nano_print("Director schimbat.\n");
+            } else {
+                nano_print("Eroare: director inexistent.\n");
+            }
+        }
+        
         else {
             // Trecem la rând nou înainte de rularea programului extern
             nano_print("\n");

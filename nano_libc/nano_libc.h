@@ -4,12 +4,18 @@
 #include <stdint.h>
 #include <stddef.h>  // Pentru size_t
 
+#include "../src/syscall.h"
 
+/*
 #define SYSCALL_PRINT     1
 #define SYSCALL_READLINE  2
 #define SYSCALL_MALLOC    3
 #define SYSCALL_SLEEP     4
 #define SYSCALL_DATETIME  5
+#define SYSCALL_EXEC      6
+#define SYSCALL_SHUTDOWN  7
+#define SYSCALL_LIST_FILES 8
+*/
 
 // 1. Definim structura exact cum este ea în kernel
 typedef struct {
@@ -20,6 +26,18 @@ typedef struct {
     uint8_t month;
     uint8_t year;
 } DateTime;
+
+
+static inline int nano_cd(const char* path) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYSCALL_CD), "D"(path)
+        : "memory"
+    );
+    return ret;
+}
 
 
 static inline int nano_exec(const char* filename) {
@@ -42,6 +60,15 @@ static inline void nano_shutdown(void) {
     );
 }
 
+static inline void nano_ls(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a"(SYSCALL_LIST_FILES)
+        : "memory"
+    );
+}
+
 void nano_print(const char* str);
 void nano_readline(char* buffer, uint32_t max_len);
 
@@ -53,7 +80,7 @@ void* memcpy(void* dest, const void* src, size_t len);
 size_t strlen(const char* str);
 int strcmp(const char* s1, const char* s2);
 char* strcpy(char* dest, const char* src);
-
+int starts_with(const char* text, const char* prefix);
 
 // Conversii
 int atoi(const char* str);
@@ -63,5 +90,6 @@ void sleep(uint32_t milliseconds);
 
 // 2. Funcția pe care o va apela programul tău
 void get_time(DateTime* dt);
+
 
 #endif

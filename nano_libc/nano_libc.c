@@ -173,4 +173,10 @@ void get_time(DateTime* dt) {
     );
 }
 
+int starts_with(const char* text, const char* prefix) {
+    while (*prefix) {
+        if (*text++ != *prefix++) return 0;
+    }
+    return 1;
+}
 

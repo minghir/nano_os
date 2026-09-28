@@ -32,9 +32,12 @@ make APP=shell
 ../nanohdd ../hda.img push shell.bin /bin/sh
 make clean
 
-
 make APP=shutdown
 ../nanohdd ../hda.img push shutdown.bin /bin/shutdown
+make clean
+
+make APP=ls
+../nanohdd ../hda.img push ls.bin /bin/ls
 make clean
 
 
