@@ -1,0 +1,261 @@
+#ifndef NANO_LIBC_H
+#define NANO_LIBC_H
+
+#include <stdint.h>
+#include <stddef.h>  // Pentru size_t
+#include <stdarg.h> // Necesar pentru sprintf dacă folosește argumente variabile
+
+#include "../src/syscall.h"
+
+/*
+#define SYSCALL_PRINT     1
+#define SYSCALL_READLINE  2
+#define SYSCALL_MALLOC    3
+#define SYSCALL_SLEEP     4
+#define SYSCALL_DATETIME  5
+#define SYSCALL_EXEC      6
+#define SYSCALL_SHUTDOWN  7
+#define SYSCALL_LIST_FILES 8
+*/
+
+// 1. Definim structura exact cum este ea în kernel
+typedef struct {
+    uint8_t second;
+    uint8_t minute;
+    uint8_t hour;
+    uint8_t day;
+    uint8_t month;
+    uint8_t year;
+} DateTime;
+
+// structura proces table:
+typedef struct {
+    uint32_t pid;
+    uint32_t ppid;
+    uint32_t state;
+    char name[32];
+} ProcessInfo;
+
+static inline int nano_cd(const char* path) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYSCALL_CD), "D"(path)
+        : "memory"
+    );
+    return ret;
+}
+
+
+static inline int nano_exec(const char* filename) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)6), "D" ((uint64_t)filename) // 6 este numărul pentru SYSCALL_EXEC
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_shutdown(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a" ((uint64_t)7) // 7 este SYSCALL_SHUTDOWN
+        : "cc", "memory"
+    );
+}
+
+static inline void nano_ls(const char* path) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a"(SYSCALL_LIST_FILES), "D"(path)  // Folosim "D" care reprezintă registrul RDI
+        : "memory"
+    );
+}
+
+static inline int nano_create_file(const char* name, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)10), "D" ((uint64_t)name), "S" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_write_file(const char* name, const uint8_t* data, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)11), "D" ((uint64_t)name), "S" ((uint64_t)data), "d" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_format(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a" ((uint64_t)12)
+        : "cc", "memory"
+    );
+}
+
+static inline int nano_delete_file(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)13), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)14), "D" ((uint64_t)name), "S" ((uint64_t)buffer), "d" ((uint64_t)max_size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_mkdir(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)15), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_print_int(uint32_t val) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a" ((uint64_t)16), "D" ((uint64_t)val) // RAX = 16 (SYSCALL_PRINT_INT), RDI = valoarea
+        : "cc", "memory"
+    );
+}
+
+static inline char nano_read_char(void) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)17) // RAX = 17 (SYSCALL_READ_CHAR)
+        : "cc", "memory"
+    );
+    return (char)ret;
+}
+
+static inline void nano_clear_screen(void) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a" ((uint64_t)18) // SYSCALL_CLEAR_SCREEN
+        : "cc", "memory"
+    );
+}
+
+static inline void nano_pwd(char* buffer, uint32_t max_len) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a"(SYSCALL_PWD), "D"(buffer), "S"(max_len)  // D = rdi (buffer), S = rsi (max_len)
+        : "memory"
+    );
+}
+
+void nano_print(const char* str);
+static inline void newline(){
+	nano_print("\n");
+}
+void nano_readline(char* buffer, uint32_t max_len);
+
+void* nano_malloc(size_t size);
+void nano_free(void* ptr); // (Chiar dacă e bump allocator, e bine să avem interfața)
+
+void* memset(void* dest, int val, size_t len);
+void* memcpy(void* dest, const void* src, size_t len);
+size_t strlen(const char* str);
+int strcmp(const char* s1, const char* s2);
+char* strcpy(char* dest, const char* src);
+int starts_with(const char* text, const char* prefix);
+
+// Conversii
+int atoi(const char* str);
+char* itoa(int value, char* str, int base);
+
+void sleep(uint32_t milliseconds);
+
+// 2. Funcția pe care o va apela programul tău
+void get_time(DateTime* dt);
+
+int nano_get_processes(ProcessInfo* buf, int max_entries);
+int nano_wait();
+int nano_kill(int pid);
+
+
+
+
+
+static inline char* strcat(char* dest, const char* src) {
+    char* ptr = dest + strlen(dest);
+    while (*src != '\0') {
+        *ptr++ = *src++;
+    }
+    *ptr = '\0';
+    return dest;
+}
+
+
+
+
+// Helper pentru sprintf (suportă de bază formatul %d și %s folosite în editor)
+static inline int sprintf(char* str, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int i = 0;
+    char* ptr = str;
+    
+    while (format[i] != '\0') {
+        if (format[i] == '%' && format[i+1] == 'd') {
+            int val = va_arg(args, int);
+            char buf[16];
+            itoa(val, buf, 10);
+            char* b = buf;
+            while (*b) *ptr++ = *b++;
+            i += 2;
+        } else if (format[i] == '%' && format[i+1] == 's') {
+            char* s = va_arg(args, char*);
+            while (*s) *ptr++ = *s++;
+            i += 2;
+        } else if (format[i] == '%' && format[i+1] == 'c') {
+            char c = (char)va_arg(args, int);
+            *ptr++ = c;
+            i += 2;
+        } else {
+            *ptr++ = format[i++];
+        }
+    }
+    *ptr = '\0';
+    va_end(args);
+    return (int)(ptr - str);
+}
+
+
+
+#endif

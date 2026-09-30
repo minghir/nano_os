@@ -1,0 +1,216 @@
+#include "nano_libc.h"
+
+#define SCREEN_ROWS 24
+#define SCREEN_COLS 80
+
+typedef enum {
+    MODE_NORMAL,
+    MODE_INSERT,
+    MODE_COMMAND
+} EditorMode;
+
+typedef struct {
+    char lines[100][80]; // Maxim 100 de linii, 80 caractere per linie
+    int num_lines;
+    int cx, cy;          // Coordonate cursor X și Y
+    EditorMode mode;
+    char filename[32];
+} Editor;
+
+Editor E;
+
+int last_key = 0;
+
+// Funcție helper pentru a transforma un număr întreg în string folosind itoa din nano_libc
+void int_to_str(int n, char* buf) {
+    itoa(n, buf, 10);
+}
+
+void editor_refresh_screen() {
+    // 1. Curățăm ecranul curat prin kernel, fără caractere ANSI afișate pe ecran
+    nano_clear_screen();
+
+    // 2. Afișăm conținutul bufferului linie cu linie
+    for (int i = 0; i < SCREEN_ROWS - 2; i++) {
+        if (i < E.num_lines) {
+            nano_print(E.lines[i]);
+        } else {
+            nano_print("~");
+        }
+        nano_print("\n");
+    }
+
+    // 3. Bara de stare
+// 3. Bara de stare cu tot cu codul ultimei taste apăsate (pentru Debug)
+    if (E.mode == MODE_NORMAL) {
+        nano_print("-- NORMAL -- ");
+    } else if (E.mode == MODE_INSERT) {
+        nano_print("-- INSERT -- ");
+    } else if (E.mode == MODE_COMMAND){
+        nano_print(" :");
+    }
+    nano_print("File: ");
+    nano_print(E.filename);
+    nano_print(" | Tasta: ");
+    char key_buf[16];
+    itoa(last_key, key_buf, 10);
+    nano_print(key_buf);
+    nano_print("\n");
+}
+
+
+void editor_save_file() {
+    char disk_buffer[4096];
+    int offset = 0;
+    
+    // Parcurgem toate liniile editorului
+    for (int i = 0; i < E.num_lines; i++) {
+        int len = strlen(E.lines[i]);
+        
+        // Copiem caracterele efective de pe linie
+        for (int j = 0; j < len; j++) {
+            if (offset < (int)sizeof(disk_buffer) - 2) {
+                disk_buffer[offset++] = E.lines[i][j];
+            }
+        }
+        
+        // Adăugăm newline la sfârșitul fiecărei linii (inclusiv ultima)
+        if (offset < (int)sizeof(disk_buffer) - 2) {
+            disk_buffer[offset++] = '\n';
+        }
+    }
+    disk_buffer[offset] = '\0'; // Terminăm șirul
+
+    // Apelăm funcția din nano_libc pentru a scrie pe disc
+    int success = nano_write_file(E.filename, (uint8_t*)disk_buffer, offset);
+    
+    // Feedback vizual imediat pe ecran
+    if (success) {
+        // Afișăm un mesaj rapid sau putem folosi print pentru confirmare
+        // (Notă: Apare pe ecran înainte de următorul refresh)
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // 1. Preluăm numele fișierului din argumente (dacă există)
+    if (argc >= 2) {
+        strcpy(E.filename, argv[1]);
+    } else {
+        strcpy(E.filename, "test.txt"); // Fallback dacă nu dăm argumente
+    }
+
+    E.cx = 0;
+    E.cy = 0;
+    E.mode = MODE_NORMAL;
+    E.num_lines = 1;
+    memset(E.lines[0], 0, 80);
+
+    // 2. Încercăm să citim fișierul de pe disc
+    uint8_t file_buffer[4096];
+    int bytes_read = nano_read_file(E.filename, file_buffer, sizeof(file_buffer) - 1);
+    
+    if (bytes_read > 0) {
+        file_buffer[bytes_read] = '\0';
+        
+        // 3. PARSAREA: Spargem buffer-ul în mai multe linii
+        int line_idx = 0;
+        int col_idx = 0;
+        
+        for (int i = 0; i < bytes_read; i++) {
+            if (file_buffer[i] == '\n') {
+                E.lines[line_idx][col_idx] = '\0'; // Terminăm linia curentă
+                line_idx++;                        // Trecem la linia următoare
+                col_idx = 0;
+                if (line_idx >= 100) break;        // Protecție overflow
+            } else if (file_buffer[i] != '\r') {   // Ignorăm \r (carriage return)
+                if (col_idx < 79) {
+                    E.lines[line_idx][col_idx++] = file_buffer[i];
+                }
+            }
+        }
+        E.lines[line_idx][col_idx] = '\0'; // Terminăm ultima linie
+        E.num_lines = line_idx + 1;
+    } else {
+        // Dacă fișierul nu există, îl creăm acum (pentru a putea salva mai târziu)
+        nano_create_file(E.filename, 1024);
+    }
+
+    // Bucla principală a editorului
+    while (1) {
+        editor_refresh_screen();
+        
+        char c = nano_read_char();
+        last_key = (int)c;
+        
+        if (E.mode == MODE_NORMAL) {
+            switch (c) {
+                case 'q': 
+                    // Ieșire din editor: curățăm ecranul pentru a lăsa shell-ul curat
+                    nano_clear_screen(); 
+                    return 0;
+                case 'i': 
+                    E.mode = MODE_INSERT; 
+                    break;
+                case 'h': // Stânga
+                    if (E.cx > 0) E.cx--; 
+                    break;
+                case 'l': // Dreapta
+                    // Limităm la lungimea efectivă a textului de pe linie
+                    if (E.cx < strlen(E.lines[E.cy])) E.cx++; 
+                    break;
+                case 'j': // Jos
+                    if (E.cy < E.num_lines - 1) E.cy++; 
+                    // Ajustăm X dacă linia de jos e mai scurtă
+                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    break;
+                case 'k': // Sus
+                    if (E.cy > 0) E.cy--; 
+                    // Ajustăm X dacă linia de sus e mai scurtă
+                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    break;
+                case 's':
+                    editor_save_file();
+                    break;
+                case ':':
+                    E.mode = MODE_COMMAND;
+                break;
+            }
+        } else if (E.mode == MODE_INSERT) {
+            if (c == 27 || c == 1) { // Tasta ESC -> revenire în modul Normal
+                E.mode = MODE_NORMAL;
+            } else if (c == '\n' || c == '\r') {
+                // Enter: adaugă linie nouă dedesubt (pentru un editor rudimentar)
+                if (E.num_lines < 98) {
+                    // Mutăm liniile următoare mai jos (dacă suntem la mijloc)
+                    for (int i = E.num_lines; i > E.cy + 1; i--) {
+                        strcpy(E.lines[i], E.lines[i-1]);
+                    }
+                    E.num_lines++;
+                    E.cy++;
+                    E.cx = 0;
+                    E.lines[E.cy][0] = '\0';
+                }
+            } else if (c == 8 || c == 127) {
+                // Backspace
+                if (E.cx > 0) {
+                    E.cx--;
+                    E.lines[E.cy][E.cx] = '\0'; // Momentan doar "taie" ultima literă
+                }
+            } else {
+                // Adaugă caracter curent pe linie
+                if (E.cx < SCREEN_COLS - 1) {
+                    E.lines[E.cy][E.cx] = c;
+                    E.cx++;
+                    E.lines[E.cy][E.cx] = '\0'; // Terminators
+                }
+            }
+        }
+        else if (E.mode == MODE_COMMAND){
+            if (c == 27 || c == 1 || c == '\n' || c == '\r') { 
+                E.mode = MODE_NORMAL;
+            } 
+        }
+    }
+
+    return 0;
+}
