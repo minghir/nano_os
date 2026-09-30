@@ -3,7 +3,7 @@ ENTRY(_start)
 
 SECTIONS
 {
-	. = TEXT_ADDR;
+	. = 0x800000;
     .header : { *(.header) }
     .text   : { *(.text) }
     .rodata : { *(.rodata) }

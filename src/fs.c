@@ -314,6 +314,7 @@ int fs_rmdir(const char* name) {
     return 0;
 }
 
+/*
 int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
     uint8_t buffer[512];
     disk_read_sector(current_process->cwd_sector, buffer);
@@ -330,6 +331,7 @@ int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
     disk_write_sector(current_process->cwd_sector, buffer);
     return 1;
 }
+*/
 
 static uint32_t fs_resolve_path(const char* full_path, char* filename_out) {
     if (!full_path || !full_path[0]) return 0;
@@ -427,6 +429,42 @@ static uint32_t fs_resolve_path(const char* full_path, char* filename_out) {
 
     return temp_sector;
 }
+
+
+int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
+    char target_filename[128];
+    uint32_t target_dir_sector = fs_resolve_path(name, target_filename);
+    
+    if (target_dir_sector == 0 || target_filename[0] == '\0') {
+        return 0; // Cale invalidă sau director negăsit
+    }
+
+    uint8_t buffer[512];
+    disk_read_sector(target_dir_sector, buffer);
+    
+    DirectoryEntry* entry = find_file_entry(buffer, target_filename);
+    if (!entry || entry->flags == FS_FLAG_DIR) return 0;
+
+    // Calculăm câte sectoare sunt necesare pentru datele de scris
+    uint32_t sectors_needed = size > 0 ? (size + 511) / 512 : 1;
+    uint32_t total_written = 0;
+
+    // Scriem datele sector cu sector începând de la start_sector al fișierului
+    for (uint32_t s = 0; s < sectors_needed; s++) {
+        uint8_t sector_data[512] = {0};
+        for (uint32_t i = 0; i < 512 && total_written < size; i++) {
+            sector_data[i] = data[total_written++];
+        }
+        disk_write_sector(entry->start_sector + s, sector_data);
+    }
+
+    // Actualizăm dimensiunea reală în intrarea din director și salvăm pe disc
+    entry->size = size;
+    disk_write_sector(target_dir_sector, buffer);
+    return 1;
+}
+
+
 
 
 int fs_create_file(const char* name, uint32_t size) {

@@ -1,7 +1,8 @@
 #include "process.h"
 #include "memory.h"
 #include "string.h"
-#include "io.h" // Asigură-te că ai inclus io.h pentru funcția print()
+#include "io.h"
+
 
 PCB process_table[MAX_PROCESSES];
 PCB* current_process = 0;
@@ -76,11 +77,16 @@ uint64_t schedule(uint64_t current_rsp) {
     next_proc->state = PROC_RUNNING;
     current_process = next_proc;
 
+	// 3.1 --- Schimbăm memoria virtuală (CR3) dacă procesul are una ---
+    if (current_process->cr3 != 0) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(current_process->cr3));
+    }
+
     // 4. Returnăm noul RSP
     return current_process->regs.rsp;
 }
 
-void process_create(const char* name, uint64_t entry_point, int argc, char** argv) {
+void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3) {
     //print("[DEBUG] process_create: Trying to create process '");
     //print(name);
     //print("'...\n");
@@ -103,6 +109,11 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
         return;
     }
 
+
+	// Îi asociezi harta de memorie unică
+    p->cr3 = process_cr3;
+	
+	
     // 2. Populăm datele de bază
     p->pid = next_pid++;
     p->ppid = current_process ? current_process->pid : 0;
@@ -154,3 +165,5 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     
     //print("[DEBUG] process_create: Process created successfully! PID assigned, state set to PROC_READY.\n");
 }
+
+

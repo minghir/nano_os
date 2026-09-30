@@ -4,29 +4,32 @@
 
 
 // Codurile pentru Syscall-uri (System Call Numbers)
-#define SYSCALL_PRINT     1
-#define SYSCALL_READLINE  2
-#define SYSCALL_MALLOC    3
-#define SYSCALL_SLEEP     4
-#define SYSCALL_DATETIME  5
-#define SYSCALL_EXEC      6
-#define SYSCALL_SHUTDOWN  7
-#define SYSCALL_LIST_FILES 8
-#define SYSCALL_CD 9
-#define SYSCALL_CREATE_FILE 10
-#define SYSCALL_WRITE_FILE  11
-#define SYSCALL_FORMAT      12
-#define SYSCALL_DELETE_FILE 13
-#define SYSCALL_READ_FILE 14
-#define SYSCALL_MKDIR 15
-#define SYSCALL_PRINT_INT 16
-#define SYSCALL_READ_CHAR 17
-#define SYSCALL_CLEAR_SCREEN 18
-#define SYSCALL_PWD 19
-#define SYSCALL_EXIT 20
-#define SYSCALL_PS 21
-#define SYSCALL_WAIT 22
-#define SYSCALL_KILL 23
+#define SYSCALL_PRINT       1  // Afișează un șir de caractere (string) pe ecran
+#define SYSCALL_READLINE    2  // Citește o linie de text de la tastatură într-un buffer
+#define SYSCALL_MALLOC      3  // Alocă memorie din heap-ul user-space
+#define SYSCALL_SLEEP       4  // Pune procesul curent în pauză (sleep) pentru un număr de milisecunde
+#define SYSCALL_DATETIME    5  // Returnează data și ora curentă (sincronizată cu offsetul de timezone)
+#define SYSCALL_EXEC        6  // Încarcă și execută un program binar nou din sistemul de fișiere
+#define SYSCALL_SHUTDOWN    7  // Oprește sistemul de operare / închide emulatorul
+#define SYSCALL_LIST_FILES  8  // Listează fișierele și directoarele din directorul curent
+#define SYSCALL_CD          9  // Schimbă directorul curent (change directory)
+#define SYSCALL_CREATE_FILE 10 // Creează un fișier nou gol pe disc
+#define SYSCALL_WRITE_FILE  11 // Scrie date într-un fișier existent
+#define SYSCALL_FORMAT      12 // Formatează discul virtual (resetează sistemul de fișiere NAN2)
+#define SYSCALL_DELETE_FILE 13 // Șterge un fișier de pe disc
+#define SYSCALL_READ_FILE   14 // Citește conținutul unui fișier într-un buffer
+#define SYSCALL_MKDIR       15 // Creează un director nou (make directory)
+#define SYSCALL_PRINT_INT   16 // Afișază valoarea numerică dintr-un registru (ex: rax) pe ecran
+#define SYSCALL_READ_CHAR   17 // Citește un singur caracter de la tastatură (non-blocking / blocant în coadă)
+#define SYSCALL_CLEAR_SCREEN 18 // Curăță ecranul VGA și resetează cursorul sus
+#define SYSCALL_PWD         19 // Returnează calea completă a directorului curent (Print Working Directory)
+#define SYSCALL_EXIT        20 // Termină execuția procesului curent și eliberează resursele (Exit)
+#define SYSCALL_PS          21 // Afișează lista proceselor active din sistem (Process Status)
+#define SYSCALL_WAIT        22 // Așteaptă ca un proces copil să se termine (Wait)
+#define SYSCALL_KILL        23 // Oprește forțat un proces pe baza PID-ului
+#define SYSCALL_MEMINFO     24 // Afișază informații despre memoria RAM / Heap total și folosit
+#define SYSCALL_GETCWD      25 // Copiază calea directorului curent într-un buffer din user-space
+#define SYSCALL_NEWLINE     26 // Inserează un rând nou (newline) pe ecran cu tot cu scroll automat
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
@@ -40,6 +43,14 @@ typedef struct {
     char magic[4];       // "NAS1"
     uint32_t entry_offset;
 } __attribute__((packed)) NanoHeader;
+
+typedef struct {
+    uint64_t heap_total;
+    uint64_t heap_used;
+    uint64_t heap_free;
+    uint64_t physical_total; // opțional, dacă vrei să afișezi și RAM-ul total
+    uint64_t physical_free;
+} MemInfo;
 
 void syscall_handler(SyscallRegisters* regs);
 #endif

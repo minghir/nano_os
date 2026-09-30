@@ -54,42 +54,6 @@ static void scroll_screen() {
     }
 }
 
-// --- 2. Print modificat pentru a face scroll ---
-/*
-void print(const char* s) {
-    while (*s) {
-        char character = *s++;
-
-        if (character == '\n') {
-            cursor = (cursor / 80 + 1) * 80;
-            // Dacă am depășit ecranul, facem scroll și ținem cursorul pe ultima linie
-            if (cursor >= 80 * 25) {
-                scroll_screen();
-                cursor = 80 * 24;
-            }
-            continue;
-        }
-
-        if (character == '\b') {
-            if (cursor > 0) {
-                cursor--;
-                VGA[cursor] = (FONT_COLOR) | ' ';
-            }
-            continue;
-        }
-
-        VGA[cursor++] = (FONT_COLOR) | character;
-        
-        // Word wrap: dacă am depășit ecranul scriind un caracter, scroll
-        if (cursor >= 80 * 25) {
-            scroll_screen();
-            cursor = 80 * 24;
-        }
-    }
-    cursor_update();
-}
-*/
-
 // Atributul VGA curent (folosit pentru text normal sau evidențiere / Reverse Video)
 static uint16_t current_vga_attr = FONT_COLOR; // Păstrăm culoarea verde setată de tine
 

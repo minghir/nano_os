@@ -7,16 +7,7 @@
 
 #include "../src/syscall.h"
 
-/*
-#define SYSCALL_PRINT     1
-#define SYSCALL_READLINE  2
-#define SYSCALL_MALLOC    3
-#define SYSCALL_SLEEP     4
-#define SYSCALL_DATETIME  5
-#define SYSCALL_EXEC      6
-#define SYSCALL_SHUTDOWN  7
-#define SYSCALL_LIST_FILES 8
-*/
+
 
 // 1. Definim structura exact cum este ea în kernel
 typedef struct {
@@ -256,6 +247,10 @@ static inline int sprintf(char* str, const char* format, ...) {
     return (int)(ptr - str);
 }
 
+int nano_get_meminfo(MemInfo* info);
 
+int nano_getcwd(char* buf, int max_len); //curent dir
+
+char* string_copy(char* dest, const char* src);
 
 #endif

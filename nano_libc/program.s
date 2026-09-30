@@ -1,9 +1,15 @@
-mov rax, 5
+print "Afisam descrescator:"
+newline
+mov rdi, 5
 bucla:
+cmp rdi, 0
+;je gata
+mov rax, rdi
 print_rax
-sub rax, 1
-cmp rax, 0
-je gata
+newline
+dec rdi
 jmp bucla
 gata:
-ret
+print "gata!"
+newline
+exit

@@ -10,6 +10,6 @@ extern PCB process_table[MAX_PROCESSES];
 extern PCB* current_process;
 
 void process_init();
-void process_create(const char* name, uint64_t entry_point, int argc, char** argv);
+void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3);
 
 #endif

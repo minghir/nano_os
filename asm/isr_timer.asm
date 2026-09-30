@@ -1,11 +1,10 @@
 BITS 64
 global isr_timer
 extern timer_irq
-extern schedule    ; <--- Adăugăm funcția noastră C
+extern schedule     ; NOUA funcție din C
 
-section .text
 isr_timer:
-    ; 1. Salvăm contextul complet pe stiva procesului curent
+    ; 1. Salvăm toate registrele exact cum făceai tu
     push rax
     push rcx
     push rdx
@@ -26,23 +25,20 @@ isr_timer:
     sub rsp, 16
     movdqu [rsp], xmm0
 
-    ; 2. Rulăm timer_irq ca de obicei (pentru a actualiza system_ticks, ceasul, etc.)
+    ; 2. Apelăm funcția ta veche care numără tick-urile (opțional)
     call timer_irq
 
-    ; 3. CONTEXT SWITCH: Apelăm scheduler-ul
-    ; Punem RSP-ul curent în RDI (primul argument pentru funcția C)
-    mov rdi, rsp
-    call schedule
-    
-    ; RAX conține acum noul RSP (returnat de schedule). 
-    ; Dacă e același proces, va fi aceeași valoare. Dacă e un proces nou, schimbăm stiva!
-    mov rsp, rax
-
-    ; 4. Trimite EOI către PIC Master
+    ; 3. TRIMITEM EOI către PIC Master (Aici e bine!)
     mov al, 0x20
     out 0x20, al
 
-    ; 5. Restaurăm contextul (de pe NOUA stivă sau VECHEA stivă)
+    ; 4. SCHEDULING! (Aici e magia)
+    mov rdi, rsp        ; RDI = argument 1 (current_rsp)
+    call schedule       ; Apelăm C-ul! Returnează noul RSP în RAX.
+    mov rsp, rax        ; SCHIMBĂM STIVA PE STIVA NOULUI PROCES! 
+                        ; (CR3 a fost deja schimbat de C în interiorul funcției)
+
+    ; 5. Recuperăm registrele de pe NOUA stivă
     movdqu xmm0, [rsp]
     add rsp, 16
     add rsp, 8

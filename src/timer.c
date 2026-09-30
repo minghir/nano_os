@@ -94,6 +94,7 @@ void timer_irq() {
     timer_ticks++;
 
     // Actualizăm o dată pe secundă (la fiecare 1000 de tick-uri acum!)
+	/*
     if (timer_ticks % 1000 == 0) {
         DateTime dt = get_current_time();
         
@@ -141,6 +142,7 @@ void timer_irq() {
         vga[index++] = (0x0F << 8) | p[0];
         vga[index++] = (0x0F << 8) | p[1];
     }
+	*/
 }
 
 void timer_init(uint32_t frequency) {
@@ -196,3 +198,4 @@ DateTime get_current_time() {
 
     return dt;
 }
+

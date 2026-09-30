@@ -8,43 +8,9 @@
 #include "fs.h"
 #include "string.h"
 #include "process.h"
+#include "paging.h"
 
 extern char env_path[];
-
-
-uint64_t get_program_load_address(const char* path) {
-    // Verificăm după nume sau cale exactă, la fel ca în Makefile
-    
-    // Programe din /sbin/
-    if (string_contains(path, "shell"))   return 0x800000;
-    if (string_contains(path, "time"))    return 0x810000;
-    if (string_contains(path, "date"))    return 0x820000;
-    if (string_contains(path, "shutdown"))return 0x830000;
-    if (string_contains(path, "ls"))      return 0x840000;
-    if (string_contains(path, "format"))  return 0x850000;
-    if (string_contains(path, "rm"))      return 0x860000;
-    if (string_contains(path, "cat"))     return 0x870000;
-    if (string_contains(path, "mkdir"))   return 0x880000;
-    if (string_contains(path, "touch"))   return 0x890000;
-    if (string_contains(path, "pwd"))     return 0x8A0000;
-    if (string_contains(path, "ps"))      return 0x8B0000;
-	if (string_contains(path, "kill"))    return 0x8C0000;
-
-    // Programe din /bin/
-    if (string_contains(path, "mandel"))  return 0x900000;
-    if (string_contains(path, "asm"))     return 0x910000;
-    if (string_contains(path, "vi"))      return 0x920000;
-
-    // Programe din /tests/
-    if (string_contains(path, "chr"))         return 0xA00000;
-    if (string_contains(path, "argt"))        return 0xA10000;
-    if (string_contains(path, "test_malloc")) return 0xA20000;
-    if (string_contains(path, "test_sleep"))  return 0xA30000;
-
-    // Adresă implicită pentru orice alt program neprevăzut
-    return 0xB00000;
-}
-
 
 void syscall_handler(SyscallRegisters* regs) {
     // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
@@ -91,13 +57,12 @@ void syscall_handler(SyscallRegisters* regs) {
             *user_dt = kernel_dt; // Copiem direct rezultatul
             break;
         }
-/*
+		
 		case SYSCALL_EXEC: {
             char* command = (char*)regs->rdi;
-            uint8_t* prog_memory = (uint8_t*)0x900000;
             int file_found = 0;
 
-            // 1. Copiem comanda curățând orice potențial \n sau \r de la capăt
+            // 1. Curățare și Tokenizare comandă (codul tău original)
             char cmd_copy[128];
             int c_idx = 0;
             while (command[c_idx] != '\0' && command[c_idx] != '\n' && command[c_idx] != '\r' && c_idx < 127) {
@@ -106,23 +71,17 @@ void syscall_handler(SyscallRegisters* regs) {
             }
             cmd_copy[c_idx] = '\0';
 
-            // 2. Tokenizăm (folosind indecși siguri)
             char* argv[16];
             int argc = 0;
             int p = 0;
 
             while (cmd_copy[p] != '\0' && argc < 15) {
-                // Sărim peste spații
                 while (cmd_copy[p] == ' ' || cmd_copy[p] == '\t') p++;
                 if (cmd_copy[p] == '\0') break;
-
-                argv[argc++] = &cmd_copy[p]; // Salvăm începutul argumentului
-
-                // Mergem până la următorul spațiu
+                argv[argc++] = &cmd_copy[p];
                 while (cmd_copy[p] != '\0' && cmd_copy[p] != ' ' && cmd_copy[p] != '\t') p++;
-                
                 if (cmd_copy[p] != '\0') {
-                    cmd_copy[p] = '\0'; // Terminăm string-ul curent izolat
+                    cmd_copy[p] = '\0';
                     p++;
                 }
             }
@@ -133,16 +92,12 @@ void syscall_handler(SyscallRegisters* regs) {
                 break;
             }
 
-            // argv[0] este acum garantat să fie curat, de ex. "argt"
             char* prog_name = argv[0];
             char paths_to_try[6][64];
             int try_count = 0;
 
-            // Resetăm bufferele
             for (int i = 0; i < 6; i++) {
-                for (int j = 0; j < 64; j++) {
-                    paths_to_try[i][j] = '\0';
-                }
+                for (int j = 0; j < 64; j++) paths_to_try[i][j] = '\0';
             }
 
             if (prog_name[0] == '/' || prog_name[0] == '.') {
@@ -150,7 +105,6 @@ void syscall_handler(SyscallRegisters* regs) {
             } else {
                 char path_copy[128];
                 string_copy(path_copy, env_path); 
-                
                 int start_idx = 0;
                 int len = string_length(path_copy);
                 
@@ -159,9 +113,7 @@ void syscall_handler(SyscallRegisters* regs) {
                         path_copy[i] = '\0'; 
                         char* current_dir = &path_copy[start_idx];
                         start_idx = i + 1;
-                        
                         if (string_length(current_dir) == 0) continue;
-
                         string_copy(paths_to_try[try_count], current_dir);
                         int dirlen = string_length(paths_to_try[try_count]);
                         if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
@@ -169,174 +121,60 @@ void syscall_handler(SyscallRegisters* regs) {
                         }
                         string_concat(paths_to_try[try_count], prog_name);
                         try_count++;
-                        
                         if (try_count >= 5) break;
                     }
                 }
             }
 
-            // 3. Testăm căile și executăm
+            // 2. Încărcarea folosind Paginarea (FĂRĂ adrese hardcodate)
             for (int i = 0; i < try_count; i++) {
-                int bytes_read = fs_read_file(paths_to_try[i], prog_memory, 32768);
+                
+                // A. Alocăm 8 pagini FIZICE (32KB) pentru a citi programul de pe disc
+                uint64_t phys_prog_mem = (uint64_t)alloc_page();
+                for(int p = 1; p < 8; p++) alloc_page();
+
+                // Kernel-ul citește fișierul direct în RAM-ul fizic brut
+                int bytes_read = fs_read_file(paths_to_try[i], (uint8_t*)phys_prog_mem, 32768);
+                
                 if (bytes_read > (int)sizeof(NanoHeader)) {
-                    NanoHeader* hdr = (NanoHeader*)prog_memory;
+                    NanoHeader* hdr = (NanoHeader*)phys_prog_mem;
                     
                     if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
                         hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
                         
                         file_found = 1;
 
-                        // SOLUȚIA ANTI-CRASH: Plasăm structurile de argumente la distanță sigură (0x980000)!
-                        // Astfel nu vor mai fi șterse de secțiunea .bss a programului tău!
+                        // B. Creăm o HARTĂ VIRTUALĂ nouă (PML4) doar pentru acest proces
+                        uint64_t* process_pml4 = create_process_pml4();
+
+                        // C. Mapăm memoria fizică unde e programul la ADRESA VIRTUALĂ UNIVERSALĂ (0x800000)
+                        for (uint64_t offset = 0; offset < 32768; offset += 4096) {
+                            map_page(process_pml4, 0x800000 + offset, phys_prog_mem + offset, 
+                                     PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+                        }
+
+                        // Plasăm argumentele în zona sigură (0x980000)
                         uintptr_t arg_dest_area = 0x980000;
                         uint64_t* user_argv = (uint64_t*)arg_dest_area;
                         char* string_pool = (char*)(user_argv + argc + 1);
-
                         char* current_pool_ptr = string_pool;
+                        
                         for (int a = 0; a < argc; a++) {
                             char* src_arg = argv[a];
                             char* dest_arg = current_pool_ptr;
-                            while (*src_arg != '\0') {
-                                *current_pool_ptr++ = *src_arg++;
-                            }
+                            while (*src_arg != '\0') *current_pool_ptr++ = *src_arg++;
                             *current_pool_ptr++ = '\0';
                             user_argv[a] = (uint64_t)dest_arg;
                         }
                         user_argv[argc] = 0; 
 
-                        void (*program_start)(int, char**) = (void (*)(int, char**))(prog_memory + hdr->entry_offset);
-                        program_start(argc, (char**)user_argv);
-                        break;
-                    }
-                }
-            }
-
-            regs->rax = file_found ? 1 : 0;
-            break;
-        }
-*/		
-		case SYSCALL_EXEC: {
-            char* command = (char*)regs->rdi;
-            uint8_t* prog_memory = (uint8_t*)0x900000;
-            int file_found = 0;
-
-            // 1. Copiem comanda curățând orice potențial \n sau \r de la capăt
-            char cmd_copy[128];
-            int c_idx = 0;
-            while (command[c_idx] != '\0' && command[c_idx] != '\n' && command[c_idx] != '\r' && c_idx < 127) {
-                cmd_copy[c_idx] = command[c_idx];
-                c_idx++;
-            }
-            cmd_copy[c_idx] = '\0';
-
-            // 2. Tokenizăm (folosind indecși siguri)
-            char* argv[16];
-            int argc = 0;
-            int p = 0;
-
-            while (cmd_copy[p] != '\0' && argc < 15) {
-                // Sărim peste spații
-                while (cmd_copy[p] == ' ' || cmd_copy[p] == '\t') p++;
-                if (cmd_copy[p] == '\0') break;
-
-                argv[argc++] = &cmd_copy[p]; // Salvăm începutul argumentului
-
-                // Mergem până la următorul spațiu
-                while (cmd_copy[p] != '\0' && cmd_copy[p] != ' ' && cmd_copy[p] != '\t') p++;
-                
-                if (cmd_copy[p] != '\0') {
-                    cmd_copy[p] = '\0'; // Terminăm string-ul curent izolat
-                    p++;
-                }
-            }
-            argv[argc] = NULL;
-
-            if (argc == 0) {
-                regs->rax = 0;
-                break;
-            }
-
-            // argv[0] este acum garantat să fie curat, de ex. "argt"
-            char* prog_name = argv[0];
-            char paths_to_try[6][64];
-            int try_count = 0;
-
-            // Resetăm bufferele
-            for (int i = 0; i < 6; i++) {
-                for (int j = 0; j < 64; j++) {
-                    paths_to_try[i][j] = '\0';
-                }
-            }
-
-            if (prog_name[0] == '/' || prog_name[0] == '.') {
-                string_copy(paths_to_try[try_count++], prog_name);
-            } else {
-                char path_copy[128];
-                string_copy(path_copy, env_path); 
-                
-                int start_idx = 0;
-                int len = string_length(path_copy);
-                
-                for (int i = 0; i <= len; i++) {
-                    if (path_copy[i] == ';' || path_copy[i] == '\0') {
-                        path_copy[i] = '\0'; 
-                        char* current_dir = &path_copy[start_idx];
-                        start_idx = i + 1;
+                        // D. Entry point-ul se raportează acum mereu la 0x800000
+                        uint64_t entry_point = 0x800000 + hdr->entry_offset;
                         
-                        if (string_length(current_dir) == 0) continue;
-
-                        string_copy(paths_to_try[try_count], current_dir);
-                        int dirlen = string_length(paths_to_try[try_count]);
-                        if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
-                            string_concat(paths_to_try[try_count], "/");
-                        }
-                        string_concat(paths_to_try[try_count], prog_name);
-                        try_count++;
+                        // E. Creăm procesul și îi trimitem harta lui de memorie (PML4)
+                        process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4);
                         
-                        if (try_count >= 5) break;
-                    }
-                }
-            }
-
-            // 3. Testăm căile și executăm
-            for (int i = 0; i < try_count; i++) {
-				
-				uint8_t* prog_memory = (uint8_t*)get_program_load_address(paths_to_try[i]);
-				
-                int bytes_read = fs_read_file(paths_to_try[i], prog_memory, 32768);
-                if (bytes_read > (int)sizeof(NanoHeader)) {
-                    NanoHeader* hdr = (NanoHeader*)prog_memory;
-                    
-                    if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
-                        hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
-                        
-                        file_found = 1;
-
-                        // SOLUȚIA ANTI-CRASH: Plasăm structurile de argumente la distanță sigură (0x980000)!
-                        // Astfel nu vor mai fi șterse de secțiunea .bss a programului tău!
-                        uintptr_t arg_dest_area = 0x980000;
-                        uint64_t* user_argv = (uint64_t*)arg_dest_area;
-                        char* string_pool = (char*)(user_argv + argc + 1);
-
-                        char* current_pool_ptr = string_pool;
-                        for (int a = 0; a < argc; a++) {
-                            char* src_arg = argv[a];
-                            char* dest_arg = current_pool_ptr;
-                            while (*src_arg != '\0') {
-                                *current_pool_ptr++ = *src_arg++;
-                            }
-                            *current_pool_ptr++ = '\0';
-                            user_argv[a] = (uint64_t)dest_arg;
-                        }
-                        user_argv[argc] = 0; 
-
-                        //void (*program_start)(int, char**) = (void (*)(int, char**))(prog_memory + hdr->entry_offset);
-						uint64_t entry_point = (uint64_t)(prog_memory + hdr->entry_offset);
-						// 1. Creăm noul proces!
-                        process_create(prog_name, entry_point, argc, (char**)user_argv);
-						current_process->state = PROC_SLEEPING;
-						//file_found = 1;
-                        //program_start(argc, (char**)user_argv);
+                        current_process->state = PROC_SLEEPING;
                         break;
                     }
                 }
@@ -532,6 +370,36 @@ void syscall_handler(SyscallRegisters* regs) {
             fs_get_current_path(user_buffer, max_len);
             break;
         }
+		case SYSCALL_MEMINFO: {
+			MemInfo* info = (MemInfo*)regs->rdi; // Primul argument e pointerul unde scriem datele
+			if (info) {
+				info->heap_total = get_heap_total();
+				info->heap_used  = get_heap_used();
+				info->heap_free  = get_heap_free();
+				// Poți completa și date despre paginile fizice dacă ai funcțiile create în memory.c
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0; // Eroare pointer
+			}
+			break;
+		}
+		case SYSCALL_GETCWD: {
+			char* user_buf = (char*)regs->rdi;
+			uint32_t max_len = (uint32_t)regs->rsi;
+			
+			if (user_buf && max_len > 0) {
+				fs_get_current_path(user_buf, max_len);
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0;
+			}
+			break;
+		}
+		case SYSCALL_NEWLINE: {
+			newline();
+			//regs->rax = 1;
+			break;
+		}
         default: {
             print("Kernel Warning: Syscall necunoscut apelat: ");
             print_number(regs->rax);

@@ -1,14 +1,22 @@
 #include "nano_libc.h"
 
 int main() {
-	nano_print("SHELL MAIN REACHED!\n"); // <--- Adaugă asta aici
-	
     nano_print("\nNano OS User-Space Shell v1.0\n");
     char command_buffer[128];
 
     while (1) {
         // Afișăm promptul clar pe un rând nou
-        nano_print("\nnano:/# ");
+        char cwd[64];
+        for(int i=0; i<64; i++) cwd[i] = '\0';
+        
+        if (nano_getcwd(cwd, 63) <= 0 || cwd[0] == '\0') {
+            string_copy(cwd, "/"); // Fallback dacă nu e setat
+        }
+
+        // Afișăm promptul dinamic
+        nano_print("nano:");
+        nano_print(cwd);
+        nano_print("# ");
         
         // Resetăm bufferul
         for (int i = 0; i < 128; i++) {
@@ -57,23 +65,43 @@ int main() {
             const char* path = command_buffer + 3;
 
             if (nano_cd(path)) {
-                nano_print("Director schimbat.\n");
+                //nano_print("Director schimbat.\n");
             } else {
-                nano_print("Eroare: director inexistent.\n");
+                //nano_print("Eroare: director inexistent.\n");
             }
         }
         
         else {
             // Trecem la rând nou înainte de rularea programului extern
-            nano_print("\n");
+            //nano_print("\n");
+			
+            // 1. Verificăm dacă utilizatorul a pus '&' la sfârșitul liniei
+            int len = 0;
+            while (command_buffer[len] != '\0') len++;
             
+            int background = 0;
+            // Trecem peste spațiile de la final
+            while (len > 0 && (command_buffer[len - 1] == ' ' || command_buffer[len - 1] == '\t')) {
+                len--;
+            }
+            
+            if (len > 0 && command_buffer[len - 1] == '&') {
+                background = 1;
+                command_buffer[len - 1] = '\0'; // Tăiem '&' din șir
+            }
+			
             int success = nano_exec(command_buffer);
             if (!success) {
                 nano_print("Comanda necunoscuta: ");
                 nano_print(command_buffer);
                 nano_print("\n");
             }else{
-				nano_wait();
+				// 2. Așteptăm doar dacă NU e în background!
+                if (!background) {
+                    nano_wait();
+                } else {
+                    nano_print("[Background task started]\n");
+                }
 			}
         }
     }

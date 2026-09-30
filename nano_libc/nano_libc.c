@@ -213,3 +213,36 @@ int nano_kill(int pid) {
     );
     return (int)ret;
 }
+
+int nano_get_meminfo(MemInfo* info) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(24), "D"(info) // 24 este SYSCALL_MEMINFO, RDI = info
+        : "memory"
+    );
+    return (int)ret;
+}
+
+int nano_getcwd(char* buf, int max_len) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(25), "D"(buf), "S"(max_len) // 25 = SYSCALL_GETCWD, RDI = buf, RSI = max_len
+        : "memory"
+    );
+    return (int)ret;
+}
+
+char* string_copy(char* dest, const char* src) {
+    char* original_dest = dest;
+    while (*src != '\0') {
+        *dest = *src;
+        dest++;
+        src++;
+    }
+    *dest = '\0'; // Nu uităm terminatorul de șir!
+    return original_dest;
+}

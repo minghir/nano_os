@@ -12,4 +12,6 @@ size_t get_heap_total();
 size_t get_heap_used();
 size_t get_heap_free();
 
+void* alloc_page();
+
 #endif
