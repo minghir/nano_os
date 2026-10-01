@@ -38,7 +38,7 @@ static inline int nano_cd(const char* path) {
     return ret;
 }
 
-
+/*
 static inline int nano_exec(const char* filename) {
     uint64_t ret;
     __asm__ volatile (
@@ -49,12 +49,24 @@ static inline int nano_exec(const char* filename) {
     );
     return (int)ret;
 }
+*/
+
+static inline int nano_exec(const char* filename) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_EXEC), "D" ((uint64_t)filename) 
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
 
 static inline void nano_shutdown(void) {
     __asm__ volatile (
         "int $0x80"
         :
-        : "a" ((uint64_t)7) // 7 este SYSCALL_SHUTDOWN
+        : "a" ((uint64_t)SYSCALL_SHUTDOWN)
         : "cc", "memory"
     );
 }
@@ -254,22 +266,19 @@ int nano_getcwd(char* buf, int max_len); //curent dir
 char* string_copy(char* dest, const char* src);
 
 // Trimite un mesaj în syslog-ul kernelului
+
+// Și rescrie nano_syslog și nano_getlog curat, fără mov-uri manuale paralele:
 static inline void nano_syslog(const char* msg) {
     __asm__ volatile (
-        "mov $5, %%rax\n"      // Numărul syscall-ului (SYSCALL_SYSLOG = 5)
-        "mov %0, %%rdi\n"      // Argumentul (mesajul)
-        "int $0x80\n"          // Declanșarea întreruperii de sistem
-        : : "r"(msg) : "rax", "rdi", "memory"
+        "int $0x80"
+        : : "a"((uint64_t)SYSCALL_SYSLOG), "D"((uint64_t)msg) : "memory"
     );
 }
 
-// Citește întregul log din kernel (pentru dmesg)
 static inline void nano_getlog(char* dest, int max_len) {
     __asm__ volatile (
-        "mov $6, %%rax\n"      // Numărul syscall-ului pentru citire log
-        "mov %0, %%rdi\n"
-        "int $0x80\n"
-        : : "r"(dest) : "rax", "rdi", "memory"
+        "int $0x80"
+        : : "a"((uint64_t)SYSCALL_GETLOG), "D"((uint64_t)dest), "S"((uint64_t)max_len) : "memory"
     );
 }
 

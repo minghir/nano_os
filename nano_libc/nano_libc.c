@@ -209,7 +209,8 @@ int nano_kill(int pid) {
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)23), "rdi" ((uint64_t)pid)
+        : "a" ((uint64_t)SYSCALL_KILL), "D" ((uint64_t)pid)
+        : "memory"
     );
     return (int)ret;
 }

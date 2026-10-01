@@ -58,7 +58,7 @@ static DirectoryEntry* find_file_entry(uint8_t* dir_buffer, const char* name) {
 }
 
 #define FS_MAX_DIR_DEPTH 16
-
+/*
 static uint32_t highest_allocated_sector(uint32_t dir_sector, uint32_t depth) {
     if (dir_sector == 0 || depth >= FS_MAX_DIR_DEPTH) return UINT32_MAX;
 
@@ -87,7 +87,39 @@ static uint32_t highest_allocated_sector(uint32_t dir_sector, uint32_t depth) {
 
     return highest;
 }
+*/
+static uint32_t highest_allocated_sector(uint32_t dir_sector, uint32_t depth) {
+    if (dir_sector == 0 || depth >= FS_MAX_DIR_DEPTH) return UINT32_MAX;
 
+    // Folosim un masiv static de buffere indexat după adâncime, 
+    // ca să nu încărcăm stiva kernelului cu câte 512 octeți la fiecare apel recursiv!
+    static uint8_t recursion_buffers[FS_MAX_DIR_DEPTH][512];
+    uint8_t* dir_buffer = recursion_buffers[depth];
+
+    disk_read_sector(dir_sector, dir_buffer);
+
+    uint32_t highest = dir_sector;
+    int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+
+    for (int i = 0; i < max_entries; i++) {
+        DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
+        if (entry->filename[0] == 0 || entry->filename[0] == ' ' || entry->start_sector == 0) continue;
+
+        uint32_t last_sector = entry->start_sector;
+        if (entry->flags == FS_FLAG_DIR) {
+            uint32_t child_highest = highest_allocated_sector(entry->start_sector, depth + 1);
+            if (child_highest > highest) highest = child_highest;
+        } else {
+            uint32_t sector_count = entry->size / 512 + (entry->size % 512 != 0);
+            if (sector_count == 0) sector_count = 1;
+            if (sector_count - 1 > UINT32_MAX - last_sector) return UINT32_MAX;
+            last_sector += sector_count - 1;
+            if (last_sector > highest) highest = last_sector;
+        }
+    }
+
+    return highest;
+}
 // Alocă N sectoare de pe disc folosind metadatele din Sectorul 1 (Root)
 static uint32_t allocate_sectors(uint32_t count) {
     uint8_t root_buffer[512];
@@ -678,6 +710,7 @@ void fs_format() {
     newline();
 }
 
+/*
 void fs_get_current_path(char* buffer, uint32_t max_len) {
     if (current_process->cwd_sector == 1) {
         if (max_len > 1) {
@@ -707,6 +740,98 @@ void fs_get_current_path(char* buffer, uint32_t max_len) {
         }
 
         uint8_t parent_buf[512];
+        disk_read_sector(parent_sec, parent_buf);
+
+        int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+        char entry_name[12] = "";
+        int found = 0;
+
+        for (int i = 0; i < max_entries; i++) {
+            DirectoryEntry* entry = (DirectoryEntry*)(parent_buf + 8 + (i * sizeof(DirectoryEntry)));
+            if (entry->filename[0] != 0 && entry->filename[0] != ' ' && entry->flags == FS_FLAG_DIR && entry->start_sector == current_sec) {
+                int j = 0;
+                while (j < 11 && entry->filename[j] != ' ' && entry->filename[j] != '\0') {
+                    entry_name[j] = entry->filename[j];
+                    j++;
+                }
+                entry_name[j] = '\0';
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found) break;
+
+        // Construim calea invers
+        char new_path[128];
+        int idx = 0;
+        new_path[idx++] = '/';
+        int k = 0;
+        while (entry_name[k] != '\0' && idx < 126) {
+            new_path[idx++] = entry_name[k++];
+        }
+        int l = 0;
+        while (temp_path[l] != '\0' && idx < 127) {
+            new_path[idx++] = temp_path[l++];
+        }
+        new_path[idx] = '\0';
+
+        // Copiem înapoi în temp_path
+        int m = 0;
+        while (new_path[m] != '\0' && m < 127) {
+            temp_path[m] = new_path[m];
+            m++;
+        }
+        temp_path[m] = '\0';
+
+        current_sec = parent_sec;
+    }
+
+    if (temp_path[0] == '\0') {
+        temp_path[0] = '/';
+        temp_path[1] = '\0';
+    }
+
+    // Copiem în bufferul user-space în siguranță
+    int i = 0;
+    while (temp_path[i] != '\0' && i < (int)max_len - 1) {
+        buffer[i] = temp_path[i];
+        i++;
+    }
+    buffer[i] = '\0';
+}
+*/
+
+void fs_get_current_path(char* buffer, uint32_t max_len) {
+    if (current_process->cwd_sector == 1) {
+        if (max_len > 1) {
+            buffer[0] = '/';
+            buffer[1] = '\0';
+        } else if (max_len > 0) {
+            buffer[0] = '\0';
+        }
+        return;
+    }
+
+    char temp_path[128] = "";
+    uint32_t current_sec = current_process->cwd_sector;
+    int depth = 0;
+    const int max_depth = 16; 
+
+    // BUFFERELE ALOCATE O SINGURĂ DATĂ AICI (Nu în interiorul buclei!)
+    uint8_t dir_buf[512];
+    uint8_t parent_buf[512];
+
+    // Urcăm spre rădăcină în siguranță
+    while (current_sec != 1 && depth < max_depth) {
+        depth++;
+        disk_read_sector(current_sec, dir_buf);
+        uint32_t parent_sec = *(uint32_t*)(dir_buf + 4);
+
+        if (parent_sec == 0 || parent_sec == current_sec || parent_sec > 1024) {
+            break; 
+        }
+
         disk_read_sector(parent_sec, parent_buf);
 
         int max_entries = (512 - 8) / sizeof(DirectoryEntry);

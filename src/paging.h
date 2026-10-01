@@ -12,5 +12,5 @@
 uint64_t* create_process_pml4();
 void map_page(uint64_t* pml4, uint64_t vaddr, uint64_t paddr, uint16_t flags);
 void switch_page_directory(uint64_t* pml4);
-
+void free_process_paging(uint64_t pml4_phys);
 #endif

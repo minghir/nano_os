@@ -7,8 +7,17 @@
 PCB process_table[MAX_PROCESSES];
 PCB* current_process = 0;
 uint32_t next_pid = 1;
+uint64_t kernel_cr3 = 0;
 
 void process_init() {
+	// Salvăm CR3-ul de bază al Kernelului O SINGURĂ DATĂ la boot
+    __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_cr3));
+	
+	//salva adresa PML4 globală a kernelului la pornire și să o atribui procesului 0 în
+	uint64_t kernel_pml4;
+	__asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
+	current_process->cr3 = kernel_pml4;
+	
     print("[DEBUG] process_init: Cleaning process table...\n");
     // 1. Curățăm toate sloturile din tabelă
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -136,11 +145,12 @@ uint64_t schedule(uint64_t current_rsp) {
     return current_process->regs.rsp;
 }
 
-void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3) {
+void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages)  {
+    
     //print("[DEBUG] process_create: Trying to create process '");
     //print(name);
     //print("'...\n");
-
+	
     PCB* p = 0;
     
     // 1. Căutăm un slot liber în tabelă
@@ -163,6 +173,10 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
 	// Îi asociezi harta de memorie unică
     p->cr3 = process_cr3;
 	
+	// Salvăm cele 8 pagini împrăștiate
+    for(int i = 0; i < 8; i++) {
+        p->prog_pages[i] = prog_pages[i];
+    }
 	
     // 2. Populăm datele de bază
     p->pid = next_pid++;
@@ -181,35 +195,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
         return;
     }
     p->stack_base = (uint64_t)stack;
-	/*
-    // 4. Calculăm Vârful stivei și o aliniem la 16 octeți
-    uint64_t stack_top = (uint64_t)(stack + 16384);
-    stack_top &= ~0xF; 
-
-    // 5. Facem loc pentru structura Registers exact la vârful stivei
-    stack_top -= sizeof(Registers);
-    Registers* regs = (Registers*)stack_top;
-
-    // Zeroizăm tot struct-ul de registre
-    uint8_t* byte_ptr = (uint8_t*)regs;
-    for (uint32_t i = 0; i < sizeof(Registers); i++) {
-        byte_ptr[i] = 0;
-    }
-
-    // 6. Setăm starea procesorului pentru IRETQ
-    regs->ss = 0x10;        
-    regs->rsp = stack_top;    
-    regs->rflags = 0x202;     // IF=1 (Întreruperi activate)
-    regs->cs = 0x08;          
-    regs->rip = entry_point;  
-
-    // 7. Parametrii argc / argv
-    regs->rdi = (uint64_t)argc;
-    regs->rsi = (uint64_t)argv;
-
-    // 8. Salvăm RSP-ul final în PCB
-    p->regs.rsp = stack_top;
-    */
+	
 	// 4. Calculăm Vârful stivei și o aliniem la 16 octeți
     uint64_t stack_top = (uint64_t)(stack + 16384);
     stack_top &= ~0xF; 
@@ -243,5 +229,4 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     
     //print("[DEBUG] process_create: Process created successfully! PID assigned, state set to PROC_READY.\n");
 }
-
 

@@ -49,7 +49,8 @@ typedef struct {
     uint64_t cr3;             // Paging (dacă folosești memorie virtuală)
     uint64_t mem_base;        // De unde începe în memorie (ex: 0x900000)
     uint64_t stack_base;      // Baza stivei procesului
-    
+    uint64_t prog_pages[8];	  // Procesul nu mai are un singur pointer de memorie continuă, ci un array de 8 pagini: Adresa fizică a programului (32KB)
+	
     // --- Timp și Statistici ---
     uint64_t start_time;      // Ticks la care a pornit
     uint64_t cpu_time;        // Cât timp a stat efectiv pe CPU

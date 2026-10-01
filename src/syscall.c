@@ -59,7 +59,7 @@ void syscall_handler(SyscallRegisters* regs) {
             *user_dt = kernel_dt; // Copiem direct rezultatul
             break;
         }
-		
+		/*
 		case SYSCALL_EXEC: {
             char* command = (char*)regs->rdi;
             int file_found = 0;
@@ -185,6 +185,163 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = file_found ? 1 : 0;
             break;
         }
+		*/
+		
+		case SYSCALL_EXEC: {
+            char* command = (char*)regs->rdi;
+            int file_found = 0;
+
+            // 1. Curățare și Tokenizare comandă
+            char cmd_copy[128];
+            int c_idx = 0;
+            while (command[c_idx] != '\0' && command[c_idx] != '\n' && command[c_idx] != '\r' && c_idx < 127) {
+                cmd_copy[c_idx] = command[c_idx];
+                c_idx++;
+            }
+            cmd_copy[c_idx] = '\0';
+
+            char* argv[16];
+            int argc = 0;
+            int p = 0;
+
+            while (cmd_copy[p] != '\0' && argc < 15) {
+                while (cmd_copy[p] == ' ' || cmd_copy[p] == '\t') p++;
+                if (cmd_copy[p] == '\0') break;
+                argv[argc++] = &cmd_copy[p];
+                while (cmd_copy[p] != '\0' && cmd_copy[p] != ' ' && cmd_copy[p] != '\t') p++;
+                if (cmd_copy[p] != '\0') {
+                    cmd_copy[p] = '\0';
+                    p++;
+                }
+            }
+            argv[argc] = NULL;
+
+            if (argc == 0) {
+                regs->rax = 0;
+                break;
+            }
+
+            char* prog_name = argv[0];
+            char paths_to_try[6][64];
+            int try_count = 0;
+
+            for (int i = 0; i < 6; i++) {
+                for (int j = 0; j < 64; j++) paths_to_try[i][j] = '\0';
+            }
+
+            if (prog_name[0] == '/' || prog_name[0] == '.') {
+                string_copy(paths_to_try[try_count++], prog_name);
+            } else {
+                char path_copy[128];
+                string_copy(path_copy, env_path); 
+                int start_idx = 0;
+                int len = string_length(path_copy);
+                
+                for (int i = 0; i <= len; i++) {
+                    if (path_copy[i] == ';' || path_copy[i] == '\0') {
+                        path_copy[i] = '\0'; 
+                        char* current_dir = &path_copy[start_idx];
+                        start_idx = i + 1;
+                        if (string_length(current_dir) == 0) continue;
+                        string_copy(paths_to_try[try_count], current_dir);
+                        int dirlen = string_length(paths_to_try[try_count]);
+                        if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
+                            string_concat(paths_to_try[try_count], "/");
+                        }
+                        string_concat(paths_to_try[try_count], prog_name);
+                        try_count++;
+                        if (try_count >= 5) break;
+                    }
+                }
+            }
+
+            // 2. VERIFICARE PREALABILĂ (Fără alocare de memorie fizică masivă)
+            int valid_path_idx = -1;
+            uint8_t temp_header_buf[512]; // Folosim doar 512 bytes temporari pe stivă
+            
+            for (int i = 0; i < try_count; i++) {
+                int bytes_read = fs_read_file(paths_to_try[i], temp_header_buf, 512);
+                
+                if (bytes_read >= (int)sizeof(NanoHeader)) {
+                    NanoHeader* temp_hdr = (NanoHeader*)temp_header_buf;
+                    // Verificăm imediat dacă este un executabil valid Nano OS
+                    if (temp_hdr->magic[0] == 'N' && temp_hdr->magic[1] == 'A' && 
+                        temp_hdr->magic[2] == 'S' && temp_hdr->magic[3] == '1') {
+                        valid_path_idx = i;
+                        break; // Am găsit calea corectă!
+                    }
+                }
+            }
+
+            if (valid_path_idx == -1) {
+                regs->rax = 0; // Fișierul nu există sau nu e executabil valid
+                break;
+            }
+
+            // 3. ÎNCĂRCAREA EFECTIVĂ (Alocăm memorie doar pentru programul valid!)
+            file_found = 1;
+            
+            // Creăm o HARTĂ VIRTUALĂ nouă (PML4) doar pentru acest proces
+            uint64_t* process_pml4 = create_process_pml4();
+
+            // A. Alocăm 8 pagini FIZICE disjuncte (fragmentate)
+            uint64_t allocated_pages[8];
+            for(int p = 0; p < 8; p++) {
+                allocated_pages[p] = (uint64_t)alloc_page();
+                // Mapăm imediat pagina fizică (oriunde ar fi ea) la adresa VIRTUALĂ continuă
+                map_page(process_pml4, 0x800000 + (p * 4096), allocated_pages[p], 
+                         PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+            }
+
+            // B. Salvăm CR3-ul kernelului și Trecem TEMPORAR pe noua hartă
+            uint64_t old_cr3;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+            __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)process_pml4));
+
+            // C. Citim fișierul CONTINUU la adresa VIRTUALĂ!
+            // Acum procesorul (MMU) va sparge automat cei 32KB și îi va pune în paginile corecte!
+            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], (uint8_t*)0x800000, 32768);
+            
+            NanoHeader* hdr = (NanoHeader*)0x800000; 
+
+            // Verificăm dacă fișierul e corupt
+            if (bytes_read <= (int)sizeof(NanoHeader) || 
+                hdr->magic[0] != 'N' || hdr->magic[1] != 'A' || 
+                hdr->magic[2] != 'S' || hdr->magic[3] != '1') {
+                
+                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3)); // Revenim la kernel
+                for(int p = 0; p < 8; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                regs->rax = 0;
+                break;
+            }
+
+            uint64_t entry_point = 0x800000 + hdr->entry_offset;
+            
+            // D. Revenim la CR3-ul kernelului ÎNAINTE de a apela alte funcții!
+            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+
+            // E. Plasăm argumentele (rămâne identic)
+            uintptr_t arg_dest_area = 0x980000;
+            uint64_t* user_argv = (uint64_t*)arg_dest_area;
+            char* string_pool = (char*)(user_argv + argc + 1);
+            char* current_pool_ptr = string_pool;
+            for (int a = 0; a < argc; a++) {
+                char* src_arg = argv[a];
+                char* dest_arg = current_pool_ptr;
+                while (*src_arg != '\0') *current_pool_ptr++ = *src_arg++;
+                *current_pool_ptr++ = '\0';
+                user_argv[a] = (uint64_t)dest_arg;
+            }
+            user_argv[argc] = 0; 
+            
+            // F. Creăm procesul și îi pasăm lista celor 8 pagini!
+            process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages);
+            
+            regs->rax = 1;
+            break;
+        }
+		
 		/*
 		case SYSCALL_EXIT: {
             int exit_code = (int)regs->rdi;
@@ -212,36 +369,104 @@ void syscall_handler(SyscallRegisters* regs) {
             break;
         }
 		*/
+		
 		case SYSCALL_EXIT: {
             int exit_code = (int)regs->rdi;
             
             if (current_process) {
                 current_process->exit_code = exit_code;
                 
-                // 1. Căutăm părintele și îl trezim DOAR DACă dormea (era în SYSCALL_WAIT)
+                // 1. Trezim părintele
                 for (int i = 0; i < MAX_PROCESSES; i++) {
                     if (process_table[i].pid == current_process->ppid) {
-                        // VERIFICARE CRUCIALĂ: Aștepta părintele după acest copil?
                         if (process_table[i].state == PROC_SLEEPING) {
-                            process_table[i].state = PROC_READY; // Trezim Shell-ul
+                            process_table[i].state = PROC_READY; 
                             keyboard_flush();
                         }
                         break;
                     }
                 }
                 
-                // 2. Acum eliberăm slotul copilului
+                // +++ CURĂȚENIA PERFECTĂ +++
+
+                // A. MUTĂM PROCESORUL PE TABELA KERNELULUI (Pentru a nu tăia craca!)
+                __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+                // B. Eliberăm stiva (Heap)
+                if (current_process->stack_base) {
+                    free((void*)current_process->stack_base);
+                    current_process->stack_base = 0;
+                }
+
+                // C. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
+                for (int p = 0; p < 8; p++) {
+                    if (current_process->prog_pages[p] != 0) {
+                        free_page((void*)current_process->prog_pages[p]);
+                        current_process->prog_pages[p] = 0;
+                    }
+                }
+
+                // D. Eliberăm toate cele ~19 pagini ale Ierarhiei Paging
+                if (current_process->cr3) {
+                    free_process_paging(current_process->cr3);
+                    current_process->cr3 = 0;
+                }
+
+                // +++++++++++++++++++++++++++
+
                 current_process->state = PROC_FREE;
                 current_process->pid = 0;
                 current_process->name[0] = '\0';
             }
             
-            // 3. Oprim execuția curentă și lăsăm timer-ul să preia controlul
-            while(1) {
-                __asm__ volatile ("sti; hlt");
-            }
+            while(1) { __asm__ volatile ("sti; hlt"); }
             break;
         }
+
+        case SYSCALL_KILL: {
+            int target_pid = (int)regs->rdi;
+            if (target_pid == 1) { regs->rax = 0; break; }
+            
+            int killed = 0;
+            for (int i = 0; i < MAX_PROCESSES; i++) {
+                if (process_table[i].pid == target_pid && target_pid != 0) {
+                    
+                    // Pentru KILL, curățăm resursele procesului mort
+
+                    // A. Eliberăm stiva (Heap)
+                    if (process_table[i].stack_base) {
+                        free((void*)process_table[i].stack_base);
+                        process_table[i].stack_base = 0;
+                    }
+
+                    // B. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
+                    for (int p = 0; p < 8; p++) {
+                        if (process_table[i].prog_pages[p] != 0) {
+                            free_page((void*)process_table[i].prog_pages[p]);
+                            process_table[i].prog_pages[p] = 0;
+                        }
+                    }
+
+                    // C. Eliberăm toate cele ~19 pagini ale Ierarhiei Paging
+                    if (process_table[i].cr3) {
+                        // Aici nu trebuie să comutăm CR3 pentru că ucidem ALT proces, nu cel curent!
+                        free_process_paging(process_table[i].cr3);
+                        process_table[i].cr3 = 0;
+                    }
+
+                    // D. Eliberăm slotul din tabelă
+                    process_table[i].state = PROC_FREE;
+                    process_table[i].pid = 0;
+                    process_table[i].name[0] = '\0';
+                    
+                    killed = 1;
+                    break;
+                }
+            }
+            regs->rax = killed ? 1 : 0;
+            break;
+        }
+		
 		case SYSCALL_WAIT: { // SYSCALL_WAIT
             int children_alive = 0;
             
@@ -271,35 +496,6 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = 1; // Un copil tocmai și-a dat exit și ne-a trezit!
             break;
         }
-		case SYSCALL_KILL: {
-			int target_pid = (int)regs->rdi;
-			
-			// PROTECȚIE CRITICĂ: Nimeni nu are voie să omoare procesul INIT (PID 1)!
-			if (target_pid == 1) {
-				// Returnăm eroare în RAX (de ex: -1 sau 0, depinde cum semnalezi eșecul)
-				regs->rax = 0; 
-				break;
-			}
-			
-			int killed = 0;
-
-			for (int i = 0; i < MAX_PROCESSES; i++) {
-				// Nu lăsăm pe nimeni să omoare kernelul (PID 0) sau pe sine însuși accidental prin kill simplu
-				if (process_table[i].pid == target_pid && target_pid != 0) {
-					// Eliberăm stiva alocată
-					if (process_table[i].stack_base) {
-						free((void*)process_table[i].stack_base);
-					}
-					// Resetăm slotul
-					process_table[i].state = PROC_FREE;
-					process_table[i].pid = 0;
-					killed = 1;
-					break;
-				}
-			}
-			regs->rax = killed ? 1 : 0;
-			break;
-		}
 		case SYSCALL_PS: { // SYSCALL_PS
             // Definim o structură simplificată pe care o vom trimite user-space-ului
             typedef struct {
