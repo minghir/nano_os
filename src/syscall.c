@@ -411,39 +411,53 @@ void syscall_handler(SyscallRegisters* regs) {
 
         case SYSCALL_KILL: {
             int target_pid = (int)regs->rdi;
-            if (target_pid == 1) { regs->rax = 0; break; }
+            if (target_pid <= 1) { regs->rax = (uint64_t)-1; break; }
+
+            if (current_process && current_process->pid == (uint32_t)target_pid) {
+                regs->rax = (uint64_t)-1;
+                break;
+            }
             
             int killed = 0;
             for (int i = 0; i < MAX_PROCESSES; i++) {
-                if (process_table[i].pid == target_pid && target_pid != 0) {
+                PCB* victim = &process_table[i];
+                if (victim->state != PROC_FREE && victim->pid == (uint32_t)target_pid) {
                     
                     // Pentru KILL, curățăm resursele procesului mort
 
                     // A. Eliberăm stiva (Heap)
-                    if (process_table[i].stack_base) {
-                        free((void*)process_table[i].stack_base);
-                        process_table[i].stack_base = 0;
+                    if (victim->stack_base) {
+                        free((void*)victim->stack_base);
+                        victim->stack_base = 0;
                     }
 
                     // B. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
                     for (int p = 0; p < 8; p++) {
-                        if (process_table[i].prog_pages[p] != 0) {
-                            free_page((void*)process_table[i].prog_pages[p]);
-                            process_table[i].prog_pages[p] = 0;
+                        if (victim->prog_pages[p] != 0) {
+                            free_page((void*)victim->prog_pages[p]);
+                            victim->prog_pages[p] = 0;
                         }
                     }
 
                     // C. Eliberăm toate cele ~19 pagini ale Ierarhiei Paging
-                    if (process_table[i].cr3) {
-                        // Aici nu trebuie să comutăm CR3 pentru că ucidem ALT proces, nu cel curent!
-                        free_process_paging(process_table[i].cr3);
-                        process_table[i].cr3 = 0;
+                    if (victim->cr3) {
+                        free_process_paging(victim->cr3);
+                        victim->cr3 = 0;
                     }
 
-                    // D. Eliberăm slotul din tabelă
-                    process_table[i].state = PROC_FREE;
-                    process_table[i].pid = 0;
-                    process_table[i].name[0] = '\0';
+                    uint32_t parent_pid = victim->ppid;
+                    victim->state = PROC_FREE;
+                    victim->pid = 0;
+                    victim->name[0] = '\0';
+
+                    for (int parent_idx = 0; parent_idx < MAX_PROCESSES; parent_idx++) {
+                        PCB* parent = &process_table[parent_idx];
+                        if (parent->pid == parent_pid && parent->state == PROC_SLEEPING) {
+                            parent->state = PROC_READY;
+                            keyboard_flush();
+                            break;
+                        }
+                    }
                     
                     killed = 1;
                     break;
