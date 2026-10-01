@@ -43,6 +43,9 @@ int main() {
             nano_print("La revedere!\n");
             break;
         } 
+		if (strcmp(command_buffer, "clear") == 0) {
+            nano_clear_screen();
+        } 
         else if (strcmp(command_buffer, "about") == 0) {
             nano_print("Nano OS: educational x86-64 kernel");
         } 
@@ -67,7 +70,7 @@ int main() {
             if (nano_cd(path)) {
                 //nano_print("Director schimbat.\n");
             } else {
-                //nano_print("Eroare: director inexistent.\n");
+                nano_print("cd: No such file or directory.\n");
             }
         }
         

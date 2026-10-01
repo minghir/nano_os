@@ -16,6 +16,8 @@ TEXT_ADDR = 0x800000
 # Atribuim doar calea pe disc pentru utilitarul nanohdd (VFS)
 ifeq ($(APP),shell)
     OS_PATH = /sbin/shell
+else ifeq ($(APP),init)
+    OS_PATH = /sbin/init	
 else ifeq ($(APP),time)
     OS_PATH = /sbin/time
 else ifeq ($(APP),date)
@@ -56,6 +58,8 @@ else ifeq ($(APP),test_malloc)
     OS_PATH = /tests/test_malloc
 else ifeq ($(APP),test_sleep)
     OS_PATH = /tests/test_sleep
+else ifeq ($(APP),tsr_sleep2)
+    OS_PATH = /tests/tsr_sleep2
 else 
     # Valoare implicită pentru orice alt program nou
     OS_PATH = /bin/$(APP)

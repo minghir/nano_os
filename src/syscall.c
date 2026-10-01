@@ -44,9 +44,9 @@ void syscall_handler(SyscallRegisters* regs) {
         
         case SYSCALL_SLEEP: {
             uint32_t milliseconds = (uint32_t)regs->rdi;
-            print("Sleep cerut pt ms: "); 
-            print_number(milliseconds);
-            print("\n");
+            //print("Sleep cerut pt ms: "); 
+            //print_number(milliseconds);
+            //print("\n");
             sleep_ms(milliseconds); 
             break;
         }
@@ -174,7 +174,7 @@ void syscall_handler(SyscallRegisters* regs) {
                         // E. Creăm procesul și îi trimitem harta lui de memorie (PML4)
                         process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4);
                         
-                        current_process->state = PROC_SLEEPING;
+                        //current_process->state = PROC_SLEEPING;
                         break;
                     }
                 }
@@ -239,6 +239,14 @@ void syscall_handler(SyscallRegisters* regs) {
         }
 		case SYSCALL_KILL: {
 			int target_pid = (int)regs->rdi;
+			
+			// PROTECȚIE CRITICĂ: Nimeni nu are voie să omoare procesul INIT (PID 1)!
+			if (target_pid == 1) {
+				// Returnăm eroare în RAX (de ex: -1 sau 0, depinde cum semnalezi eșecul)
+				regs->rax = 0; 
+				break;
+			}
+			
 			int killed = 0;
 
 			for (int i = 0; i < MAX_PROCESSES; i++) {

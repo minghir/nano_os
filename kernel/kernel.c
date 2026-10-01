@@ -222,10 +222,10 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 	
 	
     // --- LOADING THE SHELL FROM USER SPACE AS A PROCESS ---
-    print("Loading the Shell from User Space (/sbin/shell)...\n");
+    print("Loading the Init daemon from User Space (/sbin/init)...\n");
 	
     // 1. Alocăm 8 pagini FIZICE (32KB) pentru a citi shell-ul de pe disc
-    uint64_t phys_shell_mem = (uint64_t)alloc_page();
+    uint64_t phys_init_mem = (uint64_t)alloc_page();
     for(int p = 1; p < 8; p++) alloc_page(); 
 
 
@@ -233,7 +233,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 //while(1) { __asm__ volatile("hlt"); } // FRÂNA AICI
 	
     // 2. Kernel-ul citește fișierul direct în RAM-ul fizic brut
-    int bytes = fs_read_file("/sbin/shell", (uint8_t*)phys_shell_mem, 32768);
+    int bytes = fs_read_file("/sbin/init", (uint8_t*)phys_init_mem, 32768);
     
     print("[DEBUG] fs_read_file bytes read: ");
     if (bytes > 0) print("[DEBUG] File read successfully.\n");
@@ -245,38 +245,38 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     } __attribute__((packed)) NanoHeader;
 
     if (bytes > (int)sizeof(NanoHeader)) {
-        NanoHeader* hdr = (NanoHeader*)phys_shell_mem;
+        NanoHeader* hdr = (NanoHeader*)phys_init_mem;
         
         // Verificăm semnătura "NAS1"
         if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
             hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
             
-            print("Shell signature valid (NAS1). Entry offset parsed.\n");
+            print("Init signature valid (NAS1). Entry offset parsed.\n");
             
             // 3. Creăm o HARTĂ VIRTUALĂ nouă (PML4) DOAR pentru Shell
-            uint64_t* shell_pml4 = create_process_pml4();
+            uint64_t* init_pml4 = create_process_pml4();
 
             // 4. Mapăm memoria fizică unde e programul la ADRESA VIRTUALĂ UNIVERSALĂ (0x800000)
             for (uint64_t offset = 0; offset < 32768; offset += 4096) {
-                map_page(shell_pml4, 0x800000 + offset, phys_shell_mem + offset, 
+                map_page(init_pml4, 0x800000 + offset, phys_init_mem + offset, 
                          PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
             }
             
             // 5. Entry point-ul se raportează acum virtual (0x800000)
-            uint64_t shell_entry_point = 0x800000 + hdr->entry_offset;
+            uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
             
-            print("[DEBUG] Calling process_create for shell...\n");
+            print("[DEBUG] Calling process_create for init...\n");
             
             // 6. Creăm procesul transmițând și noua hartă CR3!
-            process_create("shell", shell_entry_point, 0, NULL, (uint64_t)shell_pml4);
+            process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4);
             
             print("[DEBUG] process_create finished! Entering scheduler loop...\n");
             //while(1) { __asm__ volatile("hlt"); }
         } else {
-            print("FATAL ERROR: /sbin/shell has no valid signature: NAS1!\n");
+            print("FATAL ERROR: /sbin/init has no valid signature: NAS1!\n");
         }
     } else {
-        print("FATAL ERROR: /sbin/shell is missing or has been corrupted!\n");
+        print("FATAL ERROR: /sbin/init is missing or has been corrupted!\n");
     }
 
     timer_init(1000); // Pornește timer-ul la 1000 Hz

@@ -10,6 +10,7 @@ make
 
 # Acum apelezi doar make APP=nume, iar Makefile-ul se ocupă și de binar și de push!
 make APP=shell
+make APP=init
 make APP=time
 make APP=date
 make APP=shutdown
@@ -35,6 +36,7 @@ make APP=chr
 make APP=argt
 make APP=test_malloc
 make APP=test_sleep
+make APP=tsr_sleep2
 
 
 make clean

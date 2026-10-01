@@ -86,6 +86,6 @@ run: kernel.iso
 # ============================
 
 clean:
-	rm -f *.o kernel/*.o boot/*.o kernel.bin kernel.iso *.bin
+	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin
 	rm -rf iso/boot/kernel.bin
 #	rm -f hda.img

@@ -1,1 +1,2 @@
-qemu-img create -f raw hda.img 10M
+#qemu-img create -f raw hda.img 10M
+./nanohdd ./hda.img format
