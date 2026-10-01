@@ -37,6 +37,7 @@ make APP=argt
 make APP=test_malloc
 make APP=test_sleep
 make APP=tsr_sleep2
+make APP=crash
 
 
 make clean

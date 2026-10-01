@@ -253,4 +253,24 @@ int nano_getcwd(char* buf, int max_len); //curent dir
 
 char* string_copy(char* dest, const char* src);
 
+// Trimite un mesaj în syslog-ul kernelului
+inline void nano_syslog(const char* msg) {
+    __asm__ volatile (
+        "mov $5, %%rax\n"      // Numărul syscall-ului (SYSCALL_SYSLOG = 5)
+        "mov %0, %%rdi\n"      // Argumentul (mesajul)
+        "int $0x80\n"          // Declanșarea întreruperii de sistem
+        : : "r"(msg) : "rax", "rdi", "memory"
+    );
+}
+
+// Citește întregul log din kernel (pentru dmesg)
+inline void nano_getlog(char* dest, int max_len) {
+    __asm__ volatile (
+        "mov $6, %%rax\n"      // Numărul syscall-ului pentru citire log
+        "mov %0, %%rdi\n"
+        "int $0x80\n"
+        : : "r"(dest) : "rax", "rdi", "memory"
+    );
+}
+
 #endif

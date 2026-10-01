@@ -27,6 +27,7 @@ void process_init() {
 }
 
 // Planificatorul (Scheduler-ul) apelat la fiecare milisecundă
+/*
 uint64_t schedule(uint64_t current_rsp) {
 	//print(".");
     if (!current_process) return current_rsp;
@@ -85,6 +86,55 @@ uint64_t schedule(uint64_t current_rsp) {
     // 4. Returnăm noul RSP
     return current_process->regs.rsp;
 }
+*/
+
+uint64_t schedule(uint64_t current_rsp) {
+    // 1. SALVĂM ÎNTOTDEAUNA stiva procesului curent întrerupt de timer,
+    // indiferent dacă era RUNNING sau SLEEPING!
+    if (current_process) {
+        current_process->regs.rsp = current_rsp;
+    }
+
+    // 2. Găsim următorul proces READY
+    int start_idx = current_process ? ((current_process - process_table) + 1) : 0;
+    
+    PCB* next_proc = NULL;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        int idx = (start_idx + i) % MAX_PROCESSES;
+        
+        // Sărim peste Kernel (PID 0) pentru programele normale
+        if (process_table[idx].state == PROC_READY && process_table[idx].pid != 0) {
+            next_proc = &process_table[idx];
+            break;
+        }
+    }
+
+    // 3. Dacă nu am găsit nimic din USER SPACE...
+    if (!next_proc) {
+        if (!current_process) {
+            // Plasa de siguranță: forțăm întoarcerea pe Kernel (PID 0)
+            next_proc = &process_table[0];
+        } else {
+            // Nu e nimeni altcineva gata. Rămânem pe cel curent!
+            return current_rsp; 
+        }
+    }
+
+    // 4. Facem switch-ul efectiv (Schimbăm stările)
+    if (current_process && current_process->state == PROC_RUNNING) {
+        current_process->state = PROC_READY; 
+    }
+    
+    next_proc->state = PROC_RUNNING;
+    current_process = next_proc;
+
+    // 5. Schimbăm memoria virtuală (CR3)
+    if (current_process->cr3 != 0) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(current_process->cr3));
+    }
+
+    return current_process->regs.rsp;
+}
 
 void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3) {
     //print("[DEBUG] process_create: Trying to create process '");
@@ -131,7 +181,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
         return;
     }
     p->stack_base = (uint64_t)stack;
-
+	/*
     // 4. Calculăm Vârful stivei și o aliniem la 16 octeți
     uint64_t stack_top = (uint64_t)(stack + 16384);
     stack_top &= ~0xF; 
@@ -159,7 +209,35 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
 
     // 8. Salvăm RSP-ul final în PCB
     p->regs.rsp = stack_top;
-    
+    */
+	// 4. Calculăm Vârful stivei și o aliniem la 16 octeți
+    uint64_t stack_top = (uint64_t)(stack + 16384);
+    stack_top &= ~0xF; 
+
+    // 5. Facem loc pentru structura Registers exact la vârful stivei
+    stack_top -= sizeof(Registers);
+    Registers* regs = (Registers*)stack_top;
+
+    // Zeroizăm tot struct-ul de registre
+    uint8_t* byte_ptr = (uint8_t*)regs;
+    for (uint32_t i = 0; i < sizeof(Registers); i++) {
+        byte_ptr[i] = 0;
+    }
+
+    // 6. Setăm starea procesorului pentru IRETQ
+    regs->ss = 0x10;        
+    regs->rsp = stack_top + sizeof(Registers); // <-- Punctează fix la vârful aliniat!
+    regs->rflags = 0x202;     // IF=1 (Întreruperi activate)
+    regs->cs = 0x08;          
+    regs->rip = entry_point;  
+
+    // 7. Parametrii argc / argv
+    regs->rdi = (uint64_t)argc;
+    regs->rsi = (uint64_t)argv;
+
+    // 8. Salvăm RSP-ul final în PCB
+    p->regs.rsp = stack_top;
+	
     // 9. Îl marcăm ca pregătit să ruleze
     p->state = PROC_READY;
     

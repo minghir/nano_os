@@ -160,7 +160,7 @@ void timer_init(uint32_t frequency) {
     outb(0x40, h);
 }
 
-#include "io.h"
+
 
 // Funcție helper pentru conversia din BCD în zecimal
 static uint8_t bcd_to_bin(uint8_t bcd) {

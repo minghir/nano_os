@@ -6,6 +6,7 @@
 extern void isr_keyboard();
 extern void isr_timer();
 extern void isr_syscall();
+extern void isr14();
 
 void interrupts_init() {
     // 1. Oprește întreruperile global în timpul configurării
@@ -25,6 +26,8 @@ void interrupts_init() {
     // Pentru int 0x80, folosim de obicei DPL = 3 (User Mode), dar cum totul e în Ring 0 momentan, e ok și 0.
     idt_set_gate(0x80, (uint64_t)isr_syscall, 0x08, 0xEE);
 
+
+	idt_set_gate(14, (uint64_t)isr14, 0x08, 0x8E);
 
     // Încarcă tabelul IDT în procesor folosind LIDT
     idt_load();

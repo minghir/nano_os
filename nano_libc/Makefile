@@ -60,6 +60,8 @@ else ifeq ($(APP),test_sleep)
     OS_PATH = /tests/test_sleep
 else ifeq ($(APP),tsr_sleep2)
     OS_PATH = /tests/tsr_sleep2
+else ifeq ($(APP),crash)
+    OS_PATH = /tests/crash
 else 
     # Valoare implicită pentru orice alt program nou
     OS_PATH = /bin/$(APP)

@@ -9,8 +9,10 @@
 #include "string.h"
 #include "process.h"
 #include "paging.h"
+#include "syslog.h"
 
 extern char env_path[];
+extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
 void syscall_handler(SyscallRegisters* regs) {
     // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
@@ -183,6 +185,7 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = file_found ? 1 : 0;
             break;
         }
+		/*
 		case SYSCALL_EXIT: {
             int exit_code = (int)regs->rdi;
             
@@ -203,6 +206,37 @@ void syscall_handler(SyscallRegisters* regs) {
             }
             
             // 3. Oprim execuția curentă și lăsăm timer-ul să mute pe shell
+            while(1) {
+                __asm__ volatile ("sti; hlt");
+            }
+            break;
+        }
+		*/
+		case SYSCALL_EXIT: {
+            int exit_code = (int)regs->rdi;
+            
+            if (current_process) {
+                current_process->exit_code = exit_code;
+                
+                // 1. Căutăm părintele și îl trezim DOAR DACă dormea (era în SYSCALL_WAIT)
+                for (int i = 0; i < MAX_PROCESSES; i++) {
+                    if (process_table[i].pid == current_process->ppid) {
+                        // VERIFICARE CRUCIALĂ: Aștepta părintele după acest copil?
+                        if (process_table[i].state == PROC_SLEEPING) {
+                            process_table[i].state = PROC_READY; // Trezim Shell-ul
+                            keyboard_flush();
+                        }
+                        break;
+                    }
+                }
+                
+                // 2. Acum eliberăm slotul copilului
+                current_process->state = PROC_FREE;
+                current_process->pid = 0;
+                current_process->name[0] = '\0';
+            }
+            
+            // 3. Oprim execuția curentă și lăsăm timer-ul să preia controlul
             while(1) {
                 __asm__ volatile ("sti; hlt");
             }
@@ -406,6 +440,21 @@ void syscall_handler(SyscallRegisters* regs) {
 		case SYSCALL_NEWLINE: {
 			newline();
 			//regs->rax = 1;
+			break;
+		}
+		case SYSCALL_SYSLOG: { // 
+			char* user_msg = (char*)regs->rdi;
+			if (user_msg != NULL) {
+				kernel_log("[USER] ");
+				kernel_log(user_msg);
+				kernel_log("\n");
+			}
+			break;
+		}
+		case SYSCALL_GETLOG: { // SYSCALL_GETLOG
+			char* user_dest = (char*)regs->rdi;
+			// Copiezi kernel_log_buffer în adresa cerută de user-space
+			string_copy(user_dest, kernel_log_buffer);
 			break;
 		}
         default: {

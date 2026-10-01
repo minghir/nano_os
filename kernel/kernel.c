@@ -6,6 +6,8 @@
 #include "../src/string.h"
 #include "../src/timer.h"
 #include "../src/paging.h"
+#include "../src/syslog.h"
+
 #include <stdint.h>
 /*
 typedef struct multiboot_info {
@@ -18,6 +20,8 @@ typedef struct multiboot_info {
     uint32_t mods_addr;
 } __attribute__((packed)) multiboot_info_t;
 */
+
+//extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
 // Definiție parțială a structurii Multiboot Info
 typedef struct multiboot_info {
@@ -99,90 +103,70 @@ void load_kernel_environment() {
         newline();
     }
 }
-/*
-void kernel_main(unsigned long magic, unsigned long addr) {
-    cursor_init();
-    print("Nano OS booted!");
-    newline();
 
-    // Verificăm și parsăm fișierul de configurare trimis prin GRUB
-    if (magic == 0x2BADB002 && addr != 0) {
-        multiboot_info_t* mb_info = (multiboot_info_t*)addr;
-
-        // Verificăm dacă bitul 12 este setat (dacă există informații despre framebuffer)
-        if (mb_info->flags & (1 << 12)) {
-            uint64_t fb_addr = mb_info->framebuffer_addr;
-            uint32_t fb_width = mb_info->framebuffer_width;
-            uint32_t fb_height = mb_info->framebuffer_height;
-            uint32_t fb_pitch = mb_info->framebuffer_pitch;
-            uint8_t  fb_bpp = mb_info->framebuffer_bpp;
-
-            // Aici poți salva aceste valori în variabile globale ale kernelului 
-            // (ex: lfb_memory = (uint32_t*)fb_addr; screen_width = fb_width; etc.)
-        }
-
-        if (mb_info->mods_count > 0) {
-            // Conversie sigură prin uint64_t pentru a evita warning-ul pe 64-biți
-            mod_list_t* mod = (mod_list_t*)(uint64_t)mb_info->mods_addr;
-            parse_config((const char*)(uint64_t)mod->mod_start);
-        }
-    }
-
-    // Inițializăm întreruperile (inclusiv tastatura)
-    process_init();
-	interrupts_init();
-    memory_init();
-    fs_init();
-	
+// Structură specială doar pentru excepțiile care generează Error Code (ex: Page Fault)
+typedef struct {
+    uint8_t xmm0[16];
+    uint64_t padding;
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+    uint64_t rdi, rsi, rbp, rbx, rdx, rcx, rax;
     
-    // Încărcăm variabilele de mediu (PATH)
-    load_kernel_environment();
-
-    // clear_screen();
-    //shell_init();
-    //shell_run();
-    //timer_init(1000);
-
-
-    // --- LANSAREA SHELL-ULUI DIN USER SPACE ---
-    print("Loading the Shell from User Space (/sbin/shell)...\n");
+    uint64_t error_code;  // <--- ELEMENTUL LIPSĂ CARE DECALA TOTUL!
     
-    uint8_t* shell_memory = (uint8_t*)0x800000;
-    int bytes = fs_read_file("/sbin/shell", shell_memory, 32768);
-	
-    
-    // Definiția structurii header-ului (trebuie să fie vizibilă sau definită și în kernel)
-    typedef struct {
-        char magic[4];       // "NAS1"
-        uint32_t entry_offset;
-    } __attribute__((packed)) NanoHeader;
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
+} __attribute__((packed)) FaultRegisters;
 
-    if (bytes > (int)sizeof(NanoHeader)) {
-        NanoHeader* hdr = (NanoHeader*)shell_memory;
+
+// Schimbă argumentul din Registers* în FaultRegisters*
+void page_fault_handler(FaultRegisters* regs) {
+    uint64_t faulting_address;
+    __asm__ volatile ("mov %%cr2, %0" : "=r"(faulting_address));
+
+    // Verificăm cine a crăpat cu adevărat analizând Adresa Instrucțiunii (RIP)
+    // - Dacă RIP >= 0x800000 (Suntem în zona programelor)
+    // - Dacă RIP < 0x100000  (S-a sărit la o adresă invalidă ca NULL / 0x0)
+    // - Dacă CS indică Ring 3 (Pentru viitor, când vei implementa Ring 3)
+	if (regs->cs & 3 || regs->rip >= 0x800000 || regs->rip < 0x100000) {
+        // --- CRASH ÎN PROGRAM (User Space) ---
+        print("\n[CRASH] Programul a generat Page Fault! (Memorie invalida)\n");
         
-        // Verificăm semnătura magică "NAS1"
-        if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
-            hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
-            
-            print("Shell loaded successfully! Running...\n");
-            
-            // Sărim exact peste header, la adresa de început a codului
-            void (*shell_entry)(void) = (void (*)(void))(shell_memory + hdr->entry_offset);
-            shell_entry();
-        } else {
-            print("FATAL ERROR: /sbin/shell has no valid signature: NAS1!\n");
+        if (current_process) {
+            uint32_t ppid = current_process->ppid;
+
+            // 1. TREZIM PĂRINTELE (Shell-ul) care a rămas blocat în SYSCALL_WAIT
+            for (int i = 0; i < MAX_PROCESSES; i++) {
+                if (process_table[i].pid == ppid) {
+                    process_table[i].state = PROC_READY; 
+                    break;
+                }
+            }
+
+            // 2. Eliberăm slotul procesului curent
+            current_process->state = PROC_FREE; 
+            current_process->pid = 0;
+            current_process->name[0] = '\0';
+        }
+        
+        current_process = (PCB*)0; 
+        
+        // Așteptăm timer-ul să comute pe Shell-ul tocmai trezit
+        while (1) {
+            __asm__ volatile ("sti; hlt");
         }
     } else {
-        print("FATAL ERROR: /sbin/shell is missing or has been corrupted!\n");
-    }
-    // ------------------------------------------
-
-    // Fallback de siguranță (în caz că shell-ul s-ar opri vreodată)
-    for (;;) {
-        __asm__ volatile ("hlt");
+        // --- CRASH REAL ÎN KERNEL ---
+        // Aici ajunge doar dacă ai un bug în funcțiile interne ale kernelului (ex: fs_read, malloc)
+        print("\nFATAL: KERNEL PAGE FAULT IN RING 0!\n");
+        print(kernel_log_buffer);
+        while (1) {
+            __asm__ volatile ("cli; hlt");
+        }
     }
 }
-*/
 
 void kernel_main(unsigned long magic, unsigned long addr) {
     cursor_init();
@@ -215,6 +199,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     interrupts_init();
     memory_init();
     fs_init();
+	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
     
     // Load kernel environment variables (PATH)
     load_kernel_environment();
@@ -231,7 +216,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 
 //print("[DEBUG] A trecut de create_process_pml4!");
 //while(1) { __asm__ volatile("hlt"); } // FRÂNA AICI
-	
+	//kernel_log("Esec critic: Nu s-a putut initializa Managerul de Memorie!");
+	//kernel_panic("Esec critic: Nu s-a putut initializa Managerul de Memorie!");
     // 2. Kernel-ul citește fișierul direct în RAM-ul fizic brut
     int bytes = fs_read_file("/sbin/init", (uint8_t*)phys_init_mem, 32768);
     
@@ -280,7 +266,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     }
 
     timer_init(1000); // Pornește timer-ul la 1000 Hz
-
+	
     // Safety fallback loop
     for (;;) {
         __asm__ volatile ("sti; hlt");

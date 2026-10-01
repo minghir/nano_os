@@ -195,7 +195,8 @@ int main(int argc, char** argv) {
         uint32_t size = ftell(local_f);
         fseek(local_f, 0, SEEK_SET);
 
-        uint32_t sectors_needed = (size + SECTOR_SIZE - 1) / SECTOR_SIZE;
+        //uint32_t sectors_needed = (size + SECTOR_SIZE - 1) / SECTOR_SIZE;
+		uint32_t sectors_needed = size > 0 ? (size + SECTOR_SIZE - 1) / SECTOR_SIZE : 1;
 
         // 1. ALOCĂM SECTOARELE ÎNTÂI
         uint32_t target_sector;

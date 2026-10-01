@@ -3,7 +3,7 @@ newline
 mov rdi, 5
 bucla:
 cmp rdi, 0
-;je gata
+je gata
 mov rax, rdi
 print_rax
 newline

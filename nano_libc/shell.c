@@ -40,7 +40,7 @@ int main() {
 
         // Comenzi interne ale shell-ului
         if (strcmp(command_buffer, "exit") == 0) {
-            nano_print("La revedere!\n");
+            nano_print("Bye bye!\n");
             break;
         } 
 		if (strcmp(command_buffer, "clear") == 0) {
@@ -50,11 +50,11 @@ int main() {
             nano_print("Nano OS: educational x86-64 kernel");
         } 
         else if (strcmp(command_buffer, "help") == 0) {
-            nano_print("Comenzi interne: help, exit\n");
-            nano_print("Programe externe: date, time, mandel\n");
+            nano_print("Internal commands: help, exit\n");
+            nano_print("Extern commands: date, time, mandel\n");
         }
 		else if (strcmp(command_buffer, "halt") == 0) {
-            nano_print("Nano OS se inchide...\n");
+            nano_print("Nano OS is shutting down...\n");
 			nano_shutdown();
 				
 				// Dacă din orice motiv nu se închide instant, oprim execuția
@@ -95,7 +95,7 @@ int main() {
 			
             int success = nano_exec(command_buffer);
             if (!success) {
-                nano_print("Comanda necunoscuta: ");
+                nano_print("Unknown command: ");
                 nano_print(command_buffer);
                 nano_print("\n");
             }else{
