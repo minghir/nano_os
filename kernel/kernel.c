@@ -200,10 +200,11 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     memory_init();
     fs_init();
 	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
+	kernel_log("KERNEL:Log file created");
     
     // Load kernel environment variables (PATH)
     load_kernel_environment();
-
+	kernel_log("KERNEL:Enviroment loaded.");
 	
 	
     // --- LOADING THE SHELL FROM USER SPACE AS A PROCESS ---

@@ -27,6 +27,7 @@ make APP=pwd
 make APP=ps
 make APP=kill
 make APP=free
+make APP=dmesg
 
 make APP=mandel
 make APP=nanoasm

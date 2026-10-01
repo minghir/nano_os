@@ -44,6 +44,8 @@ else ifeq ($(APP),kill)
     OS_PATH = /sbin/kill
 else ifeq ($(APP),free)
     OS_PATH = /sbin/free
+else ifeq ($(APP),dmesg)
+    OS_PATH = /sbin/dmesg	
 else ifeq ($(APP),mandel)
     OS_PATH = /bin/mandel
 else ifeq ($(APP),nanoasm)
