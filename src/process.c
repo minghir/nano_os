@@ -16,7 +16,6 @@ void process_init() {
 	//salva adresa PML4 globală a kernelului la pornire și să o atribui procesului 0 în
 	uint64_t kernel_pml4;
 	__asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
-	current_process->cr3 = kernel_pml4;
 	
     print("[DEBUG] process_init: Cleaning process table...\n");
     // 1. Curățăm toate sloturile din tabelă
@@ -30,6 +29,7 @@ void process_init() {
     current_process->pid = 0;
     current_process->ppid = 0;
     current_process->state = PROC_RUNNING;
+    current_process->cr3 = kernel_pml4;
     current_process->cwd_sector = 1; 
     
     print("[DEBUG] process_init: Kernel process (PID 0) initialized as RUNNING.\n");
@@ -169,6 +169,11 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
         return;
     }
 
+    // An exited process keeps its stack until the scheduler has switched away.
+    if (p->stack_base) {
+        free((void*)p->stack_base);
+        p->stack_base = 0;
+    }
 
 	// Îi asociezi harta de memorie unică
     p->cr3 = process_cr3;

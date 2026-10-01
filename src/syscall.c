@@ -18,9 +18,6 @@ void syscall_handler(SyscallRegisters* regs) {
     // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
     uint32_t syscall_num = (uint32_t)regs->rax;
 
-    // 1. RE-ACTIVĂM ÎNTRERUPERILE HARDWARE!
-    __asm__ volatile ("sti");
-
     // 2. Rutăm apelul tăind "gunoiul" din partea superioară a lui RAX
     //switch ((uint32_t)regs->rax) {
     switch (syscall_num) {
@@ -49,6 +46,7 @@ void syscall_handler(SyscallRegisters* regs) {
             //print("Sleep cerut pt ms: "); 
             //print_number(milliseconds);
             //print("\n");
+            __asm__ volatile ("sti");
             sleep_ms(milliseconds); 
             break;
         }
@@ -371,55 +369,43 @@ void syscall_handler(SyscallRegisters* regs) {
 		*/
 		
 		case SYSCALL_EXIT: {
-            int exit_code = (int)regs->rdi;
-            
-            if (current_process) {
-                current_process->exit_code = exit_code;
-                
-                // 1. Trezim părintele
+            __asm__ volatile ("cli");
+            PCB* exiting_process = current_process;
+            if (exiting_process) {
+                uint32_t parent_pid = exiting_process->ppid;
+                exiting_process->exit_code = (int)regs->rdi;
+
+                // Use the kernel map before releasing the process page tables.
+                __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+                for (int p = 0; p < 8; p++) {
+                    if (exiting_process->prog_pages[p] != 0) {
+                        free_page((void*)exiting_process->prog_pages[p]);
+                        exiting_process->prog_pages[p] = 0;
+                    }
+                }
+
+                if (exiting_process->cr3) {
+                    free_process_paging(exiting_process->cr3);
+                    exiting_process->cr3 = 0;
+                }
+
+                // Keep stack_base until a later process_create runs on another stack.
+                exiting_process->state = PROC_FREE;
+                exiting_process->pid = 0;
+                exiting_process->name[0] = '\0';
+
                 for (int i = 0; i < MAX_PROCESSES; i++) {
-                    if (process_table[i].pid == current_process->ppid) {
-                        if (process_table[i].state == PROC_SLEEPING) {
-                            process_table[i].state = PROC_READY; 
-                            keyboard_flush();
-                        }
+                    if (process_table[i].pid == parent_pid &&
+                        process_table[i].state == PROC_SLEEPING) {
+                        process_table[i].state = PROC_READY;
+                        keyboard_flush();
                         break;
                     }
                 }
-                
-                // +++ CURĂȚENIA PERFECTĂ +++
-
-                // A. MUTĂM PROCESORUL PE TABELA KERNELULUI (Pentru a nu tăia craca!)
-                __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
-
-                // B. Eliberăm stiva (Heap)
-                if (current_process->stack_base) {
-                    free((void*)current_process->stack_base);
-                    current_process->stack_base = 0;
-                }
-
-                // C. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
-                for (int p = 0; p < 8; p++) {
-                    if (current_process->prog_pages[p] != 0) {
-                        free_page((void*)current_process->prog_pages[p]);
-                        current_process->prog_pages[p] = 0;
-                    }
-                }
-
-                // D. Eliberăm toate cele ~19 pagini ale Ierarhiei Paging
-                if (current_process->cr3) {
-                    free_process_paging(current_process->cr3);
-                    current_process->cr3 = 0;
-                }
-
-                // +++++++++++++++++++++++++++
-
-                current_process->state = PROC_FREE;
-                current_process->pid = 0;
-                current_process->name[0] = '\0';
             }
-            
-            while(1) { __asm__ volatile ("sti; hlt"); }
+
+            while (1) { __asm__ volatile ("sti; hlt"); }
             break;
         }
 
