@@ -21,22 +21,30 @@ void nano_readline(char* buffer, uint32_t max_len) {
 }
 
 void* nano_malloc(size_t size) {
-    uint64_t ret_ptr;
+    uint64_t ret;
     __asm__ volatile (
-        "mov $3, %%rax \n"      // Comanda 3: Malloc
-        "mov %1, %%rdi \n"      // Parametru: dimensiunea
-        "int $0x80 \n"
-        "mov %%rax, %0 \n"      // Salvăm rezultatul întors în RAX
-        : "=r" (ret_ptr)
-        : "r" ((uint64_t)size)
-        : "rax", "rdi"
+        "mov %1, %%rax\n\t"
+        "mov %2, %%rdi\n\t"
+        "int $0x80\n\t"        // Sau instrucțiunea ta de syscall (ex: syscall)
+        "mov %%rax, %0\n\t"
+        : "=r"(ret)
+        : "r"((uint64_t)SYSCALL_MALLOC), "r"((uint64_t)size)
+        : "%rax", "%rdi", "memory"
     );
-    return (void*)ret_ptr;
+    return (void*)ret;
 }
 
+// Wrapper user-space pentru free
 void nano_free(void* ptr) {
-    // Bump allocator nu face nimic la free, dar putem lăsa funcția goală
-    (void)ptr;
+    if (!ptr) return;
+    __asm__ volatile (
+        "mov %0, %%rax\n\t"
+        "mov %1, %%rdi\n\t"
+        "int $0x80\n\t"
+        : 
+        : "r"((uint64_t)SYSCALL_FREE), "r"((uint64_t)ptr)
+        : "%rax", "%rdi", "memory"
+    );
 }
 
 
@@ -247,3 +255,92 @@ char* string_copy(char* dest, const char* src) {
     *dest = '\0'; // Nu uităm terminatorul de șir!
     return original_dest;
 }
+
+// Funcție custom pentru a converti string la int64_t (fără dependențe de atoll din libc)
+int64_t parse_int64(const char* str) {
+    int64_t res = 0;
+    int sign = 1;
+    int i = 0;
+    
+    if (str[0] == '-') {
+        sign = -1;
+        i = 1;
+    } else if (str[0] == '+') {
+        i = 1;
+    }
+    
+    while (str[i] >= '0' && str[i] <= '9') {
+        res = res * 10 + (str[i] - '0');
+        i++;
+    }
+    
+    return res * sign;
+}
+/*
+// Funcție pentru a converti un string zecimal (ex: "3.14") într-un float real
+float parse_float(const char* str) {
+    int64_t int_part = 0;
+    int64_t frac_part = 0;
+    int divisor = 1;
+    int sign = 1;
+    int i = 0;
+
+    if (str[0] == '-') {
+        sign = -1;
+        i = 1;
+    } else if (str[0] == '+') {
+        i = 1;
+    }
+
+    // Partea întreagă
+    while (str[i] >= '0' && str[i] <= '9') {
+        int_part = int_part * 10 + (str[i] - '0');
+        i++;
+    }
+
+    // Partea fracționară (după punct)
+    if (str[i] == '.') {
+        i++;
+        while (str[i] >= '0' && str[i] <= '9') {
+            frac_part = frac_part * 10 + (str[i] - '0');
+            divisor *= 10;
+            i++;
+        }
+    }
+
+    float res = (float)int_part + ((float)frac_part / (float)divisor);
+    return res * sign;
+}
+
+float nano_parse_float(const char* str) {
+    float result = 0.0f;
+    float sign = 1.0f;
+    int i = 0;
+
+    if (str[0] == '-') {
+        sign = -1.0f;
+        i++;
+    } else if (str[0] == '+') {
+        i++;
+    }
+
+    // Partea întreagă
+    while (str[i] >= '0' && str[i] <= '9') {
+        result = result * 10.0f + (str[i] - '0');
+        i++;
+    }
+
+    // Partea fracționară (după virgulă/punct)
+    if (str[i] == '.') {
+        i++;
+        float fraction = 1.0f;
+        while (str[i] >= '0' && str[i] <= '9') {
+            fraction /= 10.0f;
+            result += (str[i] - '0') * fraction;
+            i++;
+        }
+    }
+
+    return result * sign;
+}
+*/

@@ -14,6 +14,7 @@
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
+
 void syscall_handler(SyscallRegisters* regs) {
     // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
     uint32_t syscall_num = (uint32_t)regs->rax;
@@ -38,6 +39,11 @@ void syscall_handler(SyscallRegisters* regs) {
             size_t size = (size_t)regs->rdi;
             void* ptr = malloc(size);
             regs->rax = (uint64_t)ptr; // Returnăm adresa pointerului
+            break;
+        }
+		case SYSCALL_FREE: {
+            void* ptr = (void*)regs->rdi;
+            free(ptr); // Apelează funcția ta de eliberare din memory.h
             break;
         }
         
@@ -592,12 +598,23 @@ void syscall_handler(SyscallRegisters* regs) {
             //newline();
             break;
         }
+		/*
 		case SYSCALL_READ_CHAR: {
             // Presupunând că ai o funcție în kernel care citește un caracter (blochează până când se apasă o tastă)
             char c = keyboard_read_char(); 
             regs->rax = (uint64_t)c; // Returnăm caracterul prin registrul RAX
             break;
         }
+		*/
+		case SYSCALL_READ_CHAR: {
+			int c = keyboard_read_char(); // Returnează între 0 și 255
+			regs->rax = (uint64_t)(uint8_t)c; // Forțăm cast-ul ca unsigned pe 8 biți
+			break;
+		}
+		case SYSCALL_HAS_CHAR: {
+			regs->rax = (uint64_t)keyboard_has_data();
+			break;
+		}
         case SYSCALL_CLEAR_SCREEN: {
             clear_screen(); // Funcția ta existentă care curăță ecranul VGA în kernel
             break;
@@ -653,6 +670,20 @@ void syscall_handler(SyscallRegisters* regs) {
 			string_copy(user_dest, kernel_log_buffer);
 			break;
 		}
+		case SYSCALL_PRINT_FLOAT: {
+            uint64_t raw_bits = regs->rdi;
+            float val = *(float*)&raw_bits;
+
+            int int_part = (int)val;
+            int frac_part = (int)((val - int_part) * 100);
+            if (frac_part < 0) frac_part = -frac_part;
+
+            print_number(int_part);
+            print(".");
+            if (frac_part < 10) print("0");
+            print_number(frac_part);
+            break;
+        }
         default: {
             print("Kernel Warning: Syscall necunoscut apelat: ");
             print_number(regs->rax);

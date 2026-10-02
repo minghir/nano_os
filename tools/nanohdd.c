@@ -248,9 +248,24 @@ int main(int argc, char** argv) {
 
         // 3. SCRIEM FIȘIERUL PE DISC
         uint8_t temp_buf[SECTOR_SIZE];
+        
+        // Ne asigurăm că suntem la începutul fișierului sursă
+        fseek(local_f, 0, SEEK_SET);
+        
         for (uint32_t i = 0; i < sectors_needed; i++) {
-            memset(temp_buf, 0, SECTOR_SIZE);
-            fread(temp_buf, 1, SECTOR_SIZE, local_f);
+            memset(temp_buf, 0, SECTOR_SIZE); // Umplem restul sectorului cu zero
+            
+            // Câți octeți ne-au mai rămas de citit din fișier?
+            uint32_t to_read = SECTOR_SIZE;
+            uint32_t current_pos = i * SECTOR_SIZE;
+            if (size - current_pos < SECTOR_SIZE) {
+                to_read = size - current_pos;
+            }
+            
+            // Citim exact atâți octeți câți mai sunt utili
+            fread(temp_buf, 1, to_read, local_f);
+            
+            // Scriem întregul sector (512 bytes) pe disc
             write_sector(disk, target_sector + i, temp_buf);
         }
 

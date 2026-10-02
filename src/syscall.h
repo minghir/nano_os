@@ -32,6 +32,9 @@
 #define SYSCALL_NEWLINE     26 // Inserează un rând nou (newline) pe ecran cu tot cu scroll automat
 #define SYSCALL_SYSLOG		27 // Scrie la syslog
 #define SYSCALL_GETLOG		28 //citeste de la syslog
+#define SYSCALL_HAS_CHAR	29 //
+#define SYSCALL_FREE		30
+#define SYSCALL_PRINT_FLOAT  31
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;

@@ -3,7 +3,18 @@
 ../nanohdd ../hda.img mkdir /sbin
 ../nanohdd ../hda.img mkdir /cfg
 ../nanohdd ../hda.img mkdir /tests
+../nanohdd ../hda.img mkdir /asm
 ../nanohdd ../hda.img push env.cfg /cfg/env.cfg
+
+../nanohdd ../hda.img push program.s /asm/program.s
+../nanohdd ../hda.img push loop.s /asm/loop.s
+../nanohdd ../hda.img push call.s /asm/call.s
+../nanohdd ../hda.img push math.s /asm/math.s
+../nanohdd ../hda.img push mem.s /asm/mem.s
+../nanohdd ../hda.img push kin.s /asm/kin.s
+../nanohdd ../hda.img push var.s /asm/var.s
+../nanohdd ../hda.img push float.s /asm/float.s
+../nanohdd ../hda.img push julia.s /asm/julia.s
 
 make clean
 make
@@ -39,10 +50,11 @@ make APP=test_malloc
 make APP=test_sleep
 make APP=tsr_sleep2
 make APP=crash
+make APP=mem_test
 
 
 make clean
 
-../nanohdd ../hda.img push program.s program.s
+
 
 qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses

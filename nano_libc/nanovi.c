@@ -3,27 +3,27 @@
 #define SCREEN_ROWS 24
 #define SCREEN_COLS 80
 
-// Tipurile de moduri disponibile în editorul vi
 typedef enum {
     MODE_NORMAL,
     MODE_INSERT,
     MODE_COMMAND,
     MODE_DELETE_PENDING,
     MODE_VISUAL,
-    MODE_YANK_PENDING // Stare temporară pentru comanda yy
+    MODE_YANK_PENDING
 } EditorMode;
 
-// Structura principală a stării editorului
 typedef struct {
-    char lines[100][80]; // Maxim 100 de linii, 80 caractere per linie
-    int num_lines;
-    int cx, cy;          // Coordonatele cursorului X și Y
+    char** lines;        // Tablou dinamic de pointeri la linii (char**)
+    int num_lines;       // Numărul efectiv de linii din fișier
+    int capacity;        // Capacitatea curentă a tabloului de pointeri
+    int cx, cy;          
+    int row_offset;      
+    int col_offset;      
     EditorMode mode;
     char filename[32];
-    int modified;        // Flag-ul "dirty" (1 dacă fișierul a fost modificat și nesalvat)
-    char status_msg[64]; // Mesajul afișat temporar pe bara de stare
+    int modified;
+    char status_msg[64];
     
-    // Coordonate pentru Modul Vizual (selecție text)
     int visual_start_x;
     int visual_start_y;
 } Editor;
@@ -31,21 +31,102 @@ typedef struct {
 Editor E;
 
 int last_key = 0;
-
-// Buffer pentru linia de comandă (când se apasă tasta ':')
 char cmd_input[32];
 int cmd_input_len = 0;
-
-// Clipboard global pentru operațiunile de Yank și Put
 char clipboard[1024];
 int clipboard_len = 0;
 
-// Funcție helper pentru conversia unui număr în șir de caractere
 void int_to_str(int n, char* buf) {
     itoa(n, buf, 10);
 }
 
-// Verifică dacă o poziție (row, col) se află în interiorul selecției vizuale
+// Inserarea unui rând nou în mod dinamic
+void editor_insert_row(int at, const char* s) {
+    if (at < 0 || at > E.num_lines) return;
+
+    if (E.num_lines >= E.capacity) {
+        E.capacity = E.capacity == 0 ? 16 : E.capacity * 2;
+        char** new_lines = (char**)nano_malloc(E.capacity * sizeof(char*));
+        
+        for (int i = 0; i < E.num_lines; i++) {
+            new_lines[i] = E.lines[i];
+        }
+        
+        if (E.lines) nano_free(E.lines);
+        E.lines = new_lines;
+    }
+
+    for (int i = E.num_lines; i > at; i--) {
+        E.lines[i] = E.lines[i - 1];
+    }
+
+    int len = strlen(s);
+    E.lines[at] = (char*)nano_malloc(len + 1);
+    strcpy(E.lines[at], s);
+    
+    E.num_lines++;
+    E.modified = 1;
+}
+
+// Inserarea unui caracter pe o linie existentă (redimensionare dinamică a rândului)
+void editor_row_insert_char(int row, int at, char c) {
+    if (row < 0 || row >= E.num_lines) return;
+    if (at < 0) at = 0;
+    int len = strlen(E.lines[row]);
+    if (at > len) at = len;
+
+    char* new_line = (char*)nano_malloc(len + 2);
+    for (int i = 0; i < at; i++) new_line[i] = E.lines[row][i];
+    new_line[at] = c;
+    for (int i = at; i < len; i++) new_line[i + 1] = E.lines[row][i];
+    new_line[len + 1] = '\0';
+
+    nano_free(E.lines[row]);
+    E.lines[row] = new_line;
+    E.modified = 1;
+}
+
+// Ștergerea unui caracter de pe o linie (Backspace)
+void editor_row_delete_char(int row, int at) {
+    if (row < 0 || row >= E.num_lines) return;
+    if (at <= 0) return;
+    int len = strlen(E.lines[row]);
+    if (at > len) return;
+
+    char* new_line = (char*)nano_malloc(len);
+    for (int i = 0; i < at - 1; i++) new_line[i] = E.lines[row][i];
+    for (int i = at; i < len; i++) new_line[i - 1] = E.lines[row][i];
+    new_line[len - 1] = '\0';
+
+    nano_free(E.lines[row]);
+    E.lines[row] = new_line;
+    E.modified = 1;
+}
+
+// Inserarea unei linii noi (Enter) care sparge rândul curent
+void editor_insert_newline() {
+    char* line = E.lines[E.cy];
+    char left_part[256];
+    int i = 0;
+    while (i < E.cx && line[i] != '\0') {
+        left_part[i] = line[i];
+        i++;
+    }
+    left_part[i] = '\0';
+
+    char* right_part = &line[E.cx];
+
+    char* new_left = (char*)nano_malloc(strlen(left_part) + 1);
+    strcpy(new_left, left_part);
+    nano_free(E.lines[E.cy]);
+    E.lines[E.cy] = new_left;
+
+    editor_insert_row(E.cy + 1, right_part);
+    E.cy++;
+    E.cx = 0;
+    E.modified = 1;
+}
+
 int is_in_selection(int row, int col) {
     if (E.mode != MODE_VISUAL) return 0;
 
@@ -54,7 +135,6 @@ int is_in_selection(int row, int col) {
     int end_y = E.cy;
     int end_x = E.cx;
 
-    // Normalizăm coordonatele indiferent de direcția în care s-a făcut selecția
     if (start_y > end_y || (start_y == end_y && start_x > end_x)) {
         int ty = start_y; start_y = end_y; end_y = ty;
         int tx = start_x; start_x = end_x; end_x = tx;
@@ -74,27 +154,39 @@ int is_in_selection(int row, int col) {
     return 0;
 }
 
-// Funcția de reîmprospătare și randare a ecranului
+void editor_scroll() {
+    int render_rows = SCREEN_ROWS - 1;
+    if (E.cy < E.row_offset) {
+        E.row_offset = E.cy;
+    }
+    if (E.cy >= E.row_offset + render_rows) {
+        E.row_offset = E.cy - render_rows + 1;
+    }
+}
+
 void editor_refresh_screen() {
+    editor_scroll();
     nano_clear_screen();
 
-    // 1. Afișarea liniilor de text din buffer
-    for (int i = 0; i < SCREEN_ROWS - 2; i++) {
-        if (i < E.num_lines) {
+    int render_rows = SCREEN_ROWS - 1;
+
+    for (int i = 0; i < render_rows; i++) {
+        int file_row = i + E.row_offset;
+        if (file_row < E.num_lines) {
             if (E.mode == MODE_VISUAL) {
-                int len = strlen(E.lines[i]);
+                int len = strlen(E.lines[file_row]);
                 int in_highlight = 0;
                 for (int j = 0; j <= len; j++) {
-                    int should_highlight = is_in_selection(i, j);
+                    int should_highlight = is_in_selection(file_row, j);
                     if (should_highlight && !in_highlight) {
-                        nano_print("\033[7m"); // Activează Reverse Video (Highlight)
+                        nano_print("\033[7m");
                         in_highlight = 1;
                     } else if (!should_highlight && in_highlight) {
-                        nano_print("\033[0m"); // Resetează stilul ANSI
+                        nano_print("\033[0m");
                         in_highlight = 0;
                     }
                     if (j < len) {
-                        char ch_str[2] = {E.lines[i][j], '\0'};
+                        char ch_str[2] = {E.lines[file_row][j], '\0'};
                         nano_print(ch_str);
                     }
                 }
@@ -103,7 +195,7 @@ void editor_refresh_screen() {
                 }
                 nano_print("\n");
             } else {
-                nano_print(E.lines[i]);
+                nano_print(E.lines[file_row]);
                 nano_print("\n");
             }
         } else {
@@ -111,8 +203,13 @@ void editor_refresh_screen() {
         }
     }
 
-    // 2. Afișarea barei de stare sau a mesajelor temporare
-    if (E.status_msg[0] != '\0') {
+    nano_print("\033[24;1H                                                                                ");
+    nano_print("\033[24;1H");
+
+    if (E.mode == MODE_COMMAND) {
+        nano_print(":");
+        nano_print(cmd_input);
+    } else if (E.status_msg[0] != '\0') {
         nano_print(E.status_msg);
     } else {
         if (E.mode == MODE_NORMAL) {
@@ -134,42 +231,48 @@ void editor_refresh_screen() {
         } else if (E.mode == MODE_YANK_PENDING) {
             nano_print("-y- (waiting for y for yy) File: ");
             nano_print(E.filename);
-        } else if (E.mode == MODE_COMMAND) {
-            nano_print(":");
-            nano_print(cmd_input);
         }
     }
-    nano_print("\n");
 
-    // 3. Poziționarea fizică a cursorului în terminal folosind secvențe ANSI
     char cursor_seq[32];
     if (E.mode == MODE_COMMAND) {
-        sprintf(cursor_seq, "\033[%d;%dH", SCREEN_ROWS, cmd_input_len + 2);
+        sprintf(cursor_seq, "\033[24;%dH", cmd_input_len + 2);
     } else {
-        sprintf(cursor_seq, "\033[%d;%dH", E.cy + 1, E.cx + 1);
+        int screen_y = (E.cy - E.row_offset) + 1;
+        sprintf(cursor_seq, "\033[%d;%dH", screen_y, E.cx + 1);
     }
     nano_print(cursor_seq);
 }
 
-// Salvarea conținutului editorului în fișierul de pe disc
 void editor_save_file() {
-    char disk_buffer[4096];
+    if (E.filename[0] == '\0') {
+        strcpy(E.status_msg, "No file name");
+        return;
+    }
+
+    char* disk_buffer = (char*)nano_malloc(16384);
+    if (!disk_buffer) {
+        strcpy(E.status_msg, "Out of memory for saving!");
+        return;
+    }
+
     int offset = 0;
-    
     for (int i = 0; i < E.num_lines; i++) {
         int len = strlen(E.lines[i]);
         for (int j = 0; j < len; j++) {
-            if (offset < (int)sizeof(disk_buffer) - 2) {
+            if (offset < 16382) {
                 disk_buffer[offset++] = E.lines[i][j];
             }
         }
-        if (offset < (int)sizeof(disk_buffer) - 2) {
+        if (offset < 16382) {
             disk_buffer[offset++] = '\n';
         }
     }
     disk_buffer[offset] = '\0';
     
-    // Verificăm dacă scrierea a returnat un număr de biți > 0 (Succes)
+    // Asigurăm crearea fișierului pe disc dacă nu exista
+    nano_create_file(E.filename, 1024);
+
     if (nano_write_file(E.filename, (uint8_t*)disk_buffer, offset) > 0) {
         E.modified = 0; 
         strcpy(E.status_msg, "\"");
@@ -178,63 +281,134 @@ void editor_save_file() {
     } else {
         strcpy(E.status_msg, "Error saving file!");
     }
+
+    nano_free(disk_buffer);
 }
 
 int main(int argc, char* argv[]) {
-    // Preluarea numefui de fișier din argumente sau setarea unui fallback
     if (argc >= 2) {
         strcpy(E.filename, argv[1]);
     } else {
-        strcpy(E.filename, "test.txt");
+        E.filename[0] = '\0'; // Fără fișier implicit! Rămâne gol.
     }
 
     E.cx = 0;
     E.cy = 0;
+    E.row_offset = 0;
+    E.col_offset = 0;
     E.mode = MODE_NORMAL;
-    E.num_lines = 1;
+    E.num_lines = 0;
+    E.capacity = 0;
+    E.lines = 0;
     E.modified = 0;
     E.status_msg[0] = '\0';
-    memset(E.lines[0], 0, 80);
 
-    // Citirea fișierului de pe disc la pornire
-    uint8_t file_buffer[4096];
-    int bytes_read = nano_read_file(E.filename, file_buffer, sizeof(file_buffer) - 1);
-    
-    if (bytes_read > 0) {
-        file_buffer[bytes_read] = '\0';
-        int line_idx = 0;
-        int col_idx = 0;
-        
-        for (int i = 0; i < bytes_read; i++) {
-            if (file_buffer[i] == '\n') {
-                E.lines[line_idx][col_idx] = '\0';
-                line_idx++;
-                col_idx = 0;
-                if (line_idx >= 100) break;
-            } else if (file_buffer[i] != '\r') {
-                if (col_idx < 79) {
-                    E.lines[line_idx][col_idx++] = file_buffer[i];
+    // Citim doar dacă s-a dat un fișier valid la pornire
+    if (E.filename[0] != '\0') {
+        uint8_t* file_buffer = (uint8_t*)nano_malloc(16384);
+        if (file_buffer) {
+            int bytes_read = nano_read_file(E.filename, file_buffer, 16383);
+            if (bytes_read > 0) {
+                file_buffer[bytes_read] = '\0';
+                char current_line[512];
+                int c_idx = 0;
+                
+                for (int i = 0; i <= bytes_read; i++) {
+                    if (file_buffer[i] == '\n' || file_buffer[i] == '\0') {
+                        current_line[c_idx] = '\0';
+                        editor_insert_row(E.num_lines, current_line);
+                        c_idx = 0;
+                        if (file_buffer[i] == '\0') break;
+                    } else if (file_buffer[i] != '\r') {
+                        if (c_idx < (int)sizeof(current_line) - 1) {
+                            current_line[c_idx++] = file_buffer[i];
+                        }
+                    }
                 }
             }
+            nano_free(file_buffer);
         }
-        E.lines[line_idx][col_idx] = '\0';
-        E.num_lines = line_idx + 1;
-    } else {
-        nano_create_file(E.filename, 1024);
     }
-
-    // Bucla principală a editorului
+    
+    // Dacă totuși nu avem linii (fișier gol sau deschis fără nume), punem cel puțin o linie goală
+    if (E.num_lines == 0) {
+        editor_insert_row(0, "");
+    }
+    
+    E.modified = 0; // Resetăm modificarea la început
+	
     while (1) {
         editor_refresh_screen();
         
-        char c = nano_read_char();
+        unsigned char c = (unsigned char)nano_read_char();
         last_key = (int)c;
         
         if (E.mode != MODE_COMMAND) {
             E.status_msg[0] = '\0';
         }
         
-        // Gestionarea intrărilor în funcție de modul curent
+        // --- GESTIONAREA TASTELOR SPECIALE ȘI ESC ---
+        if (c == 27) { 
+            if (E.mode == MODE_INSERT || E.mode == MODE_VISUAL || E.mode == MODE_COMMAND) {
+                E.mode = MODE_NORMAL;
+            }
+            continue;
+        }
+        else if (c == 128) { // Săgeata Sus
+            if (E.cy > 0) E.cy--;
+            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            continue;
+        }
+        else if (c == 129) { // Săgeata Jos
+            if (E.cy < E.num_lines - 1) E.cy++;
+            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            continue;
+        }
+        else if (c == 130) { // Săgeata Dreapta
+            if (E.cx < strlen(E.lines[E.cy])) E.cx++;
+            continue;
+        }
+        else if (c == 131) { // Săgeata Stânga
+            if (E.cx > 0) E.cx--;
+            continue;
+        }
+        else if (c == 132) { // Tasta Delete
+            int len = strlen(E.lines[E.cy]);
+            if (E.cx < len) {
+                char* line = E.lines[E.cy];
+                for (int i = E.cx; i < len; i++) {
+                    line[i] = line[i + 1];
+                }
+                E.modified = 1;
+            }
+            continue;
+        }
+        else if (c == 133) { // Home
+            E.cx = 0;
+            continue;
+        }
+        else if (c == 135) { // End
+            E.cx = strlen(E.lines[E.cy]);
+            continue;
+        }
+        else if (c == 134) { // Page Up
+            E.cy -= (SCREEN_ROWS - 1);
+            if (E.cy < 0) E.cy = 0;
+            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            continue;
+        }
+        else if (c == 136) { // Page Down
+            E.cy += (SCREEN_ROWS - 1);
+            if (E.cy >= E.num_lines) E.cy = E.num_lines - 1;
+            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            continue;
+        }
+        else if (c == 137) { // Insert
+            E.mode = MODE_INSERT;
+            continue;
+        }
+
+        // --- GESTIONAREA MODURILOR ---
         if (E.mode == MODE_NORMAL) {
             switch (c) {
                 case 'i': 
@@ -248,51 +422,45 @@ int main(int argc, char* argv[]) {
                 case 'y': 
                     E.mode = MODE_YANK_PENDING;
                     break;
-                case 'p': { // Lipire (Put) din clipboard
+                case 'p': { 
                     if (clipboard_len > 0) {
-                        int len = strlen(E.lines[E.cy]);
-                        if (len + clipboard_len < SCREEN_COLS - 1) {
-                            for (int i = len; i >= E.cx; i--) {
-                                E.lines[E.cy][i + clipboard_len] = E.lines[E.cy][i];
+                        for (int i = 0; i < clipboard_len; i++) {
+                            if (clipboard[i] == '\n') {
+                                editor_insert_newline();
+                            } else {
+                                editor_row_insert_char(E.cy, E.cx, clipboard[i]);
+                                E.cx++;
                             }
-                            for (int i = 0; i < clipboard_len; i++) {
-                                E.lines[E.cy][E.cx + i] = clipboard[i];
-                            }
-                            E.cx += clipboard_len;
-                            E.modified = 1;
-                            strcpy(E.status_msg, "Text pasted");
                         }
+                        strcpy(E.status_msg, "Text pasted");
                     }
                     break;
                 }
-                case 'h': // Deplasare stânga
+                case 'h': 
                     if (E.cx > 0) E.cx--; 
                     break;
-                case 'l': // Deplasare dreapta
+                case 'l': 
                     if (E.cx < strlen(E.lines[E.cy])) E.cx++; 
                     break;
-                case 'j': // Deplasare jos
+                case 'j': 
                     if (E.cy < E.num_lines - 1) E.cy++; 
                     if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
                     break;
-                case 'k': // Deplasare sus
+                case 'k': 
                     if (E.cy > 0) E.cy--; 
                     if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
                     break;
                 case 'd': 
                     E.mode = MODE_DELETE_PENDING;
                     break;
-                case 'x': { // Ștergere caracter curent (stil vi)
+                case 'x': { 
                     int len = strlen(E.lines[E.cy]);
                     if (E.cx < len) {
-                        for (int i = E.cx; i < len; i++) {
-                            E.lines[E.cy][i] = E.lines[E.cy][i + 1];
-                        }
+                        editor_row_delete_char(E.cy, E.cx + 1);
                         int new_len = strlen(E.lines[E.cy]);
                         if (E.cx >= new_len && E.cx > 0) {
                             E.cx--;
                         }
-                        E.modified = 1;
                     }
                     break;
                 }
@@ -309,20 +477,17 @@ int main(int argc, char* argv[]) {
         } 
         else if (E.mode == MODE_YANK_PENDING) {
             if (c == 'y') {
-                // YY: Copierea liniei curente întregi
                 strcpy(clipboard, E.lines[E.cy]);
                 int len = strlen(clipboard);
                 clipboard[len] = '\n';
                 clipboard[len + 1] = '\0';
                 clipboard_len = len + 1;
-
                 strcpy(E.status_msg, "Line yanked (yy)");
             }
             E.mode = MODE_NORMAL;
         }
         else if (E.mode == MODE_VISUAL) {
             switch (c) {
-                case 27: 
                 case 'v':
                     E.mode = MODE_NORMAL;
                     break;
@@ -340,7 +505,7 @@ int main(int argc, char* argv[]) {
                     if (E.cy > 0) E.cy--; 
                     if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
                     break;
-                case 'y': { // Yank text selectat vizual
+                case 'y': { 
                     int start_y = E.visual_start_y;
                     int start_x = E.visual_start_x;
                     int end_y = E.cy;
@@ -375,84 +540,40 @@ int main(int argc, char* argv[]) {
         }
         else if (E.mode == MODE_DELETE_PENDING) {
             if (c == 'd') {
-                // DD: Ștergere linie întreagă
                 if (E.num_lines > 1) {
+                    nano_free(E.lines[E.cy]);
                     for (int i = E.cy; i < E.num_lines - 1; i++) {
-                        strcpy(E.lines[i], E.lines[i + 1]);
+                        E.lines[i] = E.lines[i + 1];
                     }
                     E.num_lines--;
                     if (E.cy >= E.num_lines) {
                         E.cy = E.num_lines - 1;
                     }
                 } else {
+                    nano_free(E.lines[0]);
+                    E.lines[0] = (char*)nano_malloc(1);
                     E.lines[0][0] = '\0';
                 }
                 E.cx = 0;
                 E.modified = 1;
-            } else if (c == 'w') {
-                // DW: Ștergere cuvânt
-                char* line = E.lines[E.cy];
-                int len = strlen(line);
-                if (E.cx < len) {
-                    int i = E.cx;
-                    if (line[i] == ' ' || line[i] == '\t') {
-                        while (i < len && (line[i] == ' ' || line[i] == '\t')) i++;
-                    } else {
-                        while (i < len && line[i] != ' ' && line[i] != '\t') i++;
-                        while (i < len && (line[i] == ' ' || line[i] == '\t')) i++;
-                    }
-                    int count_to_delete = i - E.cx;
-                    for (int j = E.cx; j <= len - count_to_delete; j++) {
-                        line[j] = line[j + count_to_delete];
-                    }
-                    E.modified = 1;
-                }
             }
             E.mode = MODE_NORMAL;
         }
         else if (E.mode == MODE_INSERT) {
-            if (c == 27 || c == 1) { 
-                E.mode = MODE_NORMAL;
-            } else if (c == '\n' || c == '\r') {
-                // Inserare linie nouă (Enter)
-                if (E.num_lines < 98) {
-                    for (int i = E.num_lines; i > E.cy + 1; i--) {
-                        strcpy(E.lines[i], E.lines[i-1]);
-                    }
-                    E.num_lines++;
-                    E.cy++;
-                    E.cx = 0;
-                    E.lines[E.cy][0] = '\0';
-                    E.modified = 1;
-                }
+            if (c == '\n' || c == '\r') {
+                editor_insert_newline();
             } else if (c == 8 || c == 127) {
-                // Backspace
                 if (E.cx > 0) {
-                    int len = strlen(E.lines[E.cy]);
-                    for (int i = E.cx - 1; i < len; i++) {
-                        E.lines[E.cy][i] = E.lines[E.cy][i + 1];
-                    }
+                    editor_row_delete_char(E.cy, E.cx);
                     E.cx--;
-                    E.modified = 1;
                 }
             } else {
-                // Inserare caracter normal
-                int len = strlen(E.lines[E.cy]);
-                if (len < SCREEN_COLS - 1 && E.cx < SCREEN_COLS - 1) {
-                    for (int i = len; i >= E.cx; i--) {
-                        E.lines[E.cy][i + 1] = E.lines[E.cy][i];
-                    }
-                    E.lines[E.cy][E.cx] = c;
-                    E.cx++;
-                    E.modified = 1;
-                }
+                editor_row_insert_char(E.cy, E.cx, c);
+                E.cx++;
             }
         }
         else if (E.mode == MODE_COMMAND) {
-            if (c == 27 || c == 1) { 
-                E.mode = MODE_NORMAL;
-            } else if (c == '\n' || c == '\r') {
-                // Procesarea comenzilor introduse în linia de jos
+            if (c == '\n' || c == '\r') {
                 if (strcmp(cmd_input, "q") == 0) {
                     if (E.modified) {
                         strcpy(E.status_msg, "No write since last change (add ! to override)");
@@ -464,11 +585,40 @@ int main(int argc, char* argv[]) {
                 } else if (strcmp(cmd_input, "q!") == 0) {
                     nano_clear_screen();
                     return 0;
+                } else if (strcmp(cmd_input, "w") == 0) {
+                    editor_save_file();
+                    E.mode = MODE_NORMAL;
+                } else if (starts_with(cmd_input, "w ")) {
+                    // Prelucrăm comanda `:w filename`
+                    char* fname = &cmd_input[2];
+                    while (*fname == ' ') fname++; // Ignorăm spațiile suplimentare
+                    if (*fname != '\0') {
+                        strcpy(E.filename, fname);
+                        editor_save_file();
+                    } else {
+                        strcpy(E.status_msg, "No file name");
+                    }
+                    E.mode = MODE_NORMAL;
                 } else if (strcmp(cmd_input, "wq") == 0) {
                     editor_save_file();
                     if (!E.modified) {
                         nano_clear_screen();
                         return 0;
+                    }
+                    E.mode = MODE_NORMAL;
+                } else if (starts_with(cmd_input, "wq ")) {
+                    // Prelucrăm comanda `:wq filename`
+                    char* fname = &cmd_input[3];
+                    while (*fname == ' ') fname++;
+                    if (*fname != '\0') {
+                        strcpy(E.filename, fname);
+                        editor_save_file();
+                        if (!E.modified) {
+                            nano_clear_screen();
+                            return 0;
+                        }
+                    } else {
+                        strcpy(E.status_msg, "No file name");
                     }
                     E.mode = MODE_NORMAL;
                 } else {

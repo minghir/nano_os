@@ -56,7 +56,7 @@ static void scroll_screen() {
 
 // Atributul VGA curent (folosit pentru text normal sau evidențiere / Reverse Video)
 static uint16_t current_vga_attr = FONT_COLOR; // Păstrăm culoarea verde setată de tine
-
+/*
 void print(const char* s) {
     while (*s) {
         // Interceptăm secvențele ANSI
@@ -146,7 +146,110 @@ void print(const char* s) {
     }
     cursor_update();
 }
+*/
 
+void print(const char* s) {
+    while (*s) {
+        // Interceptăm secvențele ANSI
+        if (*s == '\033' && s[1] == '[') {
+            s += 2; // Trecem peste "\033["
+            
+            // --- ADAUGAT: Suport pentru Cursor Left (\033[D) ---
+            if (*s == 'D') {
+                s++;
+                if (cursor > 0) cursor--;
+                cursor_update();
+                continue;
+            }
+            // --- ADAUGAT: Suport pentru Cursor Right (\033[C) ---
+            if (*s == 'C') {
+                s++;
+                if (cursor < 80 * 25 - 1) cursor++;
+                cursor_update();
+                continue;
+            }
+
+            // Verificăm dacă este comandă de stil (ex: 7m sau 0m)
+            if (*s >= '0' && *s <= '9') {
+                int val = 0;
+                const char* temp = s;
+                while (*temp >= '0' && *temp <= '9') {
+                    val = val * 10 + (*temp - '0');
+                    temp++;
+                }
+                if (*temp == 'm') {
+                    s = temp + 1;
+                    if (val == 7) {
+                        current_vga_attr = 0x7000;
+                    } else if (val == 0) {
+                        current_vga_attr = FONT_COLOR;
+                    }
+                    continue;
+                }
+            }
+            
+            // Altfel, este comanda de poziționare a cursorului: \033[Row;ColH
+            int r = 0;
+            while (*s >= '0' && *s <= '9') {
+                r = r * 10 + (*s - '0');
+                s++;
+            }
+            
+            if (*s == ';') {
+                s++;
+                int c = 0;
+                while (*s >= '0' && *s <= '9') {
+                    c = c * 10 + (*s - '0');
+                    s++;
+                }
+                
+                if (*s == 'H') {
+                    s++;
+                    int row = r - 1;
+                    int col = c - 1;
+                    if (row < 0) row = 0; if (row > 24) row = 24;
+                    if (col < 0) col = 0; if (col > 79) col = 79;
+                    cursor = row * 80 + col;
+                    cursor_update();
+                    continue;
+                }
+            }
+            
+            while (*s && *s != 'm' && *s != 'H' && *s != 'D' && *s != 'C') {
+                s++;
+            }
+            if (*s) s++;
+            continue;
+        }
+
+        char character = *s++;
+
+        if (character == '\n') {
+            cursor = (cursor / 80 + 1) * 80;
+            if (cursor >= 80 * 25) {
+                scroll_screen();
+                cursor = 80 * 24;
+            }
+            continue;
+        }
+
+        if (character == '\b') {
+            if (cursor > 0) {
+                cursor--;
+                VGA[cursor] = current_vga_attr | ' ';
+            }
+            continue;
+        }
+
+        VGA[cursor++] = current_vga_attr | character;
+        
+        if (cursor >= 80 * 25) {
+            scroll_screen();
+            cursor = 80 * 24;
+        }
+    }
+    cursor_update();
+}
 
 // --- 3. Newline modificat pentru a face scroll ---
 void newline() {
@@ -283,7 +386,7 @@ void keyboard_read_line(char* buffer, uint32_t max_length) {
         }
     }
 }
-
+/*
 void keyboard_irq() {
     uint8_t scancode = inb(0x60);
     static uint8_t ctrl_pressed = 0;
@@ -362,6 +465,178 @@ void keyboard_irq() {
 
     keyboard_queue_push((uint8_t)character);
 }
+*/
+
+void keyboard_irq() {
+    uint8_t scancode = inb(0x60);
+    static uint8_t ctrl_pressed = 0;
+    static uint8_t shift_pressed = 0;
+    static uint8_t alt_pressed = 0;
+    static uint8_t is_extended = 0; // Flag pentru taste extinse (care încep cu 0xE0)
+
+    // Dacă primim prefixul 0xE0, marchem tasta ca fiind extinsă și ieșim temporar
+    if (scancode == 0xE0) {
+        is_extended = 1;
+        return;
+    }
+
+    // Dacă suntem într-o secvență extinsă
+    if (is_extended) {
+        is_extended = 0; // Resetăm flag-ul pentru tasta următoare
+
+        // Dacă are bitul 7 setat (0x80), înseamnă că tasta extinsă a fost eliberată (Break Code)
+        if (scancode & 0x80) {
+            return;
+        }
+
+        // Transmitem secvența ANSI Escape pe care shell-ul o așteaptă pentru istoric:
+        // Săgeata Sus (Make code: 0xE0 0x48) -> Trimitem ESC, '[', 'A'
+		/*
+        if (scancode == 0x48) {
+            keyboard_queue_push(27);   // 27 este '\033' (ESC)
+            keyboard_queue_push('[');
+            keyboard_queue_push('A');
+            return;
+        }
+        // Săgeata Jos (Make code: 0xE0 0x50) -> Trimitem ESC, '[', 'B'
+        if (scancode == 0x50) {
+            keyboard_queue_push(27);   // 27 este '\033' (ESC)
+            keyboard_queue_push('[');
+            keyboard_queue_push('B');
+            return;
+        }
+        // (Opțional) Săgeata Stânga / Dreapta
+        if (scancode == 0x4B) { // Stânga
+            keyboard_queue_push(27); keyboard_queue_push('['); keyboard_queue_push('D');
+            return;
+        }
+        if (scancode == 0x4D) { // Dreapta
+            keyboard_queue_push(27); keyboard_queue_push('['); keyboard_queue_push('C');
+            return;
+        }
+		//Tasta Delete (Make code: 0xE0 0x53) ---
+        if (scancode == 0x53) {
+            keyboard_queue_push(27);   // ESC (\033)
+            keyboard_queue_push('[');
+            keyboard_queue_push('3');
+            keyboard_queue_push('~');
+            return;
+        }
+		*/
+		// În interiorul blocului "if (is_extended)" din io.c:
+        if (scancode == 0x48) { // Săgeata Sus
+            keyboard_queue_push(128);
+            return;
+        }
+        if (scancode == 0x50) { // Săgeata Jos
+            keyboard_queue_push(129);
+            return;
+        }
+        if (scancode == 0x4D) { // Săgeata Dreapta
+            keyboard_queue_push(130);
+            return;
+        }
+        if (scancode == 0x4B) { // Săgeata Stânga
+            keyboard_queue_push(131);
+            return;
+        }
+        if (scancode == 0x53) { // Tasta Delete
+            keyboard_queue_push(132);
+            return;
+        }
+		if (scancode == 0x47) { // Home
+            keyboard_queue_push(133);
+            return;
+        }
+        if (scancode == 0x49) { // Page Up
+            keyboard_queue_push(134);
+            return;
+        }
+        if (scancode == 0x4F) { // End
+            keyboard_queue_push(135);
+            return;
+        }
+        if (scancode == 0x51) { // Page Down
+            keyboard_queue_push(136);
+            return;
+        }
+        if (scancode == 0x52) { // Insert
+            keyboard_queue_push(137);
+            return;
+        }
+
+        return;
+    }
+
+    // --- Restul codului tău existent pentru taste normale rămâne nemodificat ---
+    if (scancode & 0x80) {
+        uint8_t released = scancode & 0x7F;
+        if (released == 0x1D) {
+            ctrl_pressed = 0;
+        } else if (released == 0x2A || released == 0x36) {
+            shift_pressed = 0;
+        } else if (released == 0x38) {
+            alt_pressed = 0;
+        }
+        return;
+    }
+
+    if (scancode == 0x1D) {
+        ctrl_pressed = 1;
+        return;
+    }
+    if (scancode == 0x2A || scancode == 0x36) {
+        shift_pressed = 1;
+        return;
+    }
+    if (scancode == 0x38) {
+        alt_pressed = 1;
+        return;
+    }
+    if (ctrl_pressed && scancode == 0x2E) {
+        keyboard_queue_push(3);
+        return;
+    }
+    if (alt_pressed && scancode == 0x2E) {
+        clear_screen();
+        return;
+    }
+
+    if (scancode >= sizeof(keyboard_map)) {
+        return;
+    }
+
+    char character = keyboard_map[scancode];
+    if (character == 0) {
+        return;
+    }
+    if (shift_pressed) {
+        if (character >= 'a' && character <= 'z') {
+            character -= 'a' - 'A';
+        } else if (character == '-')  { character = '_'; }
+          else if (character == '1')  { character = '!'; }
+          else if (character == '2')  { character = '@'; }
+          else if (character == '3')  { character = '#'; }
+          else if (character == '4')  { character = '$'; }
+          else if (character == '5')  { character = '%'; }
+          else if (character == '6')  { character = '^'; }
+          else if (character == '7')  { character = '&'; }
+          else if (character == '8')  { character = '*'; }
+          else if (character == '9')  { character = '('; }
+          else if (character == '0')  { character = ')'; }
+          else if (character == '=')  { character = '+'; }
+          else if (character == '[')  { character = '{'; }
+          else if (character == ']')  { character = '}'; }
+          else if (character == '\\') { character = '|'; }
+          else if (character == ';')  { character = ':'; }
+          else if (character == '\'') { character = '"'; }
+          else if (character == ',')  { character = '<'; }
+          else if (character == '.')  { character = '>'; }
+          else if (character == '/')  { character = '?'; }
+    }
+
+    keyboard_queue_push((uint8_t)character);
+}
 
 void keyboard_stop_message() {
     print("Ctrl+C received. Keyboard loop stopped.");
@@ -380,4 +655,8 @@ void print_at(int row, int col, const char* s) {
 void keyboard_flush() {
     keyboard_queue_read = 0;
     keyboard_queue_write = 0;
+}
+
+int keyboard_has_data() {
+    return (keyboard_queue_read != keyboard_queue_write);
 }

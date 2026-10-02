@@ -265,6 +265,10 @@ int nano_getcwd(char* buf, int max_len); //curent dir
 
 char* string_copy(char* dest, const char* src);
 
+int64_t parse_int64(const char* str);
+//float parse_float(const char* str);
+//float nano_parse_float(const char* str);
+
 // Trimite un mesaj în syslog-ul kernelului
 
 // Și rescrie nano_syslog și nano_getlog curat, fără mov-uri manuale paralele:
@@ -280,6 +284,17 @@ static inline void nano_getlog(char* dest, int max_len) {
         "int $0x80"
         : : "a"((uint64_t)SYSCALL_GETLOG), "D"((uint64_t)dest), "S"((uint64_t)max_len) : "memory"
     );
+}
+
+static inline int nano_has_char(void) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)18) // SYSCALL_HAS_CHAR = 18
+        : "cc", "memory"
+    );
+    return (int)ret;
 }
 
 #endif

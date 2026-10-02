@@ -10,6 +10,9 @@
 // 0x0E - Galben deschis (Yellow)
 // 0x0C - Roșu deschis (Light Red)
 
+// VGA text mode
+extern uint16_t* VGA;
+extern int cursor;
 
 // I/O port access
 static inline uint8_t inb(uint16_t port) {
@@ -36,9 +39,6 @@ static inline void outw(uint16_t port, uint16_t value) {
     __asm__ volatile ("outw %0, %1" : : "a" (value), "Nd" (port));
 }
 
-// VGA text mode
-extern uint16_t* VGA;
-extern int cursor;
 
 extern volatile uint8_t keyboard_running;
 
@@ -64,6 +64,8 @@ void idt_set_gate(int num, uint64_t base, uint16_t sel, uint8_t flags);
 void interrupts_init();
 
 //void set_vga_color_palette();
+
+int keyboard_has_data(void);
 
 #endif
 
