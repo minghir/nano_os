@@ -37,9 +37,4 @@ void interrupts_init() {
     mask &= ~((1 << 0) | (1 << 1)); // Deblochează bitul 0 (timer) și bitul 1 (tastatură)
     outb(0x21, mask);
 
-    // 5. Inițializează PIT-ul (Programmable Interval Timer) la 100 Hz
-    timer_init(1000);
-
-    // 6. Pornește întreruperile global
-    __asm__ volatile ("sti");
 }
