@@ -14,15 +14,19 @@ typedef struct {
     uint8_t keyboard_queue[256];    
     uint8_t keyboard_queue_read;
     uint8_t keyboard_queue_write;
+	uint32_t foreground_pid; // PID-ul procesului care rulează acum în "față" pe acest TTY
 } TTY;
 
 // Le declarăm extern ca să poată fi folosite de io.c
 extern TTY ttys[MAX_TTYS];
 extern int active_tty;
 
+
 void tty_init();
+void tty_refresh_active_screen(void);
 void switch_tty(int tty_index);
 int get_active_tty();
 void tty_clear_screen();
+
 
 #endif

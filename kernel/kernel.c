@@ -239,7 +239,9 @@ void kernel_main(unsigned long magic, unsigned long addr) {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
                 
                 // Transmitem parametrul `t` ca fiind tty_id-ul procesului!
-                process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
+               uint32_t init_pid = process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
+			   ttys[t].foreground_pid = init_pid;
+			   
             } else {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
                 print("FATAL ERROR: /sbin/init bad signature!\n");

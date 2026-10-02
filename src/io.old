@@ -37,6 +37,7 @@ void cursor_init() {
 }
 
 // Scroll a fost modificat să facă scroll DOAR pe bufferul TTY-ului țintă
+/*
 static void scroll_screen_tty(int target_tty) {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
     for (int i = 0; i < 80 * 24; i++) {
@@ -52,8 +53,21 @@ static void scroll_screen_tty(int target_tty) {
         }
     }
 }
+*/
 
+static void scroll_screen_tty(int target_tty) {
+    // Mutăm liniile cu o poziție mai sus în bufferul TTY-ului
+    for (int i = 0; i < 80 * 24; i++) {
+        ttys[target_tty].screen_buffer[i] = ttys[target_tty].screen_buffer[i + 80];
+    }
+    
+    // Curățăm ultima linie a bufferului cu atributul curent și spații
+    for (int i = 80 * 24; i < 80 * 25; i++) {
+        ttys[target_tty].screen_buffer[i] = ttys[target_tty].current_vga_attr | ' ';
+    }
+}
 
+/*
 // Pune asta în src/io.c (și șterge-o pe cea veche)
 static void scroll_screen() {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
@@ -73,130 +87,14 @@ static void scroll_screen() {
         physical_vga[i] = ttys[active_tty].screen_buffer[i];
     }
 }
+*/
+
+
+
+
+
 
 /*
-void print(const char* s) {
-    uint16_t* physical_vga = (uint16_t*)0xB8000;
-    
-    // Preluăm starea locală din TTY-ul activ
-    int cursor = ttys[active_tty].cursor;
-    uint16_t current_vga_attr = ttys[active_tty].current_vga_attr;
-
-    while (*s) {
-        // Interceptăm secvențele ANSI
-        if (*s == '\033' && s[1] == '[') {
-            s += 2; // Trecem peste "\033["
-            
-            // --- Suport pentru Cursor Left (\033[D) ---
-            if (*s == 'D') {
-                s++;
-                if (cursor > 0) cursor--;
-                ttys[active_tty].cursor = cursor;
-                cursor_update();
-                continue;
-            }
-            // --- Suport pentru Cursor Right (\033[C) ---
-            if (*s == 'C') {
-                s++;
-                if (cursor < 80 * 25 - 1) cursor++;
-                ttys[active_tty].cursor = cursor;
-                cursor_update();
-                continue;
-            }
-
-            // Verificăm dacă este comandă de stil (ex: 7m sau 0m)
-            if (*s >= '0' && *s <= '9') {
-                int val = 0;
-                const char* temp = s;
-                while (*temp >= '0' && *temp <= '9') {
-                    val = val * 10 + (*temp - '0');
-                    temp++;
-                }
-                if (*temp == 'm') {
-                    s = temp + 1;
-                    if (val == 7) {
-                        current_vga_attr = 0x7000;
-                    } else if (val == 0) {
-                        current_vga_attr = FONT_COLOR;
-                    }
-                    ttys[active_tty].current_vga_attr = current_vga_attr;
-                    continue;
-                }
-            }
-            
-            // Comanda de poziționare a cursorului: \033[Row;ColH
-            int r = 0;
-            while (*s >= '0' && *s <= '9') {
-                r = r * 10 + (*s - '0');
-                s++;
-            }
-            
-            if (*s == ';') {
-                s++;
-                int c = 0;
-                while (*s >= '0' && *s <= '9') {
-                    c = c * 10 + (*s - '0');
-                    s++;
-                }
-                
-                if (*s == 'H') {
-                    s++;
-                    int row = r - 1;
-                    int col = c - 1;
-                    if (row < 0) row = 0; if (row > 24) row = 24;
-                    if (col < 0) col = 0; if (col > 79) col = 79;
-                    cursor = row * 80 + col;
-                    ttys[active_tty].cursor = cursor;
-                    cursor_update();
-                    continue;
-                }
-            }
-            
-            while (*s && *s != 'm' && *s != 'H' && *s != 'D' && *s != 'C') {
-                s++;
-            }
-            if (*s) s++;
-            continue;
-        }
-
-        char character = *s++;
-
-        if (character == '\n') {
-            cursor = (cursor / 80 + 1) * 80;
-            if (cursor >= 80 * 25) {
-                scroll_screen();
-                cursor = 80 * 24;
-            }
-            ttys[active_tty].cursor = cursor;
-            continue;
-        }
-
-        if (character == '\b') {
-            if (cursor > 0) {
-                cursor--;
-                ttys[active_tty].screen_buffer[cursor] = current_vga_attr | ' ';
-                physical_vga[cursor] = current_vga_attr | ' ';
-            }
-            ttys[active_tty].cursor = cursor;
-            continue;
-        }
-
-        // SCRIERE DUALĂ: Salvăm în bufferul TTY-ului și afișăm pe ecranul fizic
-        ttys[active_tty].screen_buffer[cursor] = current_vga_attr | character;
-        physical_vga[cursor] = current_vga_attr | character;
-        cursor++;
-        
-        if (cursor >= 80 * 25) {
-            scroll_screen();
-            cursor = 80 * 24;
-        }
-        
-        // Salvăm cursorul înapoi în structură
-        ttys[active_tty].cursor = cursor;
-    }
-    cursor_update();
-}
-*/
 void print(const char* s) {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
     
@@ -295,6 +193,103 @@ void print(const char* s) {
     // Update hardware cursor only if we are printing to the active screen
     if (target_tty == active_tty) cursor_update();
 }
+*/
+void print(const char* s) {
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    
+    int cursor = ttys[target_tty].cursor;
+    uint16_t current_vga_attr = ttys[target_tty].current_vga_attr;
+
+    while (*s) {
+        if (*s == '\033' && s[1] == '[') {
+            s += 2; 
+            if (*s == 'D') {
+                s++;
+                if (cursor > 0) cursor--;
+                ttys[target_tty].cursor = cursor;
+                if (target_tty == active_tty) cursor_update(); // <--- Restabilit
+                continue;
+            }
+            if (*s == 'C') {
+                s++;
+                if (cursor < 80 * 25 - 1) cursor++;
+                ttys[target_tty].cursor = cursor;
+                if (target_tty == active_tty) cursor_update(); // <--- Restabilit
+                continue;
+            }
+            if (*s >= '0' && *s <= '9') {
+                int val = 0;
+                const char* temp = s;
+                while (*temp >= '0' && *temp <= '9') {
+                    val = val * 10 + (*temp - '0');
+                    temp++;
+                }
+                if (*temp == 'm') {
+                    s = temp + 1;
+                    if (val == 7) current_vga_attr = 0x7000;
+                    else if (val == 0) current_vga_attr = FONT_COLOR;
+                    ttys[target_tty].current_vga_attr = current_vga_attr;
+                    continue;
+                }
+            }
+            int r = 0;
+            while (*s >= '0' && *s <= '9') { r = r * 10 + (*s - '0'); s++; }
+            if (*s == ';') {
+                s++;
+                int c = 0;
+                while (*s >= '0' && *s <= '9') { c = c * 10 + (*s - '0'); s++; }
+                if (*s == 'H') {
+                    s++;
+                    int row = r - 1; int col = c - 1;
+                    if (row < 0) row = 0; if (row > 24) row = 24;
+                    if (col < 0) col = 0; if (col > 79) col = 79;
+                    cursor = row * 80 + col;
+                    ttys[target_tty].cursor = cursor;
+                    if (target_tty == active_tty) cursor_update(); // <--- Restabilit pentru vi (\033[row;colH)
+                    continue;
+                }
+            }
+            while (*s && *s != 'm' && *s != 'H' && *s != 'D' && *s != 'C') s++;
+            if (*s) s++;
+            continue;
+        }
+
+        char character = *s++;
+
+        if (character == '\n') {
+            cursor = (cursor / 80 + 1) * 80;
+            if (cursor >= 80 * 25) {
+                scroll_screen_tty(target_tty);
+                cursor = 80 * 24;
+            }
+            ttys[target_tty].cursor = cursor;
+            continue;
+        }
+
+        if (character == '\b') {
+            if (cursor > 0) {
+                cursor--;
+                ttys[target_tty].screen_buffer[cursor] = current_vga_attr | ' ';
+            }
+            ttys[target_tty].cursor = cursor;
+            continue;
+        }
+
+        ttys[target_tty].screen_buffer[cursor] = current_vga_attr | character;
+        cursor++;
+        
+        if (cursor >= 80 * 25) {
+            scroll_screen_tty(target_tty);
+            cursor = 80 * 24;
+        }
+        ttys[target_tty].cursor = cursor;
+    }
+    
+    // Asigurăm actualizarea cursorului la finalul printării pe ecranul activ
+    if (target_tty == active_tty) {
+        tty_refresh_active_screen(); // Asta va randa bufferul și va actualiza și cursorul corect
+    }
+}
 
 // --- 3. Newline modificat pentru a face scroll ---
 /*
@@ -335,7 +330,7 @@ void clear_screen() {
     cursor_update();
 }
 */
-
+/*
 void clear_screen() {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
     int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
@@ -348,6 +343,20 @@ void clear_screen() {
     }
     ttys[target_tty].cursor = 0;
     if (target_tty == active_tty) cursor_update();
+}
+*/
+
+void clear_screen() {
+    // Aflăm în ce TTY trebuie să ștergem ecranul
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    
+    // Umplem exclusiv bufferul TTY-ului respectiv cu spații și atributele curente
+    for (int index = 0; index < 80 * 25; index++) {
+        ttys[target_tty].screen_buffer[index] = ttys[target_tty].current_vga_attr | ' ';
+    }
+    
+    // Resetăm cursorul în bufferul TTY-ului
+    ttys[target_tty].cursor = 0;
 }
 
 void pic_remap() {
@@ -618,6 +627,7 @@ void keyboard_stop_message() {
     newline();
 }
 
+/*
 void print_at(int row, int col, const char* s) {
     uint16_t* vga = (uint16_t*)0xB8000;
     int index = row * 80 + col;
@@ -626,7 +636,22 @@ void print_at(int row, int col, const char* s) {
         vga[index++] = FONT_COLOR | *s++;
     }
 }
+*/
 
+void print_at(int row, int col, const char* s) {
+    // Aflăm în ce TTY trebuie să scriem (procesul curent sau cel activ)
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    
+    // Verificăm limitele ecranului (80x25)
+    if (row < 0 || row > 24 || col < 0 || col > 79) return;
+    
+    int index = row * 80 + col;
+    uint16_t attr = ttys[target_tty].current_vga_attr; // Folosim atributul curent al TTY-ului
+    
+    while (*s && index < 80 * 25) {
+        ttys[target_tty].screen_buffer[index++] = attr | *s++;
+    }
+}
 
 void keyboard_flush() {
     ttys[active_tty].keyboard_queue_read = 0;

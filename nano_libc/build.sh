@@ -43,6 +43,7 @@ make APP=dmesg
 make APP=mandel
 make APP=nanoasm
 make APP=nanovi
+make APP=watch
 
 make APP=chr
 make APP=argt

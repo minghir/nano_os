@@ -263,7 +263,11 @@ int main() {
             nano_shutdown();
             while (1) { __asm__ volatile ("hlt"); }
             return 0;
-        } 
+        }
+		else if (strcmp(cmd, "reboot") == 0) {
+			nano_print("Rebooting Nano OS...\n");
+			nano_reboot();
+		}		
         else if (strcmp(cmd, "cd") == 0) {
             if (argc > 1) {
                 if (!nano_cd(argv[1])) {

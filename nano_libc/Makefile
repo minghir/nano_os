@@ -52,6 +52,8 @@ else ifeq ($(APP),nanoasm)
     OS_PATH = /bin/asm
 else ifeq ($(APP),nanovi)
     OS_PATH = /bin/vi
+else ifeq ($(APP),watch)
+    OS_PATH = /bin/watch
 else ifeq ($(APP),chr)
     OS_PATH = /tests/chr
 else ifeq ($(APP),argt)

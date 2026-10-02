@@ -35,6 +35,8 @@
 #define SYSCALL_HAS_CHAR	29 //
 #define SYSCALL_FREE		30
 #define SYSCALL_PRINT_FLOAT  31
+#define SYSCALL_REBOOT		32
+#define SYSCALL_GETPID		33
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;

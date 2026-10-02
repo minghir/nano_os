@@ -297,4 +297,27 @@ static inline int nano_has_char(void) {
     return (int)ret;
 }
 
+static inline void nano_reboot() {
+    __asm__ volatile (
+        "mov $32, %%rax\n" // Numărul SYSCALL_REBOOT
+        "int $0x80\n"      // Sau întreruperea ta de syscall
+        :
+        :
+        : "rax"
+    );
+}
+
+uint32_t nano_getpid() {
+    uint32_t pid;
+    __asm__ volatile (
+        "mov $33, %%rax\n" // Înlocuiește X cu numărul corespunzător lui SYSCALL_GETPID
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r"(pid)
+        :
+        : "rax"
+    );
+    return pid;
+}
+
 #endif

@@ -46,6 +46,8 @@ static inline void outw(uint16_t port, uint16_t value) {
 
 extern volatile uint8_t keyboard_running;
 
+
+void tty_write_char(int tty_id, char c, uint16_t attr);
 void print(const char* s);
 void newline();
 void clear_screen();

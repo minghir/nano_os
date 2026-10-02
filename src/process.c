@@ -86,7 +86,7 @@ uint64_t schedule(uint64_t current_rsp) {
     return current_process->regs.rsp;
 }
 
-void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
+uint32_t process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
     
     //print("[DEBUG] process_create: Trying to create process '");
     //print(name);
@@ -108,7 +108,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     
     if (!p) {
         print("[DEBUG] ERROR: Process table full! Cannot create process.\n");
-        return;
+        return 0;
     }
 
     // An exited process keeps its stack until the scheduler has switched away.
@@ -139,7 +139,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     uint8_t* stack = (uint8_t*)malloc(16384);
     if (!stack) {
         print("[DEBUG] ERROR: malloc failed for process stack!\n");
-        return;
+        return 0;
     }
     p->stack_base = (uint64_t)stack;
 	
@@ -174,7 +174,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     // 9. Îl marcăm ca pregătit să ruleze
     p->state = PROC_READY;
 	
-    
+    return p->pid; // <--- Returnezi PID-ul alocat
     //print("[DEBUG] process_create: Process created successfully! PID assigned, state set to PROC_READY.\n");
 }
 
