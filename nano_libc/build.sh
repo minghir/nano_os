@@ -58,4 +58,5 @@ make clean
 
 
 
-qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses
+
+qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0

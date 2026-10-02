@@ -12,12 +12,18 @@
 #include "syslog.h"
 #include "tty.h"
 #include "sys.h"
+#include "string.h"
+#include "speaker.h"
 
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
 
 void syscall_handler(SyscallRegisters* regs) {
+	
+	// 1. Dezactivăm întreruperile pentru a preveni schimbarea lui current_process la mijlocul syscall-ului
+    __asm__ volatile("cli");
+	
     // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
     uint32_t syscall_num = (uint32_t)regs->rax;
 
@@ -220,7 +226,13 @@ void syscall_handler(SyscallRegisters* regs) {
             int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
             uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages, target_tty);
 			
-            
+            char debug_buf[32];
+print("[DEBUG] Lansare proces '");
+print(prog_name);
+print("' pe TTY index: ");
+simple_itoa(target_tty, debug_buf);
+print(debug_buf);
+print("\n");
 			
             ttys[target_tty].foreground_pid = new_pid;
             
@@ -255,7 +267,7 @@ void syscall_handler(SyscallRegisters* regs) {
             break;
         }
 		*/
-		
+		/*
 		case SYSCALL_EXIT: {
             __asm__ volatile ("cli");
             PCB* exiting_process = current_process;
@@ -301,7 +313,57 @@ void syscall_handler(SyscallRegisters* regs) {
             while (1) { __asm__ volatile ("sti; hlt"); }
             break;
         }
+		*/
+		case SYSCALL_EXIT: {
+			__asm__ volatile ("cli");
+			PCB* exiting_process = current_process;
+			if (exiting_process) {
+				uint32_t parent_pid = exiting_process->ppid;
+				exiting_process->exit_code = (int)regs->rdi;
 
+				// Folosim harta kernelului înainte de eliberarea paginilor procesului
+				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+				for (int p = 0; p < 8; p++) {
+					if (exiting_process->prog_pages[p] != 0) {
+						free_page((void*)exiting_process->prog_pages[p]);
+						exiting_process->prog_pages[p] = 0;
+					}
+				}
+
+				if (exiting_process->cr3) {
+					free_process_paging(exiting_process->cr3);
+					exiting_process->cr3 = 0;
+				}
+
+				// 1. Îl facem ZOMBIE (păstrăm PID-ul și ppid-ul ca părintele să-l poată culege prin wait)
+				exiting_process->state = PROC_ZOMBIE;
+				
+				int target_tty = exiting_process->tty_id;
+
+				// 2. Căutăm părintele și îl trezim din somn dacă aștepta
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].pid == parent_pid &&
+						process_table[i].state == PROC_SLEEPING) {
+						process_table[i].state = PROC_READY;
+						keyboard_flush();
+						break;
+					}
+				}
+				
+				ttys[target_tty].foreground_pid = parent_pid;
+			}
+
+			// 3. Predăm controlul: scoatem procesul curent și forțăm oprirea
+			current_process = NULL;
+			__asm__ volatile ("sti");
+
+			// Forțăm un hlt până la următorul tic de ceas; 
+			// schedulerul va prelua automat un alt proces READY din tabelă.
+			while (1) { __asm__ volatile ("hlt"); }
+			break;
+		}
+		
         case SYSCALL_KILL: {
             int target_pid = (int)regs->rdi;
             if (target_pid <= 1) { regs->rax = (uint64_t)-1; break; }
@@ -363,7 +425,7 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = killed ? 1 : 0;
             break;
         }
-		
+		/*
 		case SYSCALL_WAIT: { // SYSCALL_WAIT
             int children_alive = 0;
             
@@ -393,6 +455,66 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = 1; // Un copil tocmai și-a dat exit și ne-a trezit!
             break;
         }
+		*/
+		
+		case SYSCALL_WAIT: {
+			int has_children = 0;
+			int dead_child_found = 0;
+			int dead_child_pid = 0;
+
+			// 1. Scanăm tabela de procese pentru copiii acestui proces
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].state != PROC_FREE && process_table[i].ppid == current_process->pid) {
+					has_children = 1;
+					
+					// Folosim PROC_ZOMBIE (starea corectă din pcb.h)
+					if (process_table[i].state == PROC_ZOMBIE) {
+						dead_child_pid = process_table[i].pid;
+						
+						// Eliberăm slotul copilului terminat
+						process_table[i].state = PROC_FREE;
+						process_table[i].pid = 0;
+						process_table[i].ppid = 0;
+						
+						dead_child_found = 1;
+						break;
+					}
+				}
+			}
+
+			// Dacă nu are deloc copii, returnăm 0
+			if (!has_children) {
+				regs->rax = 0;
+				break;
+			}
+
+			// Dacă am găsit un copil deja terminat (zombie), îi returnăm PID-ul imediat!
+			if (dead_child_found) {
+				regs->rax = dead_child_pid;
+				break;
+			}
+
+			// 2. Dacă are copii, dar TOȚI rulează încă, punem Shell-ul la somn
+			current_process->state = PROC_SLEEPING;
+			
+			while (current_process->state == PROC_SLEEPING) {
+				__asm__ volatile ("sti; hlt");
+			}
+
+			// Când s-a trezit (pentru că un copil a murit), culegem copilul zombie
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].state == PROC_ZOMBIE && process_table[i].ppid == current_process->pid) {
+					dead_child_pid = process_table[i].pid;
+					process_table[i].state = PROC_FREE;
+					process_table[i].pid = 0;
+					process_table[i].ppid = 0;
+					regs->rax = dead_child_pid;
+					break;
+				}
+			}
+			break;
+		}
+		
 		case SYSCALL_PS: { // SYSCALL_PS
             // Definim o structură simplificată pe care o vom trimite user-space-ului
             typedef struct {
@@ -582,6 +704,21 @@ void syscall_handler(SyscallRegisters* regs) {
 			// Returnează PID-ul procesului care rulează chiar acum pe CPU
 			regs->rax = current_process ? (uint64_t)current_process->pid : 0;
 			break;
+		case SYSCALL_BEEP: {
+			uint32_t frequency = (uint32_t)regs->rdi;
+			uint32_t duration_ms = (uint32_t)regs->rsi;
+			
+			beep(frequency, duration_ms); // Funcția ta de speaker din kernel
+			
+			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_SET_CURSOR_SHAPE: {
+			int style = (int)regs->rdi;
+			set_cursor_shape(style);
+			regs->rax = 0;
+			break;
+		}
         default: {
             print("Kernel Warning: Syscall necunoscut apelat: ");
             print_number(regs->rax);
@@ -591,4 +728,7 @@ void syscall_handler(SyscallRegisters* regs) {
             break;
         }
     }
+	
+	// 2. Reactivăm întreruperile la ieșire
+    __asm__ volatile("sti");
 }

@@ -36,6 +36,14 @@ void sleep_ms(uint32_t milliseconds) {
     }
 }
 
+void delay_ms(uint32_t ms) {
+    for (uint32_t i = 0; i < ms; i++) {
+        for (volatile uint32_t j = 0; j < 100000; j++) {
+            __asm__ volatile("nop");
+        }
+    }
+}
+
 /*
 void timer_irq() {
     timer_ticks++;

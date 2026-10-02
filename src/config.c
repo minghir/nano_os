@@ -1,5 +1,6 @@
 #include "config.h"
 #include "io.h"
+#include "string.h"
 
 SystemConfig current_config = {
     .timezone_offset = 3, // Valoare implicită (fallback)

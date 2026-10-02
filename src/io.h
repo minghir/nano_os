@@ -73,5 +73,7 @@ void interrupts_init();
 
 int keyboard_has_data(void);
 
+void set_cursor_shape(int style);
+
 #endif
 

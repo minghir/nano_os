@@ -235,6 +235,27 @@ void editor_refresh_screen() {
     }
 
     char cursor_seq[32];
+	/*
+    if (E.mode == MODE_COMMAND) {
+        sprintf(cursor_seq, "\033[24;%dH", cmd_input_len + 2);
+    } else {
+        int screen_y = (E.cy - E.row_offset) + 1;
+        sprintf(cursor_seq, "\033[%d;%dH", screen_y, E.cx + 1);
+    }
+    nano_print(cursor_seq);
+*/
+	
+    
+    // --- SCHIMBARE FORMĂ CURSOR ÎN FUNCȚIE DE MOD ---
+	/*
+    if (E.mode == MODE_INSERT) {
+        nano_print("\033[6 q"); // Bară verticală (|) în modul Insert
+    } else {
+        nano_print("\033[2 q"); // Bloc în modul Normal / Visual / Command
+    }
+	*/
+    // ------------------------------------------------
+
     if (E.mode == MODE_COMMAND) {
         sprintf(cursor_seq, "\033[24;%dH", cmd_input_len + 2);
     } else {
@@ -351,6 +372,7 @@ int main(int argc, char* argv[]) {
         if (c == 27) { 
             if (E.mode == MODE_INSERT || E.mode == MODE_VISUAL || E.mode == MODE_COMMAND) {
                 E.mode = MODE_NORMAL;
+				nano_set_cursor_shape(0);
             }
             continue;
         }
@@ -404,6 +426,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
         else if (c == 137) { // Insert
+			nano_set_cursor_shape(1);
             E.mode = MODE_INSERT;
             continue;
         }
@@ -412,6 +435,7 @@ int main(int argc, char* argv[]) {
         if (E.mode == MODE_NORMAL) {
             switch (c) {
                 case 'i': 
+					nano_set_cursor_shape(1);
                     E.mode = MODE_INSERT; 
                     break;
                 case 'v': 

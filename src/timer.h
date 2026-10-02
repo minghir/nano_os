@@ -25,5 +25,6 @@ void timer_irq(void);
 DateTime get_current_time();
 
 void sleep_ms(uint32_t milliseconds);
+void delay_ms(uint32_t ms);
 
 #endif

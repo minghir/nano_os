@@ -36,6 +36,21 @@ void cursor_init() {
     cursor_update();
 }
 
+
+void set_cursor_shape(int style) {
+    // style 0 = bloc plin, style 1 = underline
+    outb(0x3D4, 0x0A);
+    if (style == 1) {
+        outb(0x3D5, 12); // Începe de la rândul 12 din 15 (underline)
+    } else {
+        outb(0x3D5, 0);  // Începe de la rândul 0 (bloc)
+    }
+    
+    outb(0x3D4, 0x0B);
+    outb(0x3D5, 15);     // Se termină la rândul 15
+}
+
+
 // Scroll a fost modificat să facă scroll DOAR pe bufferul TTY-ului țintă
 static void scroll_screen_tty(int target_tty) {
     uint16_t* physical_vga = (uint16_t*)0xB8000;

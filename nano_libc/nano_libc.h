@@ -307,17 +307,27 @@ static inline void nano_reboot() {
     );
 }
 
-uint32_t nano_getpid() {
-    uint32_t pid;
+static inline void nano_beep(uint32_t frequency, uint32_t duration_ms) {
     __asm__ volatile (
-        "mov $33, %%rax\n" // Înlocuiește X cu numărul corespunzător lui SYSCALL_GETPID
+        "mov $34, %%rax\n"         // Numărul syscall-ului pentru Beep (ex: 34)
+        "mov %0, %%rdi\n"          // Primul argument: Frecvența devine %0
+        "mov %1, %%rsi\n"          // Al doilea argument: Durata devine %1
         "int $0x80\n"
-        "mov %%rax, %0\n"
-        : "=r"(pid)
         :
-        : "rax"
+        : "r"((uint64_t)frequency), "r"((uint64_t)duration_ms)
+        : "rax", "rdi", "rsi", "memory"
     );
-    return pid;
+}
+
+static inline void nano_set_cursor_shape(int style) {
+    __asm__ volatile (
+        "mov $35, %%rax\n"         // Numărul noului syscall (35)
+        "mov %0, %%rdi\n"          // Stilul trimis în rdi (0 = bloc, 1 = underline)
+        "int $0x80\n"
+        :
+        : "r"((uint64_t)style)
+        : "rax", "rdi", "memory"
+    );
 }
 
 #endif

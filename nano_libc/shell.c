@@ -267,6 +267,10 @@ int main() {
 		else if (strcmp(cmd, "reboot") == 0) {
 			nano_print("Rebooting Nano OS...\n");
 			nano_reboot();
+		}
+		else if (strcmp(cmd, "beep") == 0) {
+			nano_print("Emitere sunet PC Speaker...\n");
+			nano_beep(880, 250); // Nota La (880 Hz) timp de 250 milisecunde
 		}		
         else if (strcmp(cmd, "cd") == 0) {
             if (argc > 1) {

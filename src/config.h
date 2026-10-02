@@ -13,7 +13,7 @@ extern SystemConfig current_config;
 
 // Funcție de parsare a conținutului text din fișierul încărcat
 void parse_config(const char* file_data);
-
+/*
 // O funcție simplă de conversie string -> integer (atoi rudimentar)
 static int simple_atoi(const char* str) {
     int res = 0;
@@ -63,5 +63,5 @@ static char* simple_itoa(int value, char* buffer) {
 
     return buffer;
 }
-
+*/
 #endif
