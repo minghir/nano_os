@@ -7,6 +7,8 @@
 #include "../src/timer.h"
 #include "../src/paging.h"
 #include "../src/syslog.h"
+#include "../src/syscall.h"
+#include "../src/tty.h"
 
 #include <stdint.h>
 
@@ -157,6 +159,10 @@ void page_fault_handler(FaultRegisters* regs) {
 }
 
 void kernel_main(unsigned long magic, unsigned long addr) {
+	
+	// 1. Inițializăm subsistemul TTY și curățăm ecranele virtuale
+    tty_init();
+	
     cursor_init();
     print("Nano OS booted!");
     newline();
@@ -188,84 +194,65 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     memory_init();
     fs_init();
 	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
-	kernel_log("KERNEL:Log file created");
+	kernel_log("KERNEL:Log file created\n");
     
     // Load kernel environment variables (PATH)
     load_kernel_environment();
-	kernel_log("KERNEL:Enviroment loaded.");
+	kernel_log("KERNEL:Enviroment loaded.\n");
 	
-	
-    // --- LOADING THE SHELL FROM USER SPACE AS A PROCESS ---
-    print("Loading the Init daemon from User Space (/sbin/init)...\n");
+	// --- LOADING THE SHELL(S) FROM USER SPACE ---
+    print("Loading Init daemons on all TTYs...\n");
     
-    // 1. Alocăm 8 pagini FIZICE disjuncte într-un array
-    uint64_t init_pages[8];
-    for(int p = 0; p < 8; p++) {
-        init_pages[p] = (uint64_t)alloc_page();
-    }
-
-    // 2. Creăm o HARTĂ VIRTUALĂ nouă (PML4) DOAR pentru Shell
-    uint64_t* init_pml4 = create_process_pml4();
-
-    // 3. Mapăm paginile fizice la adresa virtuală 0x800000 (continuu)
-    for (int p = 0; p < 8; p++) {
-        map_page(init_pml4, 0x800000 + (p * 4096), init_pages[p], 
-                 PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
-    }
-
-    // 4. Salvăm CR3-ul kernelului și trecem TEMPORAR pe PML4-ul init-ului
-    //    Asta ne permite să folosim MMU-ul pentru a citi direct la adresa 0x800000
+    // Salvăm cr3-ul curent al kernelului o singură dată
     uint64_t old_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
-    __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
 
-    // 5. Citim fișierul CONTINUU la adresa VIRTUALĂ!
-    int bytes = fs_read_file("/sbin/init", (uint8_t*)0x800000, 32768);
-    
-    print("[DEBUG] fs_read_file bytes read: ");
-    if (bytes > 0) print("[DEBUG] File read successfully.\n");
-    else print("[DEBUG] File read failed or empty!\n");
-
-    typedef struct {
-        char magic[4];       // "NAS1"
-        uint32_t entry_offset;
-    } __attribute__((packed)) NanoHeader;
-
-    if (bytes > (int)sizeof(NanoHeader)) {
-        NanoHeader* hdr = (NanoHeader*)0x800000;
+    // Pornim 4 shell-uri independente
+    for (int t = 0; t < MAX_TTYS; t++) {
         
-        // Verificăm semnătura "NAS1"
-        if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
-            hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
-            
-            print("Init signature valid (NAS1). Entry offset parsed.\n");
-            
-            // Entry point-ul se raportează virtual (0x800000)
-            uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
-            
-            print("[DEBUG] Calling process_create for init...\n");
-            
-            // REVENIM LA KERNEL CR3 ÎNAINTE SĂ APELĂM FUNCȚII DIN KERNEL!
-            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-            
-            // 6. Creăm procesul transmițând noua hartă CR3 ȘI array-ul cu cele 8 pagini fizice!
-            process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages);
-            
-            print("[DEBUG] process_create finished! Entering scheduler loop...\n");
-        } else {
-            // Semnătură greșită - revenim de urgență la CR3-ul vechi
-            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-            print("FATAL ERROR: /sbin/init has no valid signature: NAS1!\n");
+        uint64_t init_pages[8];
+        for(int p = 0; p < 8; p++) {
+            init_pages[p] = (uint64_t)alloc_page();
         }
-    } else {
-        // Citire eșuată - revenim la CR3-ul vechi
-        __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-        print("FATAL ERROR: /sbin/init is missing or has been corrupted!\n");
+
+        uint64_t* init_pml4 = create_process_pml4();
+
+        for (int p = 0; p < 8; p++) {
+            map_page(init_pml4, 0x800000 + (p * 4096), init_pages[p], 
+                     PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        }
+
+        // Trecem pe memoria noului proces
+        __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
+
+        // Citim fișierul direct în memoria fizică a ACESTUI proces
+        int bytes = fs_read_file("/sbin/init", (uint8_t*)0x800000, 32768);
+        
+        if (bytes > (int)sizeof(NanoHeader)) {
+            NanoHeader* hdr = (NanoHeader*)0x800000;
+            if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
+                hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
+                
+                uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
+                
+                // Revenim la kernel
+                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+                
+                // Transmitem parametrul `t` ca fiind tty_id-ul procesului!
+                process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
+            } else {
+                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+                print("FATAL ERROR: /sbin/init bad signature!\n");
+            }
+        } else {
+            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+            print("FATAL ERROR: /sbin/init missing!\n");
+        }
     }
 
-    timer_init(1000); // Pornește timer-ul la 1000 Hz
-	
-    // Safety fallback loop
+    print("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
+    timer_init(1000); 
+    
     for (;;) {
         __asm__ volatile ("sti; hlt");
     }

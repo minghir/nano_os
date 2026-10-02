@@ -36,67 +36,6 @@ void process_init() {
 }
 
 // Planificatorul (Scheduler-ul) apelat la fiecare milisecundă
-/*
-uint64_t schedule(uint64_t current_rsp) {
-	//print(".");
-    if (!current_process) return current_rsp;
-
-    // 1. Salvăm RSP-ul curent în PCB-ul procesului care tocmai rulează
-    current_process->regs.rsp = current_rsp;
-
-    // 2. Găsim următorul proces READY
-    int start_idx = (current_process - process_table) + 1;
-    PCB* next_proc = NULL;
-    
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-        int idx = (start_idx + i) % MAX_PROCESSES;
-        //if (process_table[idx].state == PROC_READY) {
-		if (process_table[idx].state == PROC_READY && process_table[idx].pid != 0) {
-            next_proc = &process_table[idx];
-			
-			if (next_proc->pid == 1) {
-				// Punem un mesaj o singură dată când scheduler-ul trece pe shell pentru prima oară
-				static int shell_switched = 0;
-				if (!shell_switched) {
-					print("[DEBUG] Scheduler switched to Shell (PID 1) for the first time!\n");
-					shell_switched = 1;
-				}
-			}
-			
-            break;
-        }
-    }
-
-    if (!next_proc) {
-        // Dacă nu găsim nimic altceva gata de rulare, rămânem pe cel curent
-        return current_rsp; 
-    }
-
-    // [DEBUG] Dacă s-a găsit un proces nou (ex: Shell-ul), afișăm o singură dată sau la schimbare
-    // (Atenție: print-ul în interiorul scheduler-ului poate încetini sistemul dacă rulează la 1000Hz, 
-    // dar e excelent acum pentru a vedea dacă timer-ul declanșează switch-ul!)
-    if (next_proc != current_process) {
-        // Poți decomenta linia de jos dacă vrei să vezi fiecare switch:
-        // print("[SCHED] Switching from PID to new process\n");
-    }
-
-    // 3. Facem switch-ul "logic"
-    if (current_process->state == PROC_RUNNING) {
-        current_process->state = PROC_READY; 
-    }
-    next_proc->state = PROC_RUNNING;
-    current_process = next_proc;
-
-	// 3.1 --- Schimbăm memoria virtuală (CR3) dacă procesul are una ---
-    if (current_process->cr3 != 0) {
-        __asm__ volatile("mov %0, %%cr3" :: "r"(current_process->cr3));
-    }
-
-    // 4. Returnăm noul RSP
-    return current_process->regs.rsp;
-}
-*/
-
 uint64_t schedule(uint64_t current_rsp) {
     // 1. SALVĂM ÎNTOTDEAUNA stiva procesului curent întrerupt de timer,
     // indiferent dacă era RUNNING sau SLEEPING!
@@ -145,7 +84,7 @@ uint64_t schedule(uint64_t current_rsp) {
     return current_process->regs.rsp;
 }
 
-void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages)  {
+void process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
     
     //print("[DEBUG] process_create: Trying to create process '");
     //print(name);
@@ -157,6 +96,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_table[i].state == PROC_FREE) {
             p = &process_table[i];
+			process_table[i].tty_id = tty_id;
             //print("[DEBUG] process_create: Found free slot at index ");
             // Dacă vrei poți afișa și indexul
             //print("\n");
@@ -231,6 +171,7 @@ void process_create(const char* name, uint64_t entry_point, int argc, char** arg
 	
     // 9. Îl marcăm ca pregătit să ruleze
     p->state = PROC_READY;
+	
     
     //print("[DEBUG] process_create: Process created successfully! PID assigned, state set to PROC_READY.\n");
 }

@@ -72,12 +72,12 @@ end_loop_iter:
     jb print_out
     
     ; A ajuns la iteratia maxima -> Este IN fractal (#)
-    print str_in
+    print [str_in]
     jmp next_x
     
 print_out:
     ; A scapat repede -> Este OUT (.)
-    print str_out
+    print [str_out]
     
 next_x:
     ; x_val = x_val + x_step

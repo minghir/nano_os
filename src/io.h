@@ -14,6 +14,10 @@
 extern uint16_t* VGA;
 extern int cursor;
 
+extern uint16_t current_vga_attr;
+
+void cursor_update();
+
 // I/O port access
 static inline uint8_t inb(uint16_t port) {
     uint8_t ret;

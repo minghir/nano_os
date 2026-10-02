@@ -10,6 +10,7 @@
 #include "process.h"
 #include "paging.h"
 #include "syslog.h"
+#include "tty.h"
 
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
@@ -340,7 +341,9 @@ void syscall_handler(SyscallRegisters* regs) {
             user_argv[argc] = 0; 
             
             // F. Creăm procesul și îi pasăm lista celor 8 pagini!
-            process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages);
+			// PRELUĂM TTY-ul părintelui (sau active_tty dacă nu avem părinte)
+            int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+            process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages, target_tty);
             
             regs->rax = 1;
             break;

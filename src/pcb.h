@@ -57,5 +57,6 @@ typedef struct {
     
     // --- Control ---
     int exit_code;            // Codul returnat la final (ex: return 0 din main)
+	int tty_id;               // TTY-ul de care aparține procesul
 } PCB;
 #endif
