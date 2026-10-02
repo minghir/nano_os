@@ -2,6 +2,7 @@
 #include "memory.h"
 #include "string.h"
 #include "io.h"
+#include "tty.h"
 
 
 PCB process_table[MAX_PROCESSES];
@@ -31,6 +32,7 @@ void process_init() {
     current_process->state = PROC_RUNNING;
     current_process->cr3 = kernel_pml4;
     current_process->cwd_sector = 1; 
+    current_process->tty_id = active_tty;
     
     print("[DEBUG] process_init: Kernel process (PID 0) initialized as RUNNING.\n");
 }

@@ -3,7 +3,7 @@
 
 // Alocarea memoriei pentru variabilele globale
 TTY ttys[MAX_TTYS];
-int active_tty = 0;
+int active_tty = 1;
 
 extern void cursor_update();
 
@@ -41,7 +41,7 @@ void tty_init() {
         }
     }
     for (int i = 0; i < 80 * 25; i++) {
-        physical_vga[i] = ttys[0].screen_buffer[i];
+        physical_vga[i] = ttys[active_tty].screen_buffer[i];
     }
     cursor = 0;
     cursor_update();
