@@ -172,8 +172,8 @@ void syscall_handler(SyscallRegisters* regs) {
             uint64_t* process_pml4 = create_process_pml4();
 
             // A. Alocăm 8 pagini FIZICE disjuncte (fragmentate)
-            uint64_t allocated_pages[8];
-            for(int p = 0; p < 8; p++) {
+            uint64_t allocated_pages[MAX_PROG_PAGES];
+            for(int p = 0; p < MAX_PROG_PAGES; p++) {
                 allocated_pages[p] = (uint64_t)alloc_page();
                 // Mapăm imediat pagina fizică (oriunde ar fi ea) la adresa VIRTUALĂ continuă
                 map_page(process_pml4, 0x800000 + (p * 4096), allocated_pages[p], 
@@ -187,7 +187,7 @@ void syscall_handler(SyscallRegisters* regs) {
 
             // C. Citim fișierul CONTINUU la adresa VIRTUALĂ!
             // Acum procesorul (MMU) va sparge automat cei 32KB și îi va pune în paginile corecte!
-            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], (uint8_t*)0x800000, 32768);
+            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], (uint8_t*)0x800000,MAX_PROG_PAGES*4096 );
             
             NanoHeader* hdr = (NanoHeader*)0x800000; 
 
@@ -325,7 +325,7 @@ print("\n");
 				// Folosim harta kernelului înainte de eliberarea paginilor procesului
 				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
 
-				for (int p = 0; p < 8; p++) {
+				for (int p = 0; p < MAX_PROG_PAGES; p++) {
 					if (exiting_process->prog_pages[p] != 0) {
 						free_page((void*)exiting_process->prog_pages[p]);
 						exiting_process->prog_pages[p] = 0;
@@ -388,7 +388,7 @@ print("\n");
                     }
 
                     // B. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
-                    for (int p = 0; p < 8; p++) {
+                    for (int p = 0; p < MAX_PROG_PAGES; p++) {
                         if (victim->prog_pages[p] != 0) {
                             free_page((void*)victim->prog_pages[p]);
                             victim->prog_pages[p] = 0;

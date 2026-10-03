@@ -4,7 +4,7 @@
 #include "io.h"
 
 #define HEAP_START 0x00400000
-#define HEAP_SIZE  (2 * 1024 * 1024) // Mărim la 2 MB pentru siguranță
+#define HEAP_SIZE  (16 * 1024 * 1024) // Mărim la 16 MB pentru siguranță
 
 // Antetul fiecărui bloc de memorie din heap
 typedef struct BlockHeader {

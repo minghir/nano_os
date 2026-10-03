@@ -50,6 +50,8 @@ else ifeq ($(APP),mandel)
     OS_PATH = /bin/mandel
 else ifeq ($(APP),mp3_play)
     OS_PATH = /bin/mp3
+else ifeq ($(APP),wavplay)
+    OS_PATH = /bin/wav	
 else ifeq ($(APP),nanoasm)
     OS_PATH = /bin/asm
 else ifeq ($(APP),nanovi)

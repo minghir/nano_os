@@ -229,7 +229,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
 
         // Citim fișierul direct în memoria fizică a ACESTUI proces
-        int bytes = fs_read_file("/sbin/init", (uint8_t*)0x800000, 32768);
+        int bytes = fs_read_file("/sbin/init", (uint8_t*)0x800000, MAX_PROG_PAGES*4096);
         
         if (bytes > (int)sizeof(NanoHeader)) {
             NanoHeader* hdr = (NanoHeader*)0x800000;

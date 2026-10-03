@@ -52,7 +52,7 @@ void kill_process_by_pid(uint32_t pid) {
 			 __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
 			
             // 2. Eliberăm paginile fizice și paginarea (PML4)
-            for (int p = 0; p < 8; p++) {
+            for (int p = 0; p < MAX_PROG_PAGES; p++) {
                 if (process_table[i].prog_pages[p]) {
                     free_page((void*)process_table[i].prog_pages[p]);
                     process_table[i].prog_pages[p] = 0;

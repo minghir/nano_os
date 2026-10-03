@@ -121,7 +121,7 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
     p->cr3 = process_cr3;
 	
 	// Salvăm cele 8 pagini împrăștiate
-    for(int i = 0; i < 8; i++) {
+    for(int i = 0; i < MAX_PROG_PAGES; i++) {
         p->prog_pages[i] = prog_pages[i];
     }
 	

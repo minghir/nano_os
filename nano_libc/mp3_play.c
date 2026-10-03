@@ -1,9 +1,11 @@
+
+#include "nano_libc.h"
 #define MINIMP3_IMPLEMENTATION
 #include "../thirdparty/minimp3/minimp3.h"
-#include "nano_libc.h"
 
-extern void print(const char* s);
-extern uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
+
+
+//extern uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {

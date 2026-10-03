@@ -4,7 +4,12 @@
 ../nanohdd ../hda.img mkdir /cfg
 ../nanohdd ../hda.img mkdir /tests
 ../nanohdd ../hda.img mkdir /asm
+../nanohdd ../hda.img mkdir /data
+../nanohdd ../hda.img mkdir /data/mp3
+
 ../nanohdd ../hda.img push env.cfg /cfg/env.cfg
+
+../nanohdd ../hda.img push ../data/mp3/laser.wav /data/mp3/1.wav
 
 ../nanohdd ../hda.img push program.s /asm/program.s
 ../nanohdd ../hda.img push loop.s /asm/loop.s
@@ -45,6 +50,7 @@ make APP=nanoasm
 make APP=nanovi
 make APP=watch
 make APP=mp3_play
+make APP=wavplay
 
 make APP=chr
 make APP=argt
@@ -57,7 +63,8 @@ make APP=mem_test
 
 make clean
 
-
-
-qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display sdl -audiodev wav,id=snd0,path=qemu_output.wav -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
 #qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
