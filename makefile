@@ -140,6 +140,6 @@ clean:
 	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
 	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o
 	rm -rf iso/boot/kernel.bin
-	rm -f nano_libc/*.o
+	rm -f nano_libc/*.o nano_libc/*.bin
 	rm -f tools/nan2hdd tools/nan3hdd
 #	rm -f hda.img
