@@ -10,7 +10,7 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard src/*.c) $(wildcard kernel/*.c)
+C_SOURCES = $(wildcard kernel/*.c) 
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
@@ -80,7 +80,8 @@ kernel.iso: iso/boot/kernel.bin
 # ============================
 
 run: kernel.iso
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
 	#qemu-system-x86_64 -kernel kernel.bin -drive file=hda.img,format=raw,index=0,media=disk -cpu qemu64
 	#qemu-system-x86_64 -cdrom kernel.iso
 

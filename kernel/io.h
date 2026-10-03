@@ -43,6 +43,18 @@ static inline void outw(uint16_t port, uint16_t value) {
     __asm__ volatile ("outw %0, %1" : : "a" (value), "Nd" (port));
 }
 
+// --- ADĂUGATE PENTRU PCI (32-bit) ---
+static inline uint32_t inl(uint16_t port) {
+    uint32_t ret;
+    __asm__ volatile ("inl %1, %0" : "=a"(ret) : "d"(port));
+    return ret;
+}
+
+static inline void outl(uint16_t port, uint32_t val) {
+    __asm__ volatile ("outl %0, %1" : : "a"(val), "d"(port));
+}
+// ------------------------------------
+
 
 extern volatile uint8_t keyboard_running;
 

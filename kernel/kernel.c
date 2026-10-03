@@ -1,14 +1,15 @@
-#include "../src/io.h"
-#include "../src/config.h"
-#include "../src/process.h"
-#include "../src/memory.h"
-#include "../src/fs.h"
-#include "../src/string.h"
-#include "../src/timer.h"
-#include "../src/paging.h"
-#include "../src/syslog.h"
-#include "../src/syscall.h"
-#include "../src/tty.h"
+#include "io.h"
+#include "config.h"
+#include "process.h"
+#include "memory.h"
+#include "fs.h"
+#include "string.h"
+#include "timer.h"
+#include "paging.h"
+#include "syslog.h"
+#include "syscall.h"
+#include "tty.h"
+#include "pci.h"
 
 #include <stdint.h>
 
@@ -193,6 +194,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     interrupts_init();
     memory_init();
     fs_init();
+	
 	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
 	kernel_log("KERNEL:Log file created\n");
     
@@ -200,6 +202,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     load_kernel_environment();
 	kernel_log("KERNEL:Enviroment loaded.\n");
 	
+	pci_scan_bus();
 	// --- LOADING THE SHELL(S) FROM USER SPACE ---
     print("Loading Init daemons on all TTYs...\n");
     
