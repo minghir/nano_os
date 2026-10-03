@@ -571,9 +571,8 @@ print("\n");
 		case SYSCALL_SYSLOG: { // 
 			char* user_msg = (char*)regs->rdi;
 			if (user_msg != NULL) {
-				KLOG_INFO("[USER] ");
 				KLOG_INFO(user_msg);
-				KLOG_INFO("\n");
+				
 			}
 			break;
 		}

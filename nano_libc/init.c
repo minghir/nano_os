@@ -1,10 +1,10 @@
 #include "nano_libc.h"
 
 int main() {
-    nano_print("[INIT] Nano OS Init daemon started (PID 1).\n");
+    nano_syslog("[INIT] Nano OS Init daemon started (PID 1).\n");
 
     while (1) {
-        nano_print("[INIT] Spawning shell (/sbin/shell)...\n");
+        nano_syslog("[INIT] Spawning shell (/sbin/shell)...\n");
         
         // Lansăm shell-ul
         int success = nano_exec("/sbin/shell");

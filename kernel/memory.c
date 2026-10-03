@@ -27,7 +27,7 @@ void memory_init() {
     free_list->is_free = 1;
     free_list->next = 0;
 
-    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x00400000, Size: 16MB");
+    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x00400000, Size: 16MB\n");
     newline();
 }
 
