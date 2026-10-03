@@ -70,7 +70,7 @@ kernel.bin: $(OBJS)
 
 hdd_tools:
 	$(MAKE) -C tools
-	
+		
 apps: hdd_tools
 	$(MAKE) -C nano_libc APP=shell
 	$(MAKE) -C nano_libc APP=init
@@ -117,6 +117,9 @@ iso/boot/kernel.bin: kernel.bin
 kernel.iso: iso/boot/kernel.bin hdd_tools
 	grub-mkrescue -o kernel.iso iso
 	
+img_files:
+	qemu-img create -f raw hda_v2.img 10M
+	qemu-img create -f raw hdb_v3.img 50M
 # ============================
 #    Rulare în QEMU
 # ============================
