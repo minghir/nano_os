@@ -228,12 +228,14 @@ void syscall_handler(SyscallRegisters* regs) {
             uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages, target_tty);
 			
             char debug_buf[32];
+/*			
 print("[DEBUG] Lansare proces '");
 print(prog_name);
 print("' pe TTY index: ");
 simple_itoa(target_tty, debug_buf);
 print(debug_buf);
 print("\n");
+*/
 			
             ttys[target_tty].foreground_pid = new_pid;
             
@@ -241,80 +243,7 @@ print("\n");
             break;
         }
 		
-		/*
-		case SYSCALL_EXIT: {
-            int exit_code = (int)regs->rdi;
-            
-            if (current_process) {
-                current_process->exit_code = exit_code;
-                
-                // 1. Căutăm părintele și îl trezim PRIMUL
-                for (int i = 0; i < MAX_PROCESSES; i++) {
-                    if (process_table[i].pid == current_process->ppid) {
-                        process_table[i].state = PROC_READY; // Trezim Shell-ul
-                        keyboard_flush();
-                        break;
-                    }
-                }
-                
-                // 2. Acum eliberăm slotul copilului
-                current_process->state = PROC_FREE;
-            }
-            
-            // 3. Oprim execuția curentă și lăsăm timer-ul să mute pe shell
-            while(1) {
-                __asm__ volatile ("sti; hlt");
-            }
-            break;
-        }
-		*/
-		/*
-		case SYSCALL_EXIT: {
-            __asm__ volatile ("cli");
-            PCB* exiting_process = current_process;
-            if (exiting_process) {
-                uint32_t parent_pid = exiting_process->ppid;
-                exiting_process->exit_code = (int)regs->rdi;
-
-                // Use the kernel map before releasing the process page tables.
-                __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
-
-                for (int p = 0; p < 8; p++) {
-                    if (exiting_process->prog_pages[p] != 0) {
-                        free_page((void*)exiting_process->prog_pages[p]);
-                        exiting_process->prog_pages[p] = 0;
-                    }
-                }
-
-                if (exiting_process->cr3) {
-                    free_process_paging(exiting_process->cr3);
-                    exiting_process->cr3 = 0;
-                }
-
-                // Keep stack_base until a later process_create runs on another stack.
-                exiting_process->state = PROC_FREE;
-                exiting_process->pid = 0;
-                exiting_process->name[0] = '\0';
-				
-				int target_tty = exiting_process->tty_id;;
-		
-                for (int i = 0; i < MAX_PROCESSES; i++) {
-                    if (process_table[i].pid == parent_pid &&
-                        process_table[i].state == PROC_SLEEPING) {
-                        process_table[i].state = PROC_READY;
-						
-                        keyboard_flush();
-                        break;
-                    }
-                }
-				
-				ttys[target_tty].foreground_pid = parent_pid;
-            }
-
-            while (1) { __asm__ volatile ("sti; hlt"); }
-            break;
-        }
-		*/
+	
 		case SYSCALL_EXIT: {
 			__asm__ volatile ("cli");
 			PCB* exiting_process = current_process;
@@ -426,37 +355,7 @@ print("\n");
             regs->rax = killed ? 1 : 0;
             break;
         }
-		/*
-		case SYSCALL_WAIT: { // SYSCALL_WAIT
-            int children_alive = 0;
-            
-            // Verificăm dacă procesul curent (Shell-ul) mai are copii în viață
-            for (int i = 0; i < MAX_PROCESSES; i++) {
-                if (process_table[i].state != PROC_FREE && process_table[i].ppid == current_process->pid) {
-                    children_alive = 1;
-                    break;
-                }
-            }
-
-            if (!children_alive) {
-                regs->rax = 0; // Nu are copii de așteptat
-                break;
-            }
-
-            // Dacă are copii care încă rulează, punem Shell-ul la somn
-            current_process->state = PROC_SLEEPING;
-            
-            // Pentru a ne asigura că Shell-ul se oprește IMEDIAT și nu se întoarce 
-            // în user-space înainte ca timer-ul să facă switch-ul, blocăm execuția 
-            // într-un hlt controlat, așteptând ca următorul tic de ceas să schimbe contextul.
-            while (current_process->state == PROC_SLEEPING) {
-                __asm__ volatile ("sti; hlt");
-            }
-
-            regs->rax = 1; // Un copil tocmai și-a dat exit și ne-a trezit!
-            break;
-        }
-		*/
+		
 		
 		case SYSCALL_WAIT: {
 			int has_children = 0;
@@ -552,7 +451,7 @@ print("\n");
             break;
         }
         case SYSCALL_SHUTDOWN: {
-            print("Kernel: Shutdown cerut din User Space...\n");
+            KLOG_INFO("Kernel: Shutdown cerut din User Space...\n");
             // Trimitem semnalul de oprire ACPI prin porturile standard QEMU/Bochs
             __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
             __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x0160), "Nd"((uint16_t)0xB004));
@@ -672,9 +571,9 @@ print("\n");
 		case SYSCALL_SYSLOG: { // 
 			char* user_msg = (char*)regs->rdi;
 			if (user_msg != NULL) {
-				kernel_log("[USER] ");
-				kernel_log(user_msg);
-				kernel_log("\n");
+				KLOG_INFO("[USER] ");
+				KLOG_INFO(user_msg);
+				KLOG_INFO("\n");
 			}
 			break;
 		}
@@ -731,11 +630,9 @@ print("\n");
 			break;
 		}
         default: {
-            print("Kernel Warning: Syscall necunoscut apelat: ");
-            print_number(regs->rax);
-            print(" | Parametru (RDI): ");
-            print_number(regs->rdi);
-            print("\n");
+			char log_msg[128];
+			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);
+			KLOG_WARNING(log_msg);
             break;
         }
     }

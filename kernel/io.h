@@ -61,6 +61,7 @@ extern volatile uint8_t keyboard_running;
 
 void tty_write_char(int tty_id, char c, uint16_t attr);
 void print(const char* s);
+void print_syslog(const char* s);
 void newline();
 void clear_screen();
 void print_at(int row, int col, const char* s);

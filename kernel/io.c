@@ -212,6 +212,116 @@ void print(const char* s) {
     cursor_update();
 }
 */
+// Funcție internă care știe să printeze pe orice TTY specificat
+static void print_to_tty(const char* s, int target_tty) {
+    uint16_t* physical_vga = (uint16_t*)0xB8000;
+    
+    int cursor = ttys[target_tty].cursor;
+    uint16_t current_vga_attr = ttys[target_tty].current_vga_attr;
+
+    while (*s) {
+        if (*s == '\033' && s[1] == '[') {
+            s += 2; 
+            if (*s == 'D') {
+                s++;
+                if (cursor > 0) cursor--;
+                ttys[target_tty].cursor = cursor;
+                if (target_tty == active_tty) cursor_update();
+                continue;
+            }
+            if (*s == 'C') {
+                s++;
+                if (cursor < 80 * 25 - 1) cursor++;
+                ttys[target_tty].cursor = cursor;
+                if (target_tty == active_tty) cursor_update();
+                continue;
+            }
+            if (*s >= '0' && *s <= '9') {
+                int val = 0;
+                const char* temp = s;
+                while (*temp >= '0' && *temp <= '9') {
+                    val = val * 10 + (*temp - '0');
+                    temp++;
+                }
+                if (*temp == 'm') {
+                    s = temp + 1;
+                    if (val == 7) current_vga_attr = 0x7000;
+                    else if (val == 0) current_vga_attr = FONT_COLOR;
+                    ttys[target_tty].current_vga_attr = current_vga_attr;
+                    continue;
+                }
+            }
+            int r = 0;
+            while (*s >= '0' && *s <= '9') { r = r * 10 + (*s - '0'); s++; }
+            if (*s == ';') {
+                s++;
+                int c = 0;
+                while (*s >= '0' && *s <= '9') { c = c * 10 + (*s - '0'); s++; }
+                if (*s == 'H') {
+                    s++;
+                    int row = r - 1; int col = c - 1;
+                    if (row < 0) row = 0; if (row > 24) row = 24;
+                    if (col < 0) col = 0; if (col > 79) col = 79;
+                    cursor = row * 80 + col;
+                    ttys[target_tty].cursor = cursor;
+                    if (target_tty == active_tty) cursor_update();
+                    continue;
+                }
+            }
+            while (*s && *s != 'm' && *s != 'H' && *s != 'D' && *s != 'C') s++;
+            if (*s) s++;
+            continue;
+        }
+
+        char character = *s++;
+
+        if (character == '\n') {
+            cursor = (cursor / 80 + 1) * 80;
+            if (cursor >= 80 * 25) {
+                scroll_screen_tty(target_tty);
+                cursor = 80 * 24;
+            }
+            ttys[target_tty].cursor = cursor;
+            continue;
+        }
+
+        if (character == '\b') {
+            if (cursor > 0) {
+                cursor--;
+                ttys[target_tty].screen_buffer[cursor] = current_vga_attr | ' ';
+                if (target_tty == active_tty) physical_vga[cursor] = current_vga_attr | ' ';
+            }
+            ttys[target_tty].cursor = cursor;
+            continue;
+        }
+
+        ttys[target_tty].screen_buffer[cursor] = current_vga_attr | character;
+        if (target_tty == active_tty) physical_vga[cursor] = current_vga_attr | character;
+        cursor++;
+        
+        if (cursor >= 80 * 25) {
+            scroll_screen_tty(target_tty);
+            cursor = 80 * 24;
+        }
+        ttys[target_tty].cursor = cursor;
+    }
+    
+    if (target_tty == active_tty) cursor_update();
+}
+
+// Funcția normală (folosește TTY-ul procesului sau TTY-ul activ curent)
+void print(const char* s) {
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    print_to_tty(s, target_tty);
+}
+
+// Funcția dedicată pentru syslog care scrie EXCLUSIV în TTY 0
+void print_syslog(const char* s) {
+    print_to_tty(s, 0);
+}
+
+
+/*
 void print(const char* s) {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
     
@@ -310,7 +420,7 @@ void print(const char* s) {
     // Update hardware cursor only if we are printing to the active screen
     if (target_tty == active_tty) cursor_update();
 }
-
+*/
 // --- 3. Newline modificat pentru a face scroll ---
 /*
 void newline() {

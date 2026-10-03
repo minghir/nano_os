@@ -1,3 +1,6 @@
+
+#include <stdarg.h>
+
 #include "string.h"
 #include "io.h"
 
@@ -161,4 +164,126 @@ int string_contains(const char* str, const char* substr) {
         if (substr[j] == '\0') return 1;
     }
     return 0;
+}
+
+
+
+
+// Funcție ajutătoare internă pentru conversia unui număr întreg în zecimal
+static void _int_to_dec(int64_t val, char* buf) {
+    if (val == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+    int is_negative = 0;
+    if (val < 0) {
+        is_negative = 1;
+        val = -val;
+    }
+    char tmp[32];
+    int idx = 0;
+    while (val > 0) {
+        tmp[idx++] = '0' + (val % 10);
+        val /= 10;
+    }
+    int i = 0;
+    if (is_negative) {
+        buf[i++] = '-';
+    }
+    while (idx > 0) {
+        buf[i++] = tmp[--idx];
+    }
+    buf[i] = '\0';
+}
+
+// Funcție ajutătoare internă pentru conversia în hexazecimal (vital pentru OS)
+static void _uint_to_hex(uint64_t val, char* buf, int uppercase) {
+    if (val == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+    char tmp[32];
+    int idx = 0;
+    const char* digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    while (val > 0) {
+        tmp[idx++] = digits[val % 16];
+        val /= 16;
+    }
+    int i = 0;
+    while (idx > 0) {
+        buf[i++] = tmp[--idx];
+    }
+    buf[i] = '\0';
+}
+
+/**
+ * O versiune sigură de snprintf pentru mediu bare-metal / kernel.
+ * Previne depășirea bufferului și suportă %d, %s, %c, %x, %p.
+ */
+int snprintf(char* str, uint32_t size, const char* format, ...) {
+    if (!str || size == 0 || !format) return 0;
+
+    va_list args;
+    va_start(args, format);
+
+    uint32_t written = 0;
+    char* ptr = str;
+    uint32_t max_len = size - 1; // Păstrăm loc pentru terminatorul '\0'
+
+    int i = 0;
+    while (format[i] != '\0' && written < max_len) {
+        if (format[i] == '%' && format[i+1] != '\0') {
+            i++; // Trecem peste '%'
+            char spec = format[i];
+
+            char conv_buf[32];
+            char* src = conv_buf;
+
+            if (spec == 'd' || spec == 'i') {
+                int64_t val = va_arg(args, int);
+                _int_to_dec(val, conv_buf);
+            } 
+            else if (spec == 'x' || spec == 'X') {
+                uint64_t val = va_arg(args, uint64_t);
+                _uint_to_hex(val, conv_buf, (spec == 'X'));
+            } 
+            else if (spec == 'p') {
+                // Pentru pointeri afișăm prefixul 0x urmat de valoarea hex
+                *ptr++ = '0'; written++;
+                if (written < max_len) { *ptr++ = 'x'; written++; }
+                uint64_t val = (uint64_t)va_arg(args, void*);
+                _uint_to_hex(val, conv_buf, 0);
+            } 
+            else if (spec == 's') {
+                char* s = va_arg(args, char*);
+                src = s ? s : "(null)"; // Protecție anti-crash la pointeri NULL
+            } 
+            else if (spec == 'c') {
+                conv_buf[0] = (char)va_arg(args, int);
+                conv_buf[1] = '\0';
+            } 
+            else {
+                // Dacă e un caracter necunoscut după %, îl lăsăm ca atare
+                conv_buf[0] = '%';
+                conv_buf[1] = spec;
+                conv_buf[2] = '\0';
+            }
+
+            // Copiem șirul convertit în bufferul principal respectând limita
+            while (*src != '\0' && written < max_len) {
+                *ptr++ = *src++;
+                written++;
+            }
+            i++;
+        } else {
+            *ptr++ = format[i++];
+            written++;
+        }
+    }
+
+    *ptr = '\0'; // Închidem mereu șirul
+    va_end(args);
+    return (int)written;
 }

@@ -2,6 +2,7 @@
 
 #include "memory.h"
 #include "io.h"
+#include "syslog.h"
 
 #define HEAP_START 0x00400000
 #define HEAP_SIZE  (16 * 1024 * 1024) // Mărim la 16 MB pentru siguranță
@@ -26,7 +27,7 @@ void memory_init() {
     free_list->is_free = 1;
     free_list->next = 0;
 
-    print("Advanced Heap Manager initialized. Start: 0x00400000, Size: 2MB");
+    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x00400000, Size: 16MB");
     newline();
 }
 
@@ -144,7 +145,7 @@ void* alloc_page() {
         // B. Dacă stiva e goală, luăm o pagină nouă din zona liniară (bump allocator)
         // Punem o frână de siguranță la 32MB sau 128MB (în funcție de RAM-ul tău)
         if (next_free_physical_page >= 0x08000000) { 
-            print("FATAL KERNEL PANIC: Out of physical memory (RAM)!\n");
+            KLOG_FATAL("FATAL KERNEL PANIC: Out of physical memory (RAM)!\n");
             while(1) __asm__ volatile("cli; hlt");
         }
 
@@ -168,7 +169,7 @@ void free_page(void* ptr) {
     // Verificăm dacă adresa este aliniată la 4096 octeți (securitate)
     uint64_t addr = (uint64_t)ptr;
     if (addr & 0xFFF) {
-        print("KERNEL WARNING: Tried to free unaligned physical page!\n");
+        KLOG_WARNING("KERNEL WARNING: Tried to free unaligned physical page!\n");
         return;
     }
 

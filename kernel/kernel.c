@@ -85,13 +85,12 @@ void load_kernel_environment() {
                     break;
                 }
             }
-            print("Kernel: PATH setat la: ");
-            print(env_path);
-            newline();
+            KLOG_INFO("KERNEL: PATH setat la: ");
+            KLOG_INFO(env_path);
+            KLOG_INFO("\n");
         }
     } else {
-        print("Kernel: /cfg/env.cfg missing. Default PATH (/;/bin).");
-        newline();
+        KLOG_WARNING("KERNEL: /cfg/env.cfg missing. Default PATH (/;/bin).\n");
     }
 }
 
@@ -123,7 +122,7 @@ void page_fault_handler(FaultRegisters* regs) {
     // - Dacă CS indică Ring 3 (Pentru viitor, când vei implementa Ring 3)
 	if (regs->cs & 3 || regs->rip >= 0x800000 || regs->rip < 0x100000) {
         // --- CRASH ÎN PROGRAM (User Space) ---
-        print("\n[CRASH] Programul a generat Page Fault! (Memorie invalida)\n");
+        KLOG_ERROR("\nKERNEL:[CRASH] Programul a generat Page Fault! (Memorie invalida)\n");
         
         if (current_process) {
             uint32_t ppid = current_process->ppid;
@@ -151,7 +150,7 @@ void page_fault_handler(FaultRegisters* regs) {
     } else {
         // --- CRASH REAL ÎN KERNEL ---
         // Aici ajunge doar dacă ai un bug în funcțiile interne ale kernelului (ex: fs_read, malloc)
-        print("\nFATAL: KERNEL PAGE FAULT IN RING 0!\n");
+        KLOG_INFO("\nFATAL: KERNEL PAGE FAULT IN RING 0!\n");
         print(kernel_log_buffer);
         while (1) {
             __asm__ volatile ("cli; hlt");
@@ -165,8 +164,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     tty_init();
 	
     cursor_init();
-    print("Nano OS booted!");
-    newline();
+    KLOG_INFO("Nano OS booted!\n");
+   
 
     // Verify and parse the configuration file sent via GRUB
     if (magic == 0x2BADB002 && addr != 0) {
@@ -196,15 +195,15 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     fs_init();
 	
 	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
-	kernel_log("KERNEL:Log file created\n");
+	KLOG_INFO("KERNEL:Log file created\n");
     
     // Load kernel environment variables (PATH)
     load_kernel_environment();
-	kernel_log("KERNEL:Enviroment loaded.\n");
+	KLOG_INFO("KERNEL:Enviroment loaded.\n");
 	
 	pci_scan_bus();
 	// --- LOADING THE SHELL(S) FROM USER SPACE ---
-    print("Loading Init daemons on all TTYs...\n");
+    KLOG_INFO("Loading Init daemons on all TTYs...\n");
     
     // Salvăm cr3-ul curent al kernelului o singură dată
     uint64_t old_cr3;
@@ -247,15 +246,15 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 			   
             } else {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-                print("FATAL ERROR: /sbin/init bad signature!\n");
+                KLOG_FATAL("FATAL ERROR: /sbin/init bad signature!\n");
             }
         } else {
             __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-            print("FATAL ERROR: /sbin/init missing!\n");
+            KLOG_FATAL("FATAL ERROR: /sbin/init missing!\n");
         }
     }
 
-    print("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
+    KLOG_DEBUG("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
     timer_init(1000); 
     
     for (;;) {
