@@ -14,6 +14,7 @@
 #include "sys.h"
 #include "string.h"
 #include "speaker.h"
+#include "drivers/sound/audio.h"
 
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
@@ -717,6 +718,16 @@ print("\n");
 			int style = (int)regs->rdi;
 			set_cursor_shape(style);
 			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_PLAY_AUDIO: {
+			const uint8_t* user_data = (const uint8_t*)regs->rdi;
+			uint32_t length = (uint32_t)regs->rsi;
+			
+			// Apelează funcția generală din audio.h / ac97
+			play_pcm(user_data, length);
+			
+			regs->rax = 0; // Succes
 			break;
 		}
         default: {

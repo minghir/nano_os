@@ -1,7 +1,9 @@
 //Acesta conține logica de interogare prin porturile I/O 0xCF8 și 0xCFC și bucla care parcurge magistralele, sloturile și funcțiile.
 
 #include "pci.h"
-#include "io.h"     // Aici ai funcțiile outl, inl etc.
+#include "io.h"     
+#include "drivers/sound/audio.h"
+#include "drivers/sound/ac97/ac97.h"
 // #include "sys.h" // Dacă ai funcții de print/log în kernel
 
 // Citirea unui registru PCI (pe 32 de biți)
@@ -58,15 +60,31 @@ void pci_scan_bus() {
                 uint8_t header_type = (uint8_t)((reg3 >> 16) & 0xFF);
 
                 // Verificăm dacă este AC'97 Controller (Intel: Vendor 0x8086, Device 0x2415)
-                if (vendor_id == 0x8086 && device_id == 0x2415) {
-                    print("[PCI] Gasit controler audio Intel AC'97!\n");
-                    
-                    // Putem citi BAR0 și BAR1 (Base Address Registers) de la 0x10 și 0x14
-                    uint32_t bar0 = pci_config_read(bus, slot, func, 0x10);
-                    uint32_t bar1 = pci_config_read(bus, slot, func, 0x14);
-                    
-                    // Salvăm adresele sau le folosim mai târziu în driverul audio
-                }
+				if (vendor_id == 0x8086 && device_id == 0x2415) {
+					print("[PCI] Gasit controler audio Intel AC'97!\n");
+					
+					// 1. Citim BAR0 (Mixer Base Address) și BAR1 (Bus Master Base Address)
+					uint32_t bar0 = pci_config_read(bus, slot, func, 0x10);
+					uint32_t bar1 = pci_config_read(bus, slot, func, 0x14);
+					
+					// Curățăm biții de flag (ultimii 2 biți indică tipul de adresă I/O sau Memorie)
+					uint16_t mixer_base = (uint16_t)(bar0 & 0xFFFC);
+					uint16_t bm_base = (uint16_t)(bar1 & 0xFFFC);
+
+					// 2. Activăm Bus Master în Command Register (Offset 0x04)
+					uint32_t cmd_reg = pci_config_read(bus, slot, func, 0x04);
+					cmd_reg |= (1 << 2); // Setăm bitul 2 (Bus Master Enable)
+					pci_config_write(bus, slot, func, 0x04, cmd_reg);
+
+					// 3. Înregistrăm driverul în subsistemul audio general
+					audio_register_driver(ac97_get_driver());
+
+					// 4. Inițializăm driverul folosind porturile REALE extrase din PCI!
+					AudioDriver* audio_drv = ac97_get_driver();
+					if (audio_drv && audio_drv->init) {
+						audio_drv->init(mixer_base, bm_base);
+					}
+				}
 
                 // Dacă nu e multi-function și suntem la funcția 0, putem sărim peste restul funcțiilor din acest slot
                 if (func == 0 && !(header_type & 0x80)) {

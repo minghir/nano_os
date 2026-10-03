@@ -344,3 +344,41 @@ float nano_parse_float(const char* str) {
     return result * sign;
 }
 */
+
+
+void* memmove(void* dest, const void* src, size_t n) {
+    unsigned char* d = (unsigned char*)dest;
+    const unsigned char* s = (const unsigned char*)src;
+    if (d == s) return dest;
+    if (d < s) {
+        for (size_t i = 0; i < n; i++) {
+            d[i] = s[i];
+        }
+    } else {
+        for (size_t i = n; i > 0; i--) {
+            d[i - 1] = s[i - 1];
+        }
+    }
+    return dest;
+}
+
+
+uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer) {
+    // Alocăm un buffer generos pentru fișierul MP3 (ex: 2MB, cât maximul heap-ului sau cât permite fișierul)
+    uint32_t max_size = 2 * 1024 * 1024; // 2 MB
+    uint8_t* buf = (uint8_t*)nano_malloc(max_size);
+    if (!buf) {
+        return 0;
+    }
+
+    // Apelăm funcția din nano_libc.h (care folosește SYSCALL_READ_FILE / 14)
+    int bytes_read = nano_read_file(path, buf, max_size);
+    if (bytes_read <= 0) {
+        nano_free(buf);
+        *out_buffer = 0;
+        return 0;
+    }
+
+    *out_buffer = buf;
+    return (uint32_t)bytes_read;
+}

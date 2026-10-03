@@ -10,7 +10,7 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard kernel/*.c) 
+C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c)
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)

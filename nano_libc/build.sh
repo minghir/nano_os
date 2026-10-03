@@ -44,6 +44,7 @@ make APP=mandel
 make APP=nanoasm
 make APP=nanovi
 make APP=watch
+make APP=mp3_play
 
 make APP=chr
 make APP=argt
@@ -58,5 +59,5 @@ make clean
 
 
 
-
-qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
+qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0

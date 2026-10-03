@@ -5,7 +5,7 @@
 #include <stddef.h>  // Pentru size_t
 #include <stdarg.h> // Necesar pentru sprintf dacă folosește argumente variabile
 
-#include "../src/syscall.h"
+#include "../kernel/syscall.h"
 
 
 
@@ -182,6 +182,22 @@ static inline void nano_pwd(char* buffer, uint32_t max_len) {
     );
 }
 
+
+static inline void nano_sys_exit(int status) {
+    // Trimităm codul 20 (SYSCALL_EXIT) în RAX, iar status-ul în RDI
+    __asm__ volatile (
+        "mov %1, %%rax\n\t"
+        "mov %0, %%rdi\n\t"
+        "int $0x80"
+        : 
+        : "r"((uint64_t)status), "r"((uint64_t)SYSCALL_EXIT)
+        : "rax", "rdi", "memory"
+    );
+    while(1);
+}
+
+
+
 void nano_print(const char* str);
 static inline void newline(){
 	nano_print("\n");
@@ -193,6 +209,10 @@ void nano_free(void* ptr); // (Chiar dacă e bump allocator, e bine să avem int
 
 void* memset(void* dest, int val, size_t len);
 void* memcpy(void* dest, const void* src, size_t len);
+void* memmove(void* dest, const void* src, size_t n);
+
+uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
+
 size_t strlen(const char* str);
 int strcmp(const char* s1, const char* s2);
 char* strcpy(char* dest, const char* src);
@@ -215,7 +235,7 @@ int nano_kill(int pid);
 
 
 
-static inline char* strcat(char* dest, const char* src) {
+static inline char* nano_strcat(char* dest, const char* src) {
     char* ptr = dest + strlen(dest);
     while (*src != '\0') {
         *ptr++ = *src++;
@@ -328,6 +348,18 @@ static inline void nano_set_cursor_shape(int style) {
         : "r"((uint64_t)style)
         : "rax", "rdi", "memory"
     );
+}
+
+// În user-space (ex: un fișier helper de syscall-uri)
+static inline int sys_play_audio(const uint8_t* data, uint32_t length) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(36), "D"(data), "S"(length)
+        : "memory"
+    );
+    return ret;
 }
 
 #endif

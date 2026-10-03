@@ -297,8 +297,8 @@ void editor_save_file() {
     if (nano_write_file(E.filename, (uint8_t*)disk_buffer, offset) > 0) {
         E.modified = 0; 
         strcpy(E.status_msg, "\"");
-        strcat(E.status_msg, E.filename);
-        strcat(E.status_msg, "\" [Saved]");
+        nano_strcat(E.status_msg, E.filename);
+        nano_strcat(E.status_msg, "\" [Saved]");
     } else {
         strcpy(E.status_msg, "Error saving file!");
     }
