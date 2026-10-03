@@ -36,6 +36,38 @@ int cmd_input_len = 0;
 char clipboard[1024];
 int clipboard_len = 0;
 
+static inline int sprintf(char* str, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int i = 0;
+    char* ptr = str;
+    
+    while (format[i] != '\0') {
+        if (format[i] == '%' && format[i+1] == 'd') {
+            int val = va_arg(args, int);
+            char buf[16];
+            itoa(val, buf, 10);
+            char* b = buf;
+            while (*b) *ptr++ = *b++;
+            i += 2;
+        } else if (format[i] == '%' && format[i+1] == 's') {
+            char* s = va_arg(args, char*);
+            while (*s) *ptr++ = *s++;
+            i += 2;
+        } else if (format[i] == '%' && format[i+1] == 'c') {
+            char c = (char)va_arg(args, int);
+            *ptr++ = c;
+            i += 2;
+        } else {
+            *ptr++ = format[i++];
+        }
+    }
+    *ptr = '\0';
+    va_end(args);
+    return (int)(ptr - str);
+}
+
+
 void int_to_str(int n, char* buf) {
     itoa(n, buf, 10);
 }

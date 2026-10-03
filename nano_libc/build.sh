@@ -1,25 +1,25 @@
-../nanohdd ../hda.img format
-../nanohdd ../hda.img mkdir /bin
-../nanohdd ../hda.img mkdir /sbin
-../nanohdd ../hda.img mkdir /cfg
-../nanohdd ../hda.img mkdir /tests
-../nanohdd ../hda.img mkdir /asm
-../nanohdd ../hda.img mkdir /data
-../nanohdd ../hda.img mkdir /data/mp3
+../nanohdd ../hda_v2.img format
+../nanohdd ../hda_v2.img mkdir /bin
+../nanohdd ../hda_v2.img mkdir /sbin
+../nanohdd ../hda_v2.img mkdir /cfg
+../nanohdd ../hda_v2.img mkdir /tests
+../nanohdd ../hda_v2.img mkdir /asm
+../nanohdd ../hda_v2.img mkdir /data
+../nanohdd ../hda_v2.img mkdir /data/mp3
 
-../nanohdd ../hda.img push env.cfg /cfg/env.cfg
+../nanohdd ../hda_v2.img push env.cfg /cfg/env.cfg
 
-../nanohdd ../hda.img push ../data/mp3/laser.wav /data/mp3/1.wav
+../nanohdd ../hda_v2.img push ../data/mp3/laser.wav /data/mp3/1.wav
 
-../nanohdd ../hda.img push program.s /asm/program.s
-../nanohdd ../hda.img push loop.s /asm/loop.s
-../nanohdd ../hda.img push call.s /asm/call.s
-../nanohdd ../hda.img push math.s /asm/math.s
-../nanohdd ../hda.img push mem.s /asm/mem.s
-../nanohdd ../hda.img push kin.s /asm/kin.s
-../nanohdd ../hda.img push var.s /asm/var.s
-../nanohdd ../hda.img push float.s /asm/float.s
-../nanohdd ../hda.img push julia.s /asm/julia.s
+../nanohdd ../hda_v2.img push program.s /asm/program.s
+../nanohdd ../hda_v2.img push loop.s /asm/loop.s
+../nanohdd ../hda_v2.img push call.s /asm/call.s
+../nanohdd ../hda_v2.img push math.s /asm/math.s
+../nanohdd ../hda_v2.img push mem.s /asm/mem.s
+../nanohdd ../hda_v2.img push kin.s /asm/kin.s
+../nanohdd ../hda_v2.img push var.s /asm/var.s
+../nanohdd ../hda_v2.img push float.s /asm/float.s
+../nanohdd ../hda_v2.img push julia.s /asm/julia.s
 
 make clean
 make
@@ -31,7 +31,7 @@ make APP=time
 make APP=date
 make APP=shutdown
 # Dacă vrei cazul special pentru shutdown și în /sbin/q:
-../nanohdd ../hda.img push shutdown.bin /sbin/q
+../nanohdd ../hda_v2.img push shutdown.bin /sbin/q
 
 make APP=ls
 make APP=format
@@ -63,8 +63,4 @@ make APP=mem_test
 
 make clean
 
-qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display sdl -audiodev wav,id=snd0,path=qemu_output.wav -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
-#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
-#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
-#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
-#qemu-system-x86_64 -cdrom ../kernel.iso -drive file=../hda.img,format=raw,index=0,media=disk -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
+#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk file=hdb_v3.img,format=raw,index=0,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0

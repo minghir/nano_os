@@ -40,6 +40,9 @@
 #define SYSCALL_BEEP		34
 #define SYSCALL_SET_CURSOR_SHAPE 35
 #define SYSCALL_PLAY_AUDIO       36
+#define SYSCALL_MOUNT            37 // Syscall nou pentru montarea/schimbarea sistemului de fișiere
+#define SYSCALL_FDISK            38 // Syscall nou pentru montarea/schimbarea sistemului de fișiere
+#define SYSCALL_DISK_STATS       39
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -60,6 +63,12 @@ typedef struct {
     uint64_t physical_total; // opțional, dacă vrei să afișezi și RAM-ul total
     uint64_t physical_free;
 } MemInfo;
+
+typedef struct {
+    uint32_t total_sectors;
+    uint32_t free_sectors;
+    uint32_t sector_size; // De obicei 512
+} __attribute__((packed)) DiskStats;
 
 void syscall_handler(SyscallRegisters* regs);
 #endif

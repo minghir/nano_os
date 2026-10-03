@@ -2,7 +2,7 @@
 #include "config.h"
 #include "process.h"
 #include "memory.h"
-#include "fs.h"
+#include "fs/fs.h"
 #include "string.h"
 #include "timer.h"
 #include "paging.h"
@@ -58,7 +58,7 @@ typedef struct mod_list {
     uint32_t pad;
 } mod_list_t;
 
-char env_path[128] = "/;/sbin";
+char env_path[128] = "/hda/;/hda/sbin";
 
 void load_kernel_environment() {
     uint8_t* buffer = (uint8_t*)malloc(512);
@@ -66,7 +66,7 @@ void load_kernel_environment() {
     
     for (int i = 0; i < 512; i++) buffer[i] = 0;
 
-    int bytes = fs_read_file("/cfg/env.cfg", buffer, 511);
+    int bytes = fs_read_file("/hda/cfg/env.cfg", buffer, 511);
     if (bytes > 0) {
         char* text = (char*)buffer;
         if (starts_with(text, "PATH=")) { // Asigură-te că ai funcția starts_with sau o verifici manual
@@ -192,8 +192,9 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     process_init();
     interrupts_init();
     memory_init();
+	KLOG_INFO("KERNEL:Try fs_init()\n");
     fs_init();
-	
+	KLOG_INFO("KERNEL:fs_init() started\n");
 	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
 	KLOG_INFO("KERNEL:Log file created\n");
     
@@ -228,7 +229,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
 
         // Citim fișierul direct în memoria fizică a ACESTUI proces
-        int bytes = fs_read_file("/sbin/init", (uint8_t*)0x800000, MAX_PROG_PAGES*4096);
+        int bytes = fs_read_file("/hda/sbin/init", (uint8_t*)0x800000, MAX_PROG_PAGES*4096);
         
         if (bytes > (int)sizeof(NanoHeader)) {
             NanoHeader* hdr = (NanoHeader*)0x800000;

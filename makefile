@@ -10,7 +10,7 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c)
+C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c)
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
@@ -65,6 +65,48 @@ kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) $(OBJS) -o kernel.bin
 
 # ============================
+#    Tools (nan2hdd / nan3hdd)
+# ============================
+
+hdd_tools:
+	$(MAKE) -C tools
+	
+apps: hdd_tools
+	$(MAKE) -C nano_libc APP=shell
+	$(MAKE) -C nano_libc APP=init
+	$(MAKE) -C nano_libc APP=time
+	$(MAKE) -C nano_libc APP=date
+	$(MAKE) -C nano_libc APP=shutdown
+	$(MAKE) -C nano_libc APP=ls
+	$(MAKE) -C nano_libc APP=format
+	$(MAKE) -C nano_libc APP=rm
+	$(MAKE) -C nano_libc APP=cat
+	$(MAKE) -C nano_libc APP=mkdir
+	$(MAKE) -C nano_libc APP=touch
+	$(MAKE) -C nano_libc APP=cp
+	$(MAKE) -C nano_libc APP=mv
+	$(MAKE) -C nano_libc APP=df
+	$(MAKE) -C nano_libc APP=pwd
+	$(MAKE) -C nano_libc APP=ps
+	$(MAKE) -C nano_libc APP=kill
+	$(MAKE) -C nano_libc APP=free
+	$(MAKE) -C nano_libc APP=dmesg
+	$(MAKE) -C nano_libc APP=mandel
+	$(MAKE) -C nano_libc APP=nanoasm
+	$(MAKE) -C nano_libc APP=nanovi
+	$(MAKE) -C nano_libc APP=watch
+	$(MAKE) -C nano_libc APP=mp3_play
+	$(MAKE) -C nano_libc APP=wavplay
+	$(MAKE) -C nano_libc APP=chr
+	$(MAKE) -C nano_libc APP=argt
+	$(MAKE) -C nano_libc APP=test_malloc
+	$(MAKE) -C nano_libc APP=test_sleep
+	$(MAKE) -C nano_libc APP=tsr_sleep2
+	$(MAKE) -C nano_libc APP=crash
+	$(MAKE) -C nano_libc APP=mem_test
+
+	
+# ============================
 #    ISO cu GRUB
 # ============================
 
@@ -72,24 +114,29 @@ iso/boot/kernel.bin: kernel.bin
 	mkdir -p iso/boot/grub
 	cp kernel.bin iso/boot/kernel.bin
 
-kernel.iso: iso/boot/kernel.bin
+kernel.iso: iso/boot/kernel.bin hdd_tools
 	grub-mkrescue -o kernel.iso iso
-
+	
 # ============================
 #    Rulare în QEMU
 # ============================
 
-run: kernel.iso
-	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda.img,format=raw,index=0,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
-	#qemu-system-x86_64 -kernel kernel.bin -drive file=hda.img,format=raw,index=0,media=disk -cpu qemu64
-	#qemu-system-x86_64 -cdrom kernel.iso
+run: kernel.iso hdd_tools apps 
+#	push_hda.sh
+#	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+
+
+
 
 # ============================
 #    Curățare
 # ============================
 
 clean:
-	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin
+	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
+	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o
 	rm -rf iso/boot/kernel.bin
+	rm -f nano_libc/*.o
+	rm -f tools/nan2hdd tools/nan3hdd
 #	rm -f hda.img

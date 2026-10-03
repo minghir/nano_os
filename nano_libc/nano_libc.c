@@ -49,7 +49,7 @@ void nano_free(void* ptr) {
 
 
 // --- MEMORIE ---
-
+/*
 void* memset(void* dest, int val, size_t len) {
     unsigned char* ptr = (unsigned char*)dest;
     for (size_t i = 0; i < len; i++) {
@@ -66,7 +66,7 @@ void* memcpy(void* dest, const void* src, size_t len) {
     }
     return dest;
 }
-
+*/
 // --- STRING-URI ---
 
 size_t strlen(const char* str) {
@@ -181,13 +181,14 @@ void get_time(DateTime* dt) {
     );
 }
 
+/*
 int starts_with(const char* text, const char* prefix) {
     while (*prefix) {
         if (*text++ != *prefix++) return 0;
     }
     return 1;
 }
-
+*/
 
 int nano_get_processes(ProcessInfo* buf, int max_entries) {
     uint64_t ret;
@@ -245,6 +246,7 @@ int nano_getcwd(char* buf, int max_len) {
     return (int)ret;
 }
 
+/*
 char* string_copy(char* dest, const char* src) {
     char* original_dest = dest;
     while (*src != '\0') {
@@ -255,6 +257,8 @@ char* string_copy(char* dest, const char* src) {
     *dest = '\0'; // Nu uităm terminatorul de șir!
     return original_dest;
 }
+*/
+
 
 // Funcție custom pentru a converti string la int64_t (fără dependențe de atoll din libc)
 int64_t parse_int64(const char* str) {

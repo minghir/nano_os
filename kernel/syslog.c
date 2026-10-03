@@ -1,6 +1,6 @@
 #include "syslog.h"
 #include "io.h"
-#include "fs.h"
+#include "fs/fs.h"
 #include "string.h"
 
 #include <stdint.h>

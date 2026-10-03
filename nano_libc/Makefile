@@ -44,8 +44,14 @@ else ifeq ($(APP),kill)
     OS_PATH = /sbin/kill
 else ifeq ($(APP),free)
     OS_PATH = /sbin/free
+else ifeq ($(APP),cp)
+    OS_PATH = /sbin/cp	
+else ifeq ($(APP),mv)
+    OS_PATH = /sbin/mv	
+else ifeq ($(APP),df)
+    OS_PATH = /bin/df
 else ifeq ($(APP),dmesg)
-    OS_PATH = /sbin/dmesg	
+    OS_PATH = /bin/dmesg	
 else ifeq ($(APP),mandel)
     OS_PATH = /bin/mandel
 else ifeq ($(APP),mp3_play)
@@ -88,16 +94,19 @@ crt0.o: crt0.asm
 
 # 2. Compilare librărie nano_libc
 nano_libc.o: nano_libc.c nano_libc.h
-	$(CC) $(CFLAGS) nano_libc.c -o nano_libc.o
+	$(CC) $(CFLAGS) nano_libc.c -o nano_libc.o 
+	
+nano_string.o: nano_string.c nano_string.h
+	$(CC) $(CFLAGS) nano_string.c -o nano_string.o 
 
 # 3. Compilare aplicație
-$(APP).o: $(APP).c nano_libc.h
-	$(CC) $(CFLAGS) $(APP).c -o $(APP).o
+$(APP).o: $(APP).c nano_libc.h nano_string.h
+	$(CC) $(CFLAGS) $(APP).c -o $(APP).o 
 
 # 4. Link final + urcare automată pe disc
-$(APP).bin: crt0.o nano_libc.o $(APP).o
-	$(LD) $(LDFLAGS) crt0.o nano_libc.o $(APP).o -o $(APP).bin
-	../nanohdd ../hda.img push $(APP).bin $(OS_PATH)
+$(APP).bin: crt0.o nano_libc.o nano_string.o $(APP).o
+	$(LD) $(LDFLAGS) crt0.o nano_libc.o nano_string.o $(APP).o -o $(APP).bin
+	$(CURDIR)/../tools/nan2hdd $(CURDIR)/../hda_v2.img push $(APP).bin $(OS_PATH)
 	@echo "Succes! S-a creat și urcat: $(APP).bin (Virtual: $(TEXT_ADDR)) -> $(OS_PATH)"
 
 clean:

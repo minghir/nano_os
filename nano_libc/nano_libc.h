@@ -6,6 +6,7 @@
 #include <stdarg.h> // Necesar pentru sprintf dacă folosește argumente variabile
 
 #include "../kernel/syscall.h"
+#include "nano_string.h"
 
 
 
@@ -199,16 +200,14 @@ static inline void nano_sys_exit(int status) {
 
 
 void nano_print(const char* str);
-static inline void newline(){
-	nano_print("\n");
-}
+
 void nano_readline(char* buffer, uint32_t max_len);
 
 void* nano_malloc(size_t size);
 void nano_free(void* ptr); // (Chiar dacă e bump allocator, e bine să avem interfața)
 
-void* memset(void* dest, int val, size_t len);
-void* memcpy(void* dest, const void* src, size_t len);
+//void* memset(void* dest, int val, size_t len);
+//void* memcpy(void* dest, const void* src, size_t len);
 void* memmove(void* dest, const void* src, size_t n);
 
 uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
@@ -216,7 +215,7 @@ uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
 size_t strlen(const char* str);
 int strcmp(const char* s1, const char* s2);
 char* strcpy(char* dest, const char* src);
-int starts_with(const char* text, const char* prefix);
+//int starts_with(const char* text, const char* prefix);
 
 // Conversii
 int atoi(const char* str);
@@ -246,7 +245,7 @@ static inline char* nano_strcat(char* dest, const char* src) {
 
 
 
-
+/*
 // Helper pentru sprintf (suportă de bază formatul %d și %s folosite în editor)
 static inline int sprintf(char* str, const char* format, ...) {
     va_list args;
@@ -278,12 +277,12 @@ static inline int sprintf(char* str, const char* format, ...) {
     va_end(args);
     return (int)(ptr - str);
 }
-
+*/
 int nano_get_meminfo(MemInfo* info);
 
 int nano_getcwd(char* buf, int max_len); //curent dir
 
-char* string_copy(char* dest, const char* src);
+//char* string_copy(char* dest, const char* src);
 
 int64_t parse_int64(const char* str);
 //float parse_float(const char* str);
@@ -360,6 +359,40 @@ static inline int sys_play_audio(const uint8_t* data, uint32_t length) {
         : "memory"
     );
     return ret;
+}
+
+static inline int nano_mount(const char* fs_name) {
+    int ret;
+    __asm__ volatile (
+        "movq $37, %%rax\n"       // Numărul syscall-ului (SYSCALL_MOUNT) - 64-bit
+        "movq %1, %%rdi\n"        // Argumentul (pointerul fs_name) în reg RDI (64-bit)
+        "int $0x80\n"            // Întreruperea pentru apelul către kernel
+        "movl %%eax, %0\n"       // Salvăm rezultatul de 32-bit în variabila 'ret'
+        : "=r" (ret)
+        : "r" (fs_name)
+        : "rax", "rdi", "memory"
+    );
+    return ret;
+}
+
+static inline void nano_fdisk(void) {
+    __asm__ volatile (
+        "int $0x80"
+        :
+        : "a" ((uint64_t)38) // 38 este SYSCALL_FDISK
+        : "cc", "memory"
+    );
+}
+
+static inline int nano_get_fs_stats(const char* path, DiskStats* stats) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(39), "D"(path), "S"(stats) // 39 este SYSCALL_DISK_STATS, RDI = path, RSI = stats
+        : "memory"
+    );
+    return (int)ret;
 }
 
 #endif

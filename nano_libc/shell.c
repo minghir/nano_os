@@ -268,6 +268,7 @@ int main() {
 			nano_print("Rebooting Nano OS...\n");
 			nano_reboot();
 		}
+		
 		else if (strcmp(cmd, "beep") == 0) {
 			nano_print("Emitere sunet PC Speaker...\n");
 			nano_beep(880, 250); // Nota La (880 Hz) timp de 250 milisecunde
@@ -283,6 +284,69 @@ int main() {
                 nano_print("cd: missing argument\n");
             }
         } 
+		else if (strcmp(cmd, "mount") == 0) {
+			if (argc > 1) {
+				if (!nano_mount(argv[1])) {
+					nano_print("mount: failed to switch filesystem: ");
+					nano_print(argv[1]);
+					nano_print("\n");
+				} else {
+					nano_print("Successfully mounted: ");
+					nano_print(argv[1]);
+					nano_print("\n");
+				}
+			} else {
+				nano_print("mount: missing argument (usage: mount v3 / mount nan2)\n");
+			}
+		}
+		else if (strcmp(cmd, "ls") == 0) {
+            if (argc > 1) {
+                nano_ls(argv[1]);
+            } else {
+                nano_ls(""); // Dacă nu dăm argument, afișează directorul curent
+            }
+        }
+        else if (strcmp(cmd, "mkdir") == 0) {
+            if (argc > 1) {
+                if (!nano_mkdir(argv[1])) {
+                    nano_print("mkdir: failed to create directory: ");
+                    nano_print(argv[1]);
+                    nano_print("\n");
+                }
+            } else {
+                nano_print("mkdir: missing argument\n");
+            }
+        }
+        else if (strcmp(cmd, "touch") == 0) {
+            if (argc > 1) {
+                // Creăm un fișier cu dimensiunea 0
+                if (!nano_create_file(argv[1], 0)) {
+                    nano_print("touch: failed to create file: ");
+                    nano_print(argv[1]);
+                    nano_print("\n");
+                }
+            } else {
+                nano_print("touch: missing argument\n");
+            }
+        }
+        else if (strcmp(cmd, "rm") == 0) {
+            if (argc > 1) {
+                if (!nano_delete_file(argv[1])) {
+                    nano_print("rm: failed to remove file/directory: ");
+                    nano_print(argv[1]);
+                    nano_print("\n");
+                }
+            } else {
+                nano_print("rm: missing argument\n");
+            }
+        }
+        else if (strcmp(cmd, "format") == 0) {
+            nano_format();
+            nano_print("Format instruction sent to active driver.\n");
+        }
+        else if (strcmp(cmd, "fdisk") == 0) {
+            nano_fdisk();
+        }
         else {
             int success = nano_exec(raw_buffer);
             if (!success) {

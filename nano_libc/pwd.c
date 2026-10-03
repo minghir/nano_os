@@ -8,7 +8,7 @@ int main(int argc, char* argv[]) {
     nano_pwd(path_buffer, sizeof(path_buffer));
 
     nano_print(path_buffer);
-    newline();
+    nano_print("\n");
     
     return 0;
 }

@@ -4,7 +4,7 @@ int main(int argc, char** argv) {
     ProcessInfo procs[32]; // Cerem detalii pentru maxim 32 de procese
     
     int count = nano_get_processes(procs, 32);
-    newline();
+    nano_print("\n");
     nano_print("PID   PPID  STATE       NAME\n");
     nano_print("---------------------------------\n");
     

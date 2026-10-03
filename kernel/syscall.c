@@ -5,7 +5,7 @@
 #include "syscall.h"
 #include "io.h"
 #include "timer.h"
-#include "fs.h"
+#include "fs/fs.h"
 #include "string.h"
 #include "process.h"
 #include "paging.h"
@@ -628,7 +628,44 @@ print("\n");
 			regs->rax = 0; // Succes
 			break;
 		}
-        default: {
+		case SYSCALL_MOUNT:
+			// regs->rdi conține primul argument: pointerul către string-ul trimis din user-space (ex: "v3" sau "nan2")
+			fs_switch_driver((const char*)regs->rdi);
+			regs->rax = 1; // Returnează succes
+			break;
+		case SYSCALL_FDISK:
+			fs_fdisk();
+			break;
+		// În funcția de rutare a syscall-urilor din kernel:
+		case SYSCALL_DISK_STATS: {
+			const char* path = (const char*)regs->rdi;
+			DiskStats* stats = (DiskStats*)regs->rsi;
+			
+			if (!path || !stats) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			char local_path[128];
+			FileSystemInterface* target = vfs_route(path, local_path);
+			
+			if (!target || !target->get_stats) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			uint32_t total = 0, free = 0;
+			if (target->get_stats(&total, &free)) {
+				stats->total_sectors = total;
+				stats->free_sectors = free;
+				stats->sector_size = 512;
+				regs->rax = 0; // Succes
+			} else {
+				regs->rax = (uint64_t)-1;
+			}
+			break;
+		}        
+		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);
 			KLOG_WARNING(log_msg);
