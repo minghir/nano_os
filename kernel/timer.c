@@ -2,10 +2,15 @@
 #include "idt.h"
 #include "timer.h"
 #include "config.h"
+#include "mouse.h"
 
 volatile uint32_t timer_ticks = 0;
 
 extern void cursor_blink_tick();
+
+extern volatile int mouse_moved;
+extern int active_tty;
+extern void gfx_redraw_tty(int tty_id);
 
 // Funcție helper pentru formatare cu zero în față (2-digits)
 static void int_to_str_padded(uint8_t n, char* buf) {
@@ -104,6 +109,12 @@ void timer_irq() {
     timer_ticks++;
 	
 	cursor_blink_tick();
+	
+	// 2. DACĂ MOUSE-UL S-A MIȘCAT, REDESENĂM ECRANUL IMEDIAT!
+    if (mouse_moved) {
+        mouse_moved = 0;
+        gfx_redraw_tty(active_tty);
+    }
 
     // Actualizăm o dată pe secundă (la fiecare 1000 de tick-uri acum!)
 	/*

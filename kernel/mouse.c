@@ -88,8 +88,6 @@ volatile int mouse_moved = 0;
 
 void mouse_handler_main() {
     uint8_t status = inb(0x64);
-
-    // Dacă nu sunt date în buffer, ieșim
     if (!(status & 1)) {
         outb(0xA0, 0x20);
         outb(0x20, 0x20);
@@ -98,42 +96,49 @@ void mouse_handler_main() {
 
     uint8_t data = inb(0x60);
 
-    // Simplificăm logica de ciclare ca să nu se blocheze niciodată
     switch (mouse_cycle) {
         case 0:
-            // Opțional: verificăm bitul de sincronizare (bitul 3), 
-            // dar dacă e out-of-sync, îl lăsăm să avanseze ca să nu înghețe
+            // Protocolul PS/2: Bitul 3 este întotdeauna 1 pentru primul octet
+            if (!(data & 0x08)) {
+                break; 
+            }
             mouse_byte[0] = data;
             mouse_cycle = 1;
             break;
-        
+
         case 1:
             mouse_byte[1] = data;
             mouse_cycle = 2;
             break;
-        
+
         case 2:
             mouse_byte[2] = data;
-            mouse_cycle = 0; // Am terminat pachetul de 3 bytes!
+            mouse_cycle = 0; // Pachet complet de 3 bytes
 
+            uint8_t status_byte = mouse_byte[0];
             int dx = (int8_t)mouse_byte[1];
             int dy = (int8_t)mouse_byte[2];
 
-            mouse_x += dx;
-            mouse_y -= dy; // Inversat pentru că Y crește în jos pe ecran
+            // Extinderea semnelor
+            if (status_byte & 0x10) { dx |= 0xFFFFFF00; }
+            if (status_byte & 0x20) { dy |= 0xFFFFFF00; }
 
-            // Limitele ecranului (1024x768)
+            // Actualizăm poziția
+            mouse_x += dx;
+            mouse_y -= dy; 
+
+            // Limite ecran (1024x768)
             if (mouse_x < 0) mouse_x = 0;
             if (mouse_x > 1016) mouse_x = 1016;
             if (mouse_y < 0) mouse_y = 0;
             if (mouse_y > 756) mouse_y = 756;
 
-            // Anunțăm bucla principală că trebuie să redeseneze ecranul
+            // --- DOAR ANUNȚĂM CĂ S-A MIȘCAT (Fără redesenare grea aici!) ---
             mouse_moved = 1;
             break;
     }
 
-    // Confirmăm întreruperea la PIC
+    // Confirmăm întreruperea la ambele PIC-uri
     outb(0xA0, 0x20);
     outb(0x20, 0x20);
 }
