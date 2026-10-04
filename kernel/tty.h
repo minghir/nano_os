@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 #define MAX_TTYS 4
-#define VGA_WIDTH 80
-#define VGA_HEIGHT 25
+#define MAX_TERM_COLS 128
+#define MAX_TERM_ROWS 48
 
 typedef struct {
-    uint16_t screen_buffer[VGA_WIDTH * VGA_HEIGHT];
+    uint16_t screen_buffer[MAX_TERM_COLS * MAX_TERM_ROWS];
     int cursor;                     
     uint16_t current_vga_attr;      
     uint8_t keyboard_queue[256];    

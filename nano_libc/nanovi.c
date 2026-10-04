@@ -1,7 +1,9 @@
 #include "nano_libc.h"
 
-#define SCREEN_ROWS 24
-#define SCREEN_COLS 80
+// Adăugăm structura exact cum ai cerut
+
+int SCREEN_ROWS = 24;
+int SCREEN_COLS = 80;
 
 typedef enum {
     MODE_NORMAL,
@@ -13,9 +15,9 @@ typedef enum {
 } EditorMode;
 
 typedef struct {
-    char** lines;        // Tablou dinamic de pointeri la linii (char**)
-    int num_lines;       // Numărul efectiv de linii din fișier
-    int capacity;        // Capacitatea curentă a tabloului de pointeri
+    char** lines;        
+    int num_lines;       
+    int capacity;        
     int cx, cy;          
     int row_offset;      
     int col_offset;      
@@ -67,12 +69,10 @@ static inline int sprintf(char* str, const char* format, ...) {
     return (int)(ptr - str);
 }
 
-
 void int_to_str(int n, char* buf) {
     itoa(n, buf, 10);
 }
 
-// Inserarea unui rând nou în mod dinamic
 void editor_insert_row(int at, const char* s) {
     if (at < 0 || at > E.num_lines) return;
 
@@ -92,7 +92,7 @@ void editor_insert_row(int at, const char* s) {
         E.lines[i] = E.lines[i - 1];
     }
 
-    int len = strlen(s);
+    int len = (int)strlen(s);
     E.lines[at] = (char*)nano_malloc(len + 1);
     strcpy(E.lines[at], s);
     
@@ -100,11 +100,10 @@ void editor_insert_row(int at, const char* s) {
     E.modified = 1;
 }
 
-// Inserarea unui caracter pe o linie existentă (redimensionare dinamică a rândului)
 void editor_row_insert_char(int row, int at, char c) {
     if (row < 0 || row >= E.num_lines) return;
     if (at < 0) at = 0;
-    int len = strlen(E.lines[row]);
+    int len = (int)strlen(E.lines[row]);
     if (at > len) at = len;
 
     char* new_line = (char*)nano_malloc(len + 2);
@@ -118,11 +117,10 @@ void editor_row_insert_char(int row, int at, char c) {
     E.modified = 1;
 }
 
-// Ștergerea unui caracter de pe o linie (Backspace)
 void editor_row_delete_char(int row, int at) {
     if (row < 0 || row >= E.num_lines) return;
     if (at <= 0) return;
-    int len = strlen(E.lines[row]);
+    int len = (int)strlen(E.lines[row]);
     if (at > len) return;
 
     char* new_line = (char*)nano_malloc(len);
@@ -135,7 +133,6 @@ void editor_row_delete_char(int row, int at) {
     E.modified = 1;
 }
 
-// Inserarea unei linii noi (Enter) care sparge rândul curent
 void editor_insert_newline() {
     char* line = E.lines[E.cy];
     char left_part[256];
@@ -198,98 +195,90 @@ void editor_scroll() {
 
 void editor_refresh_screen() {
     editor_scroll();
-    nano_clear_screen();
 
+    // MAGICUL AICI: Alocăm array-ul static. Se alocă o singură dată, 
+    // la pornirea programului. Zero corupere de memorie, zero load pe heap!
+    static uint16_t screen_buffer[256 * 128]; 
+
+    int total_cells = SCREEN_COLS * SCREEN_ROWS;
+    uint16_t default_attr = 0x0F00; 
+    //uint16_t invert_attr  = 0x7000; 
+	uint16_t invert_attr  = 0x0B00;
+
+    // 1. Curățăm ecranul logic
+    for (int i = 0; i < total_cells; i++) {
+        screen_buffer[i] = default_attr | ' ';
+    }
+
+    // 2. Randarea fișierului text
     int render_rows = SCREEN_ROWS - 1;
-
     for (int i = 0; i < render_rows; i++) {
         int file_row = i + E.row_offset;
+        int row_start_idx = i * SCREEN_COLS;
+
         if (file_row < E.num_lines) {
-            if (E.mode == MODE_VISUAL) {
-                int len = strlen(E.lines[file_row]);
-                int in_highlight = 0;
-                for (int j = 0; j <= len; j++) {
-                    int should_highlight = is_in_selection(file_row, j);
-                    if (should_highlight && !in_highlight) {
-                        nano_print("\033[7m");
-                        in_highlight = 1;
-                    } else if (!should_highlight && in_highlight) {
-                        nano_print("\033[0m");
-                        in_highlight = 0;
-                    }
-                    if (j < len) {
-                        char ch_str[2] = {E.lines[file_row][j], '\0'};
-                        nano_print(ch_str);
-                    }
+            int len = (int)strlen(E.lines[file_row]);
+            int col = 0;
+            
+            for (int j = 0; j <= len && col < SCREEN_COLS; j++) {
+                int should_highlight = is_in_selection(file_row, j);
+                uint16_t attr = should_highlight ? invert_attr : default_attr;
+
+                if (j < len) {
+                    screen_buffer[row_start_idx + col] = attr | (unsigned char)E.lines[file_row][j];
+                    col++;
                 }
-                if (in_highlight) {
-                    nano_print("\033[0m");
-                }
-                nano_print("\n");
-            } else {
-                nano_print(E.lines[file_row]);
-                nano_print("\n");
             }
         } else {
-            nano_print("~\n");
+            screen_buffer[row_start_idx] = default_attr | '~';
         }
     }
 
-    nano_print("\033[24;1H                                                                                ");
-    nano_print("\033[24;1H");
-
-    if (E.mode == MODE_COMMAND) {
-        nano_print(":");
-        nano_print(cmd_input);
-    } else if (E.status_msg[0] != '\0') {
-        nano_print(E.status_msg);
-    } else {
-        if (E.mode == MODE_NORMAL) {
-            nano_print("-- NORMAL -- ");
-            if (E.modified) nano_print("[+] ");
-            nano_print("File: ");
-            nano_print(E.filename);
-        } else if (E.mode == MODE_INSERT) {
-            nano_print("-- INSERT -- ");
-            if (E.modified) nano_print("[+] ");
-            nano_print("File: ");
-            nano_print(E.filename);
-        } else if (E.mode == MODE_VISUAL) {
-            nano_print("-- VISUAL -- (Press y to Yank) File: ");
-            nano_print(E.filename);
-        } else if (E.mode == MODE_DELETE_PENDING) {
-            nano_print("-d- (waiting for d or w) File: ");
-            nano_print(E.filename);
-        } else if (E.mode == MODE_YANK_PENDING) {
-            nano_print("-y- (waiting for y for yy) File: ");
-            nano_print(E.filename);
-        }
-    }
-
-    char cursor_seq[32];
-	/*
-    if (E.mode == MODE_COMMAND) {
-        sprintf(cursor_seq, "\033[24;%dH", cmd_input_len + 2);
-    } else {
-        int screen_y = (E.cy - E.row_offset) + 1;
-        sprintf(cursor_seq, "\033[%d;%dH", screen_y, E.cx + 1);
-    }
-    nano_print(cursor_seq);
-*/
-	
+    // 3. Randarea bării de stare sigure
+    int status_row_idx = (SCREEN_ROWS - 1) * SCREEN_COLS;
     
-    // --- SCHIMBARE FORMĂ CURSOR ÎN FUNCȚIE DE MOD ---
-	/*
-    if (E.mode == MODE_INSERT) {
-        nano_print("\033[6 q"); // Bară verticală (|) în modul Insert
-    } else {
-        nano_print("\033[2 q"); // Bloc în modul Normal / Visual / Command
+    for (int i = 0; i < SCREEN_COLS; i++) {
+        screen_buffer[status_row_idx + i] = invert_attr | ' ';
     }
-	*/
-    // ------------------------------------------------
+
+    char status_text[256];
+    status_text[0] = '\0';
 
     if (E.mode == MODE_COMMAND) {
-        sprintf(cursor_seq, "\033[24;%dH", cmd_input_len + 2);
+        sprintf(status_text, ":%s", cmd_input);
+    } else if (E.status_msg[0] != '\0') {
+        sprintf(status_text, "%s", E.status_msg);
+    } else {
+        const char* mode_str = "";
+        if (E.mode == MODE_NORMAL) mode_str = "-- NORMAL -- ";
+        else if (E.mode == MODE_INSERT) mode_str = "-- INSERT -- ";
+        else if (E.mode == MODE_VISUAL) mode_str = "-- VISUAL -- (Press y to Yank) ";
+        else if (E.mode == MODE_DELETE_PENDING) mode_str = "-d- (waiting for d or w) ";
+        else if (E.mode == MODE_YANK_PENDING) mode_str = "-y- (waiting for y for yy) ";
+        
+        char mod_str[16] = "";
+        if (E.modified) {
+            mod_str[0] = '['; mod_str[1] = '+'; mod_str[2] = ']'; mod_str[3] = ' '; mod_str[4] = '\0';
+        }
+        
+        sprintf(status_text, "%s%sFile: %s", mode_str, mod_str, E.filename);
+    }
+
+    // Scriem status_text pe ultimul rând
+    int s_len = (int)strlen(status_text);
+    for (int i = 0; i < s_len && i < SCREEN_COLS; i++) {
+        screen_buffer[status_row_idx + i] = invert_attr | (unsigned char)status_text[i];
+    }
+
+    // 4. Apelăm noul syscall asamblat pentru a trimite buffer-ul atomic!
+    nano_draw_full_screen(screen_buffer);
+    
+    // ATENȚIE: Am șters nano_free! Nu mai e nevoie și nici nu mai face crash!
+
+    // 5. Update cursor 
+    char cursor_seq[32];
+    if (E.mode == MODE_COMMAND) {
+        sprintf(cursor_seq, "\033[%d;%dH", SCREEN_ROWS, cmd_input_len + 2);
     } else {
         int screen_y = (E.cy - E.row_offset) + 1;
         sprintf(cursor_seq, "\033[%d;%dH", screen_y, E.cx + 1);
@@ -311,7 +300,7 @@ void editor_save_file() {
 
     int offset = 0;
     for (int i = 0; i < E.num_lines; i++) {
-        int len = strlen(E.lines[i]);
+        int len = (int)strlen(E.lines[i]);
         for (int j = 0; j < len; j++) {
             if (offset < 16382) {
                 disk_buffer[offset++] = E.lines[i][j];
@@ -323,7 +312,6 @@ void editor_save_file() {
     }
     disk_buffer[offset] = '\0';
     
-    // Asigurăm crearea fișierului pe disc dacă nu exista
     nano_create_file(E.filename, 1024);
 
     if (nano_write_file(E.filename, (uint8_t*)disk_buffer, offset) > 0) {
@@ -339,10 +327,19 @@ void editor_save_file() {
 }
 
 int main(int argc, char* argv[]) {
+    // --- PRELUARE INFORMAȚII ECRAN DINAMIC ---
+    VideoModeInfo vinfo;
+    if (nano_get_video_info(&vinfo) == 1) {
+        if (vinfo.rows > 0 && vinfo.cols > 0) {
+            SCREEN_ROWS = vinfo.rows;
+            SCREEN_COLS = vinfo.cols;
+        }
+    }
+
     if (argc >= 2) {
         strcpy(E.filename, argv[1]);
     } else {
-        E.filename[0] = '\0'; // Fără fișier implicit! Rămâne gol.
+        E.filename[0] = '\0';
     }
 
     E.cx = 0;
@@ -356,7 +353,6 @@ int main(int argc, char* argv[]) {
     E.modified = 0;
     E.status_msg[0] = '\0';
 
-    // Citim doar dacă s-a dat un fișier valid la pornire
     if (E.filename[0] != '\0') {
         uint8_t* file_buffer = (uint8_t*)nano_malloc(16384);
         if (file_buffer) {
@@ -383,13 +379,12 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // Dacă totuși nu avem linii (fișier gol sau deschis fără nume), punem cel puțin o linie goală
     if (E.num_lines == 0) {
         editor_insert_row(0, "");
     }
     
-    E.modified = 0; // Resetăm modificarea la început
-	
+    E.modified = 0;
+    
     while (1) {
         editor_refresh_screen();
         
@@ -400,34 +395,33 @@ int main(int argc, char* argv[]) {
             E.status_msg[0] = '\0';
         }
         
-        // --- GESTIONAREA TASTELOR SPECIALE ȘI ESC ---
-        if (c == 27) { 
+        if (c == 27) {  
             if (E.mode == MODE_INSERT || E.mode == MODE_VISUAL || E.mode == MODE_COMMAND) {
                 E.mode = MODE_NORMAL;
-				nano_set_cursor_shape(0);
+                nano_set_cursor_shape(0);
             }
             continue;
         }
-        else if (c == 128) { // Săgeata Sus
+        else if (c == 128) { 
             if (E.cy > 0) E.cy--;
-            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
             continue;
         }
-        else if (c == 129) { // Săgeata Jos
+        else if (c == 129) { 
             if (E.cy < E.num_lines - 1) E.cy++;
-            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
             continue;
         }
-        else if (c == 130) { // Săgeata Dreapta
-            if (E.cx < strlen(E.lines[E.cy])) E.cx++;
+        else if (c == 130) { 
+            if (E.cx < (int)strlen(E.lines[E.cy])) E.cx++;
             continue;
         }
-        else if (c == 131) { // Săgeata Stânga
+        else if (c == 131) { 
             if (E.cx > 0) E.cx--;
             continue;
         }
-        else if (c == 132) { // Tasta Delete
-            int len = strlen(E.lines[E.cy]);
+        else if (c == 132) { 
+            int len = (int)strlen(E.lines[E.cy]);
             if (E.cx < len) {
                 char* line = E.lines[E.cy];
                 for (int i = E.cx; i < len; i++) {
@@ -437,37 +431,36 @@ int main(int argc, char* argv[]) {
             }
             continue;
         }
-        else if (c == 133) { // Home
+        else if (c == 133) { 
             E.cx = 0;
             continue;
         }
-        else if (c == 135) { // End
-            E.cx = strlen(E.lines[E.cy]);
+        else if (c == 135) { 
+            E.cx = (int)strlen(E.lines[E.cy]);
             continue;
         }
-        else if (c == 134) { // Page Up
+        else if (c == 134) { 
             E.cy -= (SCREEN_ROWS - 1);
             if (E.cy < 0) E.cy = 0;
-            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
             continue;
         }
-        else if (c == 136) { // Page Down
+        else if (c == 136) { 
             E.cy += (SCREEN_ROWS - 1);
             if (E.cy >= E.num_lines) E.cy = E.num_lines - 1;
-            if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+            if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
             continue;
         }
-        else if (c == 137) { // Insert
-			nano_set_cursor_shape(1);
+        else if (c == 137) { 
+            nano_set_cursor_shape(1);
             E.mode = MODE_INSERT;
             continue;
         }
 
-        // --- GESTIONAREA MODURILOR ---
         if (E.mode == MODE_NORMAL) {
             switch (c) {
                 case 'i': 
-					nano_set_cursor_shape(1);
+                    nano_set_cursor_shape(1);
                     E.mode = MODE_INSERT; 
                     break;
                 case 'v': 
@@ -496,24 +489,24 @@ int main(int argc, char* argv[]) {
                     if (E.cx > 0) E.cx--; 
                     break;
                 case 'l': 
-                    if (E.cx < strlen(E.lines[E.cy])) E.cx++; 
+                    if (E.cx < (int)strlen(E.lines[E.cy])) E.cx++; 
                     break;
                 case 'j': 
                     if (E.cy < E.num_lines - 1) E.cy++; 
-                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
                     break;
                 case 'k': 
                     if (E.cy > 0) E.cy--; 
-                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
                     break;
                 case 'd': 
                     E.mode = MODE_DELETE_PENDING;
                     break;
                 case 'x': { 
-                    int len = strlen(E.lines[E.cy]);
+                    int len = (int)strlen(E.lines[E.cy]);
                     if (E.cx < len) {
                         editor_row_delete_char(E.cy, E.cx + 1);
-                        int new_len = strlen(E.lines[E.cy]);
+                        int new_len = (int)strlen(E.lines[E.cy]);
                         if (E.cx >= new_len && E.cx > 0) {
                             E.cx--;
                         }
@@ -534,7 +527,7 @@ int main(int argc, char* argv[]) {
         else if (E.mode == MODE_YANK_PENDING) {
             if (c == 'y') {
                 strcpy(clipboard, E.lines[E.cy]);
-                int len = strlen(clipboard);
+                int len = (int)strlen(clipboard);
                 clipboard[len] = '\n';
                 clipboard[len + 1] = '\0';
                 clipboard_len = len + 1;
@@ -551,15 +544,15 @@ int main(int argc, char* argv[]) {
                     if (E.cx > 0) E.cx--; 
                     break;
                 case 'l': 
-                    if (E.cx < strlen(E.lines[E.cy])) E.cx++; 
+                    if (E.cx < (int)strlen(E.lines[E.cy])) E.cx++; 
                     break;
                 case 'j': 
                     if (E.cy < E.num_lines - 1) E.cy++; 
-                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
                     break;
                 case 'k': 
                     if (E.cy > 0) E.cy--; 
-                    if (E.cx > strlen(E.lines[E.cy])) E.cx = strlen(E.lines[E.cy]);
+                    if (E.cx > (int)strlen(E.lines[E.cy])) E.cx = (int)strlen(E.lines[E.cy]);
                     break;
                 case 'y': { 
                     int start_y = E.visual_start_y;
@@ -574,7 +567,7 @@ int main(int argc, char* argv[]) {
 
                     clipboard_len = 0;
                     for (int y = start_y; y <= end_y; y++) {
-                        int row_len = strlen(E.lines[y]);
+                        int row_len = (int)strlen(E.lines[y]);
                         int col_start = (y == start_y) ? start_x : 0;
                         int col_end = (y == end_y) ? end_x : row_len;
 
@@ -645,9 +638,8 @@ int main(int argc, char* argv[]) {
                     editor_save_file();
                     E.mode = MODE_NORMAL;
                 } else if (starts_with(cmd_input, "w ")) {
-                    // Prelucrăm comanda `:w filename`
                     char* fname = &cmd_input[2];
-                    while (*fname == ' ') fname++; // Ignorăm spațiile suplimentare
+                    while (*fname == ' ') fname++;
                     if (*fname != '\0') {
                         strcpy(E.filename, fname);
                         editor_save_file();
@@ -663,7 +655,6 @@ int main(int argc, char* argv[]) {
                     }
                     E.mode = MODE_NORMAL;
                 } else if (starts_with(cmd_input, "wq ")) {
-                    // Prelucrăm comanda `:wq filename`
                     char* fname = &cmd_input[3];
                     while (*fname == ' ') fname++;
                     if (*fname != '\0') {

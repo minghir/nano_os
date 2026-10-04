@@ -19,6 +19,7 @@ typedef struct {
     void (*get_current_path)(char* buffer, uint32_t max_len);
     void (*fdisk)(void);
     void (*format)(void);
+	int  (*get_file_at_index)(int index, char* buffer, uint32_t max_len);
 } FileSystemInterface;
 
 // --- API-ul public unificat (Dispatcher-ul) ---
@@ -38,7 +39,7 @@ int  fs_cd(const char* name);
 void fs_get_current_path(char* buffer, uint32_t max_len);
 void fs_fdisk(void);
 void fs_format(void);
-
+int  fs_get_file_at_index(int index, char* buffer, uint32_t max_len);
 // Permitem schimbarea sau exportul driverului NAN2
 extern FileSystemInterface nan2_driver;
 

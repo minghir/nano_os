@@ -30,5 +30,7 @@
  void _uint_to_hex(uint64_t val, char* buf, int uppercase);
  int snprintf(char* str, uint32_t size, const char* format, ...);
 
+int strncmp(const char* s1, const char* s2, size_t n);
+
 #endif // STRING_H
 

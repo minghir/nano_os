@@ -10,6 +10,10 @@
 #include "syscall.h"
 #include "tty.h"
 #include "pci.h"
+#include "video.h"
+#include "mouse.h"
+
+#include "gfx/gfx_term.h"
 
 #include <stdint.h>
 
@@ -59,6 +63,17 @@ typedef struct mod_list {
 } mod_list_t;
 
 char env_path[128] = "/hda/;/hda/sbin";
+
+
+uint64_t fb_physical_address = 0;
+uint32_t screen_width = 0;
+uint32_t screen_height = 0;
+uint32_t screen_pitch = 0;
+uint8_t  screen_bpp = 0;
+
+extern volatile int mouse_moved;
+extern void gfx_redraw_tty(int tty_id);
+extern int active_tty;
 
 void load_kernel_environment() {
     uint8_t* buffer = (uint8_t*)malloc(512);
@@ -159,92 +174,110 @@ void page_fault_handler(FaultRegisters* regs) {
 }
 
 void kernel_main(unsigned long magic, unsigned long addr) {
-	
-	// 1. Inițializăm subsistemul TTY și curățăm ecranele virtuale
     tty_init();
-	
     cursor_init();
     KLOG_INFO("Nano OS booted!\n");
-   
+
+	process_init();
+    interrupts_init();
+    memory_init();
 
     // Verify and parse the configuration file sent via GRUB
     if (magic == 0x2BADB002 && addr != 0) {
         multiboot_info_t* mb_info = (multiboot_info_t*)addr;
 
-        // Check if bit 12 is set (framebuffer info available)
-        if (mb_info->flags & (1 << 12)) {
-            uint64_t fb_addr = mb_info->framebuffer_addr;
-            uint32_t fb_width = mb_info->framebuffer_width;
-            uint32_t fb_height = mb_info->framebuffer_height;
-            uint32_t fb_pitch = mb_info->framebuffer_pitch;
-            uint8_t  fb_bpp = mb_info->framebuffer_bpp;
+        // Verificăm dacă GRUB ne-a dat framebuffer-ul grafic
+        // În kernel.c, în interiorul verificării Multiboot:
+		// Verificăm dacă GRUB ne-a dat framebuffer-ul grafic
+        if ((mb_info->flags & (1 << 12)) && mb_info->framebuffer_addr != 0 && mb_info->framebuffer_type == 1) {
+            fb_physical_address = mb_info->framebuffer_addr;
+            screen_width  = mb_info->framebuffer_width;
+            screen_height = mb_info->framebuffer_height;
+            screen_pitch  = mb_info->framebuffer_pitch;
+
+            // Mapăm memoria video pentru kernel în tabelele de pagini (PML4)
+            uint32_t fb_size = screen_pitch * screen_height;
+            uint64_t* current_pml4;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(current_pml4));
+            for (uint32_t offset = 0; offset < fb_size; offset += PAGE_SIZE) {
+                map_page(current_pml4,
+                         fb_physical_address + offset,
+                         fb_physical_address + offset,
+                         PAGE_PRESENT | PAGE_WRITE);
+            }
+
+            // --- INIȚIALIZARE UNICĂ ȘI CORECTĂ A MOTORULUI GRAFIC ---
+            video_init(fb_physical_address, screen_width, screen_height, screen_pitch, mb_info->framebuffer_bpp);
+
+            VideoModeInfo* mode = video_get_info();
+            gterm_init(mode->fb_addr, mode->width, mode->height, mode->pitch);
+            io_set_graphical_mode(mode->cols, mode->rows);
             
-            // Framebuffer values can be saved here if needed globally
+			mouse_init();
+			
+            gfx_redraw_tty(active_tty);
+            // --------------------------------------------------------
+
+            KLOG_INFO("KERNEL: Nano OS activat în Mod Grafic True Color (1024x768).\n");
+        } else {
+            KLOG_FATAL("FATAL: Framebuffer grafic negăsit de la GRUB!\n");
         }
 
+        // Parsăm fișierul de configurare / timezone dacă există
         if (mb_info->mods_count > 0) {
             mod_list_t* mod = (mod_list_t*)(uint64_t)mb_info->mods_addr;
             parse_config((const char*)(uint64_t)mod->mod_start);
         }
     }
 
-    // Initialize core kernel subsystems and interrupts
-    process_init();
-    interrupts_init();
-    memory_init();
-	KLOG_INFO("KERNEL:Try fs_init()\n");
+
+    
+    KLOG_INFO("KERNEL:Try fs_init()\n");
     fs_init();
-	KLOG_INFO("KERNEL:fs_init() started\n");
-	fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
-	KLOG_INFO("KERNEL:Log file created\n");
-    
-    // Load kernel environment variables (PATH)
+    KLOG_INFO("KERNEL:fs_init() started\n");
+    fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
+    KLOG_INFO("KERNEL:Log file created\n");
+
     load_kernel_environment();
-	KLOG_INFO("KERNEL:Enviroment loaded.\n");
-	
-	pci_scan_bus();
-	// --- LOADING THE SHELL(S) FROM USER SPACE ---
+    KLOG_INFO("KERNEL:Enviroment loaded.\n");
+
+    pci_scan_bus();
     KLOG_INFO("Loading Init daemons on all TTYs...\n");
-    
-    // Salvăm cr3-ul curent al kernelului o singură dată
+
     uint64_t old_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
 
-    // Pornim 4 shell-uri independente
     for (int t = 0; t < MAX_TTYS; t++) {
-        
         uint64_t init_pages[8];
-        for(int p = 0; p < 8; p++) {
+        for (int p = 0; p < 8; p++) {
             init_pages[p] = (uint64_t)alloc_page();
         }
 
         uint64_t* init_pml4 = create_process_pml4();
 
         for (int p = 0; p < 8; p++) {
-            map_page(init_pml4, 0x800000 + (p * 4096), init_pages[p], 
+            map_page(init_pml4,
+                     0x800000 + (p * 4096),
+                     init_pages[p],
                      PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
         }
 
-        // Trecem pe memoria noului proces
         __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
 
-        // Citim fișierul direct în memoria fizică a ACESTUI proces
         int bytes = fs_read_file("/hda/sbin/init", (uint8_t*)0x800000, MAX_PROG_PAGES*4096);
-        
+
         if (bytes > (int)sizeof(NanoHeader)) {
             NanoHeader* hdr = (NanoHeader*)0x800000;
-            if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' && 
+            if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' &&
                 hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
-                
+
                 uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
-                
-                // Revenim la kernel
+
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-                
-                // Transmitem parametrul `t` ca fiind tty_id-ul procesului!
-               uint32_t init_pid = process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
-			   ttys[t].foreground_pid = init_pid;
-			   
+
+                uint32_t init_pid = process_create("init", init_entry_point, 0, NULL,
+                                                   (uint64_t)init_pml4, init_pages, t);
+                ttys[t].foreground_pid = init_pid;
             } else {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
                 KLOG_FATAL("FATAL ERROR: /sbin/init bad signature!\n");
@@ -256,9 +289,16 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     }
 
     KLOG_DEBUG("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
-    timer_init(1000); 
-    
+    timer_init(1000);
+
     for (;;) {
+		// Dacă mouse-ul s-a mișcat, redesenăm ecranul!
+        if (mouse_moved) {
+            mouse_moved = 0; // Resetăm flag-ul
+            gfx_redraw_tty(active_tty); 
+        }
+        
+        // Așteptăm următoarea întrerupere (Tastatură, Mouse, sau Timer)
         __asm__ volatile ("sti; hlt");
     }
 }

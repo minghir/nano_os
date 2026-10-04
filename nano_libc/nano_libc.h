@@ -6,6 +6,7 @@
 #include <stdarg.h> // Necesar pentru sprintf dacă folosește argumente variabile
 
 #include "../kernel/syscall.h"
+#include "../kernel/video.h"
 #include "nano_string.h"
 
 
@@ -393,6 +394,58 @@ static inline int nano_get_fs_stats(const char* path, DiskStats* stats) {
         : "memory"
     );
     return (int)ret;
+}
+
+static inline int nano_get_video_info(VideoModeInfo* info) {
+    uint64_t ret;
+    __asm__ volatile (
+        "mov $40, %%rax\n"          // SYSCALL_VIDEO_INFO = 40
+        "mov %1, %%rdi\n"          // Pointerul către structura din user-space
+        "int $0x80\n"              // Sau instrucțiunea ta de întrerupere pentru syscall
+        "mov %%rax, %0\n"
+        : "=r"(ret)
+        : "r"(info)
+        : "rax", "rdi", "memory"
+    );
+    return (int)ret;
+}
+
+static inline void nano_swap_buffers() {
+    __asm__ volatile (
+        "mov $41, %%rax\n"
+        "int $0x80\n"
+        ::: "rax", "memory"
+    );
+}
+
+static inline void nano_draw_full_screen(const void* screen_buffer) {
+    __asm__ volatile (
+        "mov $42, %%rax\n\t"       // Numărul syscall-ului
+        "mov %0, %%rdx\n\t"       // Adresa bufferului din user-space trimisă în rdx
+        "int $0x80\n\t"           // Declanșăm întreruperea software
+        :
+        : "r" (screen_buffer)     // Input: pointerul către buffer
+        : "rax", "rdx", "memory"  // Registre modificate și barieră de memorie
+    );
+}
+
+static inline int nano_get_file_name_at(int index, char* buf, int max_len) {
+    (void)max_len;
+    long success = 0;
+    
+    register long rdi_val __asm__("rdi") = (long)index;
+    register long rsi_val __asm__("rsi") = (long)buf;
+    register long rax_val __asm__("rax") = 43; // ID-ul exact al syscall-ului în kernel
+
+    __asm__ volatile (
+        "int $0x80\n\t"
+        : "=r" (rax_val)
+        : "r" (rax_val), "r" (rdi_val), "r" (rsi_val)
+        : "memory"
+    );
+
+    success = rax_val;
+    return (int)success;
 }
 
 #endif

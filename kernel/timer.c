@@ -5,6 +5,8 @@
 
 volatile uint32_t timer_ticks = 0;
 
+extern void cursor_blink_tick();
+
 // Funcție helper pentru formatare cu zero în față (2-digits)
 static void int_to_str_padded(uint8_t n, char* buf) {
     buf[0] = '0' + (n / 10);
@@ -100,6 +102,8 @@ void timer_irq() {
 
 void timer_irq() {
     timer_ticks++;
+	
+	cursor_blink_tick();
 
     // Actualizăm o dată pe secundă (la fiecare 1000 de tick-uri acum!)
 	/*

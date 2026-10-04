@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "fs_v3.h"
+#include "fs_v3_inode.h"
 #include "../string.h"
 #include "../syslog.h" // Includem syslog pentru macro-urile KLOG_...
 
@@ -105,4 +106,47 @@ uint32_t nfs3_append_sector(uint32_t last_sector) {
 
     KLOG_DEBUG("[NAN3 FAT] Sector nou atașat la lanțul existent.");
     return new_sector;
+}
+
+int nfs3_get_file_at_index(int index, char* buffer, uint32_t max_len) {
+    InodeV3 dir_inode;
+    
+    // Folosim exact variabila ta globală/statică care memorează inodul directorului curent în fs_v3.c
+    // (Verifică cum se numește în fs_list_files_v3: de obicei current_dir_inode este definită sus în fs_v3.c)
+    extern uint32_t current_dir_inode; // O declarăm extern dacă e nevoie, sau folosim numele corect
+    
+    if (!nfs3_read_inode(current_dir_inode, &dir_inode)) return 0;
+    if (dir_inode.flags != INODE_FLAG_DIR) return 0;
+    if (dir_inode.first_sector == 0 || dir_inode.first_sector == 0xFFFFFFFF) return 0;
+
+    uint32_t current_sector = dir_inode.first_sector;
+    int current_index = 0;
+
+    while (current_sector != 0 && current_sector != 0xFFFFFFFF) {
+        uint8_t sec_buf[512];
+        disk_read_sector_drive(1, current_sector, sec_buf);
+
+        for (int e = 0; e < 8; e++) {
+            uint8_t* entry_ptr = sec_buf + (e * 64);
+            char* name_ptr = (char*)entry_ptr;
+            uint32_t* inode_ptr = (uint32_t*)(entry_ptr + 60);
+
+            if (*inode_ptr != 0 && name_ptr[0] != '\0' && name_ptr[0] != '.') {
+                if (current_index == index) {
+                    uint32_t i = 0;
+                    while (name_ptr[i] != '\0' && i < max_len - 1 && i < 60) {
+                        buffer[i] = name_ptr[i];
+                        i++;
+                    }
+                    buffer[i] = '\0';
+                    return 1;
+                }
+                current_index++;
+            }
+        }
+
+        current_sector = nfs3_read_fat_entry(current_sector);
+    }
+
+    return 0;
 }

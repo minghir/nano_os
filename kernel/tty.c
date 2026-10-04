@@ -6,7 +6,7 @@ TTY ttys[MAX_TTYS];
 int active_tty = 1;
 
 extern void cursor_update();
-
+/*
 void switch_tty(int new_tty) {
     if (new_tty < 0 || new_tty >= MAX_TTYS || new_tty == active_tty) {
         return;
@@ -24,11 +24,24 @@ void switch_tty(int new_tty) {
     // Actualizăm hardware-ul să arate cursorul corect
     cursor_update();
 }
+*/
+void switch_tty(int new_tty) {
+    if (new_tty < 0 || new_tty >= MAX_TTYS || new_tty == active_tty) {
+        return;
+    }
+
+    active_tty = new_tty; // Schimbăm focusul
+
+    // Magia arhitecturii noi: apelăm funcția de redraw universală!
+    // Ea știe singură dacă să copieze în 0xB8000 sau să randeze pixeli,
+    // în funcție de flag-ul is_gfx_mode, și la final actualizează și cursorul.
+    gfx_redraw_tty(active_tty);
+}
 
 int get_active_tty() {
     return active_tty;
 }
-
+/*
 void tty_init() {
     uint16_t* physical_vga = (uint16_t*)0xB8000;
     for (int t = 0; t < MAX_TTYS; t++) {
@@ -45,4 +58,31 @@ void tty_init() {
     }
     cursor = 0;
     cursor_update();
+}
+*/
+
+void tty_init() {
+    uint16_t* physical_vga = (uint16_t*)0xB8000;
+    
+    for (int t = 0; t < MAX_TTYS; t++) {
+        ttys[t].cursor = 0;
+        ttys[t].current_vga_attr = FONT_COLOR; // FONT_COLOR vine din io.h
+        ttys[t].keyboard_queue_read = 0;
+        ttys[t].keyboard_queue_write = 0;
+        ttys[t].foreground_pid = 0; 
+        
+        // Curățăm ÎNTREGUL buffer (pentru 128x48 caractere grafice)
+        for (int i = 0; i < MAX_TERM_COLS * MAX_TERM_ROWS; i++) {
+            ttys[t].screen_buffer[i] = FONT_COLOR | ' ';
+        }
+    }
+    
+    // Scriem temporar spații în memoria VGA clasică (doar 80x25), 
+    // înainte ca sistemul să afle că este în mod grafic.
+    for (int i = 0; i < 80 * 25; i++) {
+        physical_vga[i] = ttys[active_tty].screen_buffer[i];
+    }
+    
+    active_tty = 0;
+    cursor_update(); // Acest apel va ruta corect datorită io.c
 }

@@ -25,7 +25,7 @@ extern void print_number(uint32_t n);
 extern void newline();
 
 // Starea curentă a navigației în NanoFS V3 (Indexul inodului directorului curent)
-static uint32_t current_dir_inode = 0; // Root este inodul 0
+uint32_t current_dir_inode = 0; // Root este inodul 0
 
 // Funcție internă de comparație
 static int nfs3_streq(const char* a, const char* b) {
@@ -430,5 +430,6 @@ FileSystemInterface nfs3_driver = {
     .cd = fs_cd_v3,
     .get_current_path = fs_get_current_path_v3,
     .fdisk = fs_fdisk_v3,
-    .format = fs_format_v3
+    .format = fs_format_v3,
+	.get_file_at_index = nfs3_get_file_at_index
 };

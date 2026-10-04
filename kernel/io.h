@@ -87,6 +87,10 @@ void interrupts_init();
 int keyboard_has_data(void);
 
 void set_cursor_shape(int style);
+void cursor_blink_tick();
+
+void io_set_graphical_mode(int cols, int rows);
+void gfx_redraw_tty(int tty_id);
 
 #endif
 

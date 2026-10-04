@@ -745,6 +745,43 @@ int fsv2_get_stats(uint32_t* total_sectors, uint32_t* free_sectors) {
     return 1; // 1 = SUCCES
 }
 
+int fsv2_get_file_at_index(int index, char* buffer, uint32_t max_len) {
+    uint8_t dir_buffer[512];
+    disk_read_sector(current_process->cwd_sector, dir_buffer);
+
+    int max_entries = (512 - 8) / sizeof(DirectoryEntry);
+    int current_index = 0;
+
+    for (int i = 0; i < max_entries; i++) {
+        DirectoryEntry* entry = (DirectoryEntry*)(dir_buffer + 8 + (i * sizeof(DirectoryEntry)));
+
+        if (entry->filename[0] != 0 && entry->filename[0] != ' ') {
+            if (current_index == index) {
+                // Extragem numele și eliminăm spațiile de la final
+                char name_buf[12];
+                for (int j = 0; j < 11; j++) name_buf[j] = entry->filename[j];
+                name_buf[11] = '\0';
+
+                for (int k = 10; k >= 0; k--) {
+                    if (name_buf[k] == ' ') name_buf[k] = '\0';
+                    else break;
+                }
+
+                // Copiem în bufferul cerut
+                uint32_t l = 0;
+                while (name_buf[l] != '\0' && l < max_len - 1) {
+                    buffer[l] = name_buf[l];
+                    l++;
+                }
+                buffer[l] = '\0';
+                return 1; // Am găsit fișierul
+            }
+            current_index++;
+        }
+    }
+    return 0; // Nu mai sunt fișiere la acest index (EOF)
+}
+
 FileSystemInterface nan2_driver = {
     .name = "NAN2",
 	.get_stats = fsv2_get_stats,
@@ -759,6 +796,7 @@ FileSystemInterface nan2_driver = {
     .cd = fsv2_cd,
     .get_current_path = fsv2_get_current_path,
     .fdisk = fsv2_fdisk,
-    .format = fsv2_format
+    .format = fsv2_format,
+	.get_file_at_index = fsv2_get_file_at_index
 };
 

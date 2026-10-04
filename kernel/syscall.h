@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 
+
 // Codurile pentru Syscall-uri (System Call Numbers)
 #define SYSCALL_PRINT       1  // Afișează un șir de caractere (string) pe ecran
 #define SYSCALL_READLINE    2  // Citește o linie de text de la tastatură într-un buffer
@@ -43,6 +44,10 @@
 #define SYSCALL_MOUNT            37 // Syscall nou pentru montarea/schimbarea sistemului de fișiere
 #define SYSCALL_FDISK            38 // Syscall nou pentru montarea/schimbarea sistemului de fișiere
 #define SYSCALL_DISK_STATS       39
+#define SYSCALL_VIDEO_INFO      40
+#define SYSCALL_SWAP_VIDEO_BUFFERS 41
+#define SYSCALL_DRAW_FRAME		42
+#define SYSCALL_GET_DIR_ENTRIES	43
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;

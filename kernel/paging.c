@@ -1,8 +1,14 @@
-
 #include "paging.h"
 #include "memory.h" // Pentru alloc_page()
 
 #define PAGE_MASK 0xFFFFFFFFFFFFF000
+
+// =======================================================
+// IMPORTĂM VARIABILELE FRAMEBUFFER-ULUI DIN kernel.c
+// =======================================================
+extern uint64_t fb_physical_address;
+extern uint32_t screen_height;
+extern uint32_t screen_pitch;
 
 // Extrage indecșii pentru cele 4 niveluri de paginare din adresa virtuală
 static inline uint16_t get_pml4_index(uint64_t vaddr) { return (vaddr >> 39) & 0x1FF; }
@@ -56,11 +62,28 @@ uint64_t* create_process_pml4() {
         new_pml4[i] = 0;
     }
 
+ 
     // IDENTITY MAPPING (Adresa Virtuală = Adresa Fizică)
-    // Mapăm primii 32 MB pentru a include Codul de Kernel, RAM-ul video (0xB8000), 
-    // și structurile noastre, altfel când schimbăm tabela de pagini kernelul va da Crash!
-    for (uint64_t addr = 0; addr < 0x02000000; addr += PAGE_SIZE) {
+    // Mapăm primii 128 MB pentru a include Kernelul, Video-ul, Heap-ul și noile pagini fizice alocate!
+    for (uint64_t addr = 0; addr < 0x08000000; addr += PAGE_SIZE) {
         map_page(new_pml4, addr, addr, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+    }
+
+    // ==============================================================
+    // MAPARE NOUĂ: Adăugăm Framebuffer-ul în spațiul procesului!
+    // ==============================================================
+    if (fb_physical_address != 0) {
+        uint32_t fb_size = screen_pitch * screen_height;
+        
+        // Aliniem dimensiunea la multiplu de PAGE_SIZE ca să nu lăsăm o pagină pe jumătate mapată
+        if (fb_size % PAGE_SIZE != 0) {
+            fb_size = (fb_size / PAGE_SIZE + 1) * PAGE_SIZE;
+        }
+        
+        // Mapăm cu identitate toată regiunea unde este placa grafică
+        for (uint32_t offset = 0; offset < fb_size; offset += PAGE_SIZE) {
+            map_page(new_pml4, fb_physical_address + offset, fb_physical_address + offset, PAGE_PRESENT | PAGE_WRITE);
+        }
     }
 
     return new_pml4;
@@ -69,7 +92,6 @@ uint64_t* create_process_pml4() {
 void switch_page_directory(uint64_t* pml4) {
     __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)pml4));
 }
-
 
 void free_process_paging(uint64_t pml4_phys) {
     if (!pml4_phys) return;

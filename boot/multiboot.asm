@@ -1,9 +1,20 @@
 section .multiboot
 align 8
 multiboot_header:
-    dd 0x1BADB002        ; magic
-    dd 0                 ; flags
-    dd -(0x1BADB002)     ; checksum
+    dd 0x1BADB002
+    dd 0x07                  ; bit 0 + bit 1 + bit 2 (video)
+    dd -(0x1BADB002 + 0x07)
+
+    dd 0
+    dd 0
+    dd 0
+    dd 0
+    dd 0
+
+    dd 0
+    dd 1024
+    dd 768
+    dd 32
 
 section .text
 global _start
@@ -37,8 +48,8 @@ setup_page_tables:
     or eax, 0x03             ; Present + Writable
     mov [page_table_l3], eax
 
-    ; 3. Mapează identity primii 18 MiB în pagini de 2 MiB.
-    ; Heap-ul începe la 16 MiB și are 1 MiB, deci sunt necesare 9 intrări.
+    ; 3. Mapează identity primii 128 MiB în pagini de 2 MiB.
+    ; Astfel acoperim kernelul, noul Heap de 16MB și zona de alocare fizică (32MB+)
     xor ecx, ecx
 .map_2mb:
     mov eax, ecx
@@ -46,7 +57,7 @@ setup_page_tables:
     or eax, 0x00000083       ; Present + Writable + Huge Page
     mov [page_table_l2 + ecx * 8], eax
     inc ecx
-    cmp ecx, 9
+    cmp ecx, 64              ; <--- MODIFICAT DE LA 9 la 64 (64 * 2MB = 128MB)
     jne .map_2mb
 
     ret

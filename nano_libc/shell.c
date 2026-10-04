@@ -21,6 +21,94 @@ void readline_with_history(char* buffer, int max_len) {
             nano_print("\n");
             break;
         }
+        // Tab (Completare automată)
+        else if (c == '\t') {
+            // 1. Extragem ultimul cuvânt tastat
+            int start = pos;
+            while (start > 0 && buffer[start - 1] != ' ' && buffer[start - 1] != '\t') {
+                start--;
+            }
+            
+            char token[128];
+            int t_len = pos - start;
+            if (t_len > 127) t_len = 127;
+            
+            for (int i = 0; i < t_len; i++) {
+                token[i] = buffer[start + i];
+            }
+            token[t_len] = '\0';
+
+            // 2. Separăm calea de prefixul de căutare (căutăm ultimul '/')
+            int last_slash = -1;
+            for (int i = 0; token[i] != '\0'; i++) {
+                if (token[i] == '/') last_slash = i;
+            }
+
+            char search_prefix[64];
+            char path_prefix[64] = "";
+            
+            if (last_slash != -1) {
+                // Copiem partea de cale (inclusiv '/')
+                for (int i = 0; i <= last_slash; i++) {
+                    path_prefix[i] = token[i];
+                }
+                path_prefix[last_slash + 1] = '\0';
+
+                // Copiem prefixul de căutare (ce e după '/')
+                int p_idx = 0;
+                for (int i = last_slash + 1; token[i] != '\0'; i++) {
+                    search_prefix[p_idx++] = token[i];
+                }
+                search_prefix[p_idx] = '\0';
+            } else {
+                // Fără cale, căutăm direct în directorul curent
+                int i = 0;
+                while (token[i] != '\0' && i < 63) {
+                    search_prefix[i] = token[i];
+                    i++;
+                }
+                search_prefix[i] = '\0';
+            }
+
+            // 3. Căutăm fișierul care începe cu `search_prefix`
+            char filename[64];
+            int index = 0;
+            char matched_name[64] = "";
+            int s_len = strlen(search_prefix);
+
+            while (nano_get_file_name_at(index, filename, sizeof(filename))) {
+                if (starts_with(filename, search_prefix)) {
+                    string_copy(matched_name, filename);
+                    break;
+                }
+                index++;
+            }
+
+            // 4. Dacă am găsit o potrivire, o completăm în buffer
+            if (matched_name[0] != '\0') {
+                int match_len = strlen(matched_name);
+                
+                // Completăm doar caracterele care lipsesc din prefixul de căutare
+                for (int i = s_len; i < match_len; i++) {
+                    char ch = matched_name[i];
+                    if (len < max_len - 1) {
+                        for (int k = len; k > pos; k--) {
+                            buffer[k] = buffer[k - 1];
+                        }
+                        buffer[pos] = ch;
+                        len++;
+                        pos++;
+                        buffer[len] = '\0';
+                    }
+                }
+
+                // Redesenăm caracterele noi pe ecran
+                for (int i = pos - (match_len - s_len); i < len; i++) {
+                    char s[2] = {buffer[i], '\0'};
+                    nano_print(s);
+                }
+            }
+        }
         // Backspace
         else if (c == '\b' || c == 127) {
             if (pos > 0) {
@@ -43,8 +131,8 @@ void readline_with_history(char* buffer, int max_len) {
                 }
             }
         }
-        // --- NOILE CODURI UNICE TRIMISE DE KERNEL ---
-        else if (c == 128) { // Săgeata Sus (Istoric anterior)
+        // Săgeata Sus (Istoric anterior)
+        else if (c == 128) {
             if (history_count > 0 && browsing_pos > 0) {
                 browsing_pos--;
                 
@@ -64,7 +152,8 @@ void readline_with_history(char* buffer, int max_len) {
                 nano_print(buffer);
             }
         }
-        else if (c == 129) { // Săgeata Jos (Istoric următor)
+        // Săgeata Jos (Istoric următor)
+        else if (c == 129) {
             if (history_count > 0 && browsing_pos < history_count - 1) {
                 browsing_pos++;
                 
@@ -94,31 +183,36 @@ void readline_with_history(char* buffer, int max_len) {
                 pos = 0;
             }
         }
-        else if (c == 130) { // Săgeata Dreapta
+        // Săgeata Dreapta
+        else if (c == 130) {
             if (pos < len) {
                 pos++;
                 nano_print("\033[C");
             }
         }
-        else if (c == 131) { // Săgeata Stânga
+        // Săgeata Stânga
+        else if (c == 131) {
             if (pos > 0) {
                 pos--;
                 nano_print("\033[D");
             }
         }
-		else if (c == 133) { // Tasta HOME
+        // HOME
+        else if (c == 133) {
             while (pos > 0) {
                 pos--;
                 nano_print("\033[D");
             }
         }
-        else if (c == 135) { // Tasta END
+        // END
+        else if (c == 135) {
             while (pos < len) {
                 pos++;
                 nano_print("\033[C");
             }
         }
-        else if (c == 132) { // Tasta Delete
+        // Delete
+        else if (c == 132) {
             if (pos < len) {
                 for (int i = pos; i < len - 1; i++) {
                     buffer[i] = buffer[i + 1];
@@ -137,7 +231,7 @@ void readline_with_history(char* buffer, int max_len) {
                 }
             }
         }
-        // Caractere normale imprimabile (Inclusiv inserarea în mijloc)
+        // Caractere normale imprimabile
         else if (c >= 32 && c <= 126) {
             if (len < max_len - 1) {
                 for (int i = len; i > pos; i--) {

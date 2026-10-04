@@ -15,10 +15,13 @@
 #include "string.h"
 #include "speaker.h"
 #include "drivers/sound/audio.h"
+#include "video.h"
 
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
+extern int term_cols;
+extern int term_rows;
 
 void syscall_handler(SyscallRegisters* regs) {
 	
@@ -511,14 +514,7 @@ print("\n");
             //newline();
             break;
         }
-		/*
-		case SYSCALL_READ_CHAR: {
-            // Presupunând că ai o funcție în kernel care citește un caracter (blochează până când se apasă o tastă)
-            char c = keyboard_read_char(); 
-            regs->rax = (uint64_t)c; // Returnăm caracterul prin registrul RAX
-            break;
-        }
-		*/
+
 		case SYSCALL_READ_CHAR: {
 			int c = keyboard_read_char(); // Returnează între 0 și 255
 			regs->rax = (uint64_t)(uint8_t)c; // Forțăm cast-ul ca unsigned pe 8 biți
@@ -664,7 +660,61 @@ print("\n");
 				regs->rax = (uint64_t)-1;
 			}
 			break;
-		}        
+		}
+		case SYSCALL_VIDEO_INFO: {
+            VideoModeInfo* user_info = (VideoModeInfo*)regs->rdi;
+            if (user_info) {
+                // Preluăm starea curentă din kernel prin funcția ta din video.h
+                VideoModeInfo* kernel_info = video_get_info();
+                if (kernel_info) {
+                    *user_info = *kernel_info; // Copiem structura direct în bufferul trimis de user-space
+                    regs->rax = 1;            // Succes
+                } else {
+                    regs->rax = 0;
+                }
+            } else {
+                regs->rax = 0;
+            }
+            break;
+        }
+		case SYSCALL_SWAP_VIDEO_BUFFERS: {
+			video_swap_buffers();
+			regs->rax = 1;
+			break;
+		}
+		// Iar în interiorul switch-ului de syscall-uri (cazul 42):
+		case SYSCALL_DRAW_FRAME: {
+			uint16_t* user_buffer = (uint16_t*)regs->rdx;
+			
+			if (user_buffer != 0) {
+				int total_cells = term_cols * term_rows;
+				for (int i = 0; i < total_cells; i++) {
+					ttys[active_tty].screen_buffer[i] = user_buffer[i];
+				}
+				gfx_redraw_tty(active_tty);
+			}
+			
+			regs->rax = 1;
+			break;
+		}
+		case SYSCALL_GET_DIR_ENTRIES: {
+			int index = (int)regs->rdi;
+			char* user_buf = (char*)regs->rsi;
+			
+			// Poți folosi KLOG_INFO sau funcția ta de print din kernel
+			//KLOG_INFO("[DEBUG KERNEL] Syscall 43 apelat pentru indexul: %d\n", index);
+
+			int found = fs_get_file_at_index(index, user_buf, 64);
+			
+			if (found) {
+				//KLOG_INFO("[DEBUG KERNEL] -> Gasit fisier: %s\n", user_buf);
+				regs->rax = 1;
+			} else {
+				//KLOG_INFO("[DEBUG KERNEL] -> Nu mai sunt fisiere la indexul \n", index);
+				regs->rax = 0;
+			}
+			break;
+		}
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

@@ -4,8 +4,8 @@
 #include "io.h"
 #include "syslog.h"
 
-#define HEAP_START 0x00400000
-#define HEAP_SIZE  (16 * 1024 * 1024) // Mărim la 16 MB pentru siguranță
+#define HEAP_START 0x01000000 // Începem Heap-ul de la 16 MB (foarte sigur)
+#define HEAP_SIZE  (16 * 1024 * 1024) // Dimensiune 16 MB (deci se termină la 32 MB)
 
 // Antetul fiecărui bloc de memorie din heap
 typedef struct BlockHeader {
@@ -18,8 +18,9 @@ static uint8_t* heap_start_ptr = (uint8_t*)HEAP_START;
 static uint8_t* heap_end = (uint8_t*)(HEAP_START + HEAP_SIZE);
 static BlockHeader* free_list = 0; // Începutul listei de blocuri
 
-// Alocator de pagini fizice (rămâne stabil)
-static uint64_t next_free_physical_page = 0x00600000;
+
+// Alocator de pagini fizice (începe exact DUPĂ heap)
+static uint64_t next_free_physical_page = 0x02000000; // Începe de la 32 MB
 
 void memory_init() {
     free_list = (BlockHeader*)HEAP_START;
@@ -27,8 +28,7 @@ void memory_init() {
     free_list->is_free = 1;
     free_list->next = 0;
 
-    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x00400000, Size: 16MB\n");
-    newline();
+    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x01000000, Size: 16MB\n");
 }
 
 void* malloc(size_t size) {

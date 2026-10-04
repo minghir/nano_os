@@ -35,6 +35,6 @@ void fsv2_fdisk();
 void fsv2_format();
 
 int fsv2_get_stats(uint32_t* total_sectors, uint32_t* free_sectors);
-
+int fsv2_get_file_at_index(int index, char* buffer, uint32_t max_len);
 
 #endif

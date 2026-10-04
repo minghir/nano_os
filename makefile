@@ -10,7 +10,7 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c)
+C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c) $(wildcard kernel/gfx/*.c)
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
@@ -25,7 +25,7 @@ ASM_OBJS = $(notdir $(ASM_SOURCES:.asm=.o))
 # Cel mai simplu: redenumim boot/multiboot.asm în boot/boot.asm sau tratăm excepția.
 
 # Toate obiectele pentru linkare
-OBJS = boot.o isr_keyboard.o isr_timer.o isr_syscall.o isr_fault.o $(C_OBJS)
+OBJS = boot.o isr_keyboard.o isr_timer.o isr_syscall.o isr_fault.o isr_mouse.o $(C_OBJS)
 
 all: kernel.bin
 
@@ -59,6 +59,9 @@ isr_syscall.o: asm/isr_syscall.asm
 	
 isr_fault.o: asm/isr_fault.asm
 	$(AS) -f elf64 asm/isr_fault.asm -o isr_fault.o
+	
+isr_mouse.o: asm/isr_mouse.asm
+	$(AS) -f elf64 asm/isr_mouse.asm -o isr_mouse.o
 
 # Linkarea kernel-ului
 kernel.bin: $(OBJS)
@@ -126,8 +129,10 @@ img_files:
 
 run: kernel.iso hdd_tools apps 
 #	push_hda.sh
-#	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display curses -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0 -enable-kvm
+	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -vga std -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
+	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -vga std -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0 -display curses
 
 
 
@@ -138,7 +143,7 @@ run: kernel.iso hdd_tools apps
 
 clean:
 	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
-	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o
+	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o kernel/gfx/*.o
 	rm -rf iso/boot/kernel.bin
 	rm -f nano_libc/*.o nano_libc/*.bin
 	rm -f tools/nan2hdd tools/nan3hdd

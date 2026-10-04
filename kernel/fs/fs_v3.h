@@ -42,4 +42,7 @@ void nfs3_init(void);
 void nfs3_format(void);
 void read_superblock(SuperblockV3* sb);
 
+
+int nfs3_get_file_at_index(int index, char* buffer, uint32_t max_len);
+
 #endif

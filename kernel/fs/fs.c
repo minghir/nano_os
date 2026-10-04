@@ -258,3 +258,10 @@ void fs_fdisk(void) {
 void fs_format(void) {
     if (active_fs && active_fs->format) active_fs->format();
 }
+
+int fs_get_file_at_index(int index, char* buffer, uint32_t max_len) {
+    if (active_fs && active_fs->get_file_at_index) {
+        return active_fs->get_file_at_index(index, buffer, max_len);
+    }
+    return 0;
+}
