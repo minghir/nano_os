@@ -8,6 +8,8 @@
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
 
+extern uint8_t current_drive_id;
+
 // Citim Superblock-ul
 /*
 void read_superblock(SuperblockV3* sb) {
@@ -42,7 +44,7 @@ int nfs3_read_inode(uint32_t inode_index, InodeV3* out_inode) {
     uint32_t target_sector = sb.inode_start + sector_offset;
 
     uint8_t buffer[512];
-    disk_read_sector_drive(1, target_sector, buffer);
+    disk_read_sector_drive(current_drive_id, target_sector, buffer);
 
     InodeV3* inodes = (InodeV3*)buffer;
     *out_inode = inodes[entry_index];
@@ -69,12 +71,12 @@ int nfs3_write_inode(uint32_t inode_index, const InodeV3* inode) {
     uint32_t target_sector = sb.inode_start + sector_offset;
 
     uint8_t buffer[512];
-    disk_read_sector_drive(1, target_sector, buffer);
+    disk_read_sector_drive(current_drive_id, target_sector, buffer);
 
     InodeV3* inodes = (InodeV3*)buffer;
     inodes[entry_index] = *inode;
 
-    disk_write_sector_drive(1, target_sector, buffer);
+    disk_write_sector_drive(current_drive_id, target_sector, buffer);
     return 1;
 }
 
@@ -92,7 +94,7 @@ uint32_t nfs3_alloc_inode(void) {
     // Sărim peste inodul 0 (considerat rezervat/root)
     for (uint32_t s = 0; s < total_inode_sectors; s++) {
         uint8_t buffer[512];
-        disk_read_sector_drive(1, sb.inode_start + s, buffer);
+        disk_read_sector_drive(current_drive_id, sb.inode_start + s, buffer);
         InodeV3* inodes = (InodeV3*)buffer;
 
         for (uint32_t i = 0; i < inodes_per_sector; i++) {
@@ -105,7 +107,7 @@ uint32_t nfs3_alloc_inode(void) {
                 inodes[i].size = 0;
                 inodes[i].first_sector = 0;
 
-                disk_write_sector_drive(1, sb.inode_start + s, buffer);
+                disk_write_sector_drive(current_drive_id, sb.inode_start + s, buffer);
                 KLOG_DEBUG("[NAN3 INODE] Inod nou alocat cu succes.\n");
                 return global_index;
             }

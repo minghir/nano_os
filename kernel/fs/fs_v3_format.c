@@ -7,6 +7,8 @@
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
 
+extern uint8_t current_drive_id;
+
 // Declarații externe pentru funcțiile FAT
 extern uint32_t nfs3_alloc_sector(void);
 extern void nfs3_write_fat_entry(uint32_t disk_sector, uint32_t value);
@@ -38,13 +40,13 @@ void nfs3_format(void) {
     sb->data_start = 1226;       // Zona de date începe după sistem
 
     // SCRIEM PE DRIVE 1 (HDB) EXCLUSIV!
-    disk_write_sector_drive(1, 1, buffer);
+    disk_write_sector_drive(current_drive_id, 1, buffer);
     KLOG_INFO("[NAN3] Superblock scris în Sectorul 1 pe hdb.\n");
 
     // Inițializăm Tabela FAT pe hdb
     for (uint32_t s = sb->fat_start_sector; s < sb->fat_start_sector + sb->fat_sectors; s++) {
         for (int i = 0; i < 512; i++) buffer[i] = 0;
-        disk_write_sector_drive(1, s, buffer);
+        disk_write_sector_drive(current_drive_id, s, buffer);
     }
 
     // Marcăm sectoarele de sistem ca FAT_BAD
@@ -57,7 +59,7 @@ void nfs3_format(void) {
     uint32_t inode_sectors = (sb->inode_count * sizeof(InodeV3) + 511) / 512;
     for (uint32_t s = sb->inode_start; s < sb->inode_start + inode_sectors; s++) {
         for (int i = 0; i < 512; i++) buffer[i] = 0;
-        disk_write_sector_drive(1, s, buffer);
+        disk_write_sector_drive(current_drive_id, s, buffer);
     }
     KLOG_INFO("[NAN3] Zona de inoduri inițializată.\n");
 
@@ -70,7 +72,7 @@ void nfs3_format(void) {
     nfs3_write_inode(0, &root_inode);
 
     for (int i = 0; i < 512; i++) buffer[i] = 0;
-    disk_write_sector_drive(1, root_inode.first_sector, buffer);
+    disk_write_sector_drive(current_drive_id, root_inode.first_sector, buffer);
 
     KLOG_INFO("[NAN3] Formatare completă cu succes pe hdb! Directorul Root (Inod 0) creat.\n");
 }
@@ -80,7 +82,7 @@ void nfs3_format(void) {
  */
 void nfs3_init(void) {
     uint8_t buffer[512];
-    disk_read_sector_drive(1, 1, buffer);
+    disk_read_sector_drive(current_drive_id, 1, buffer);
 
     SuperblockV3* sb = (SuperblockV3*)buffer;
 

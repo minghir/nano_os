@@ -106,7 +106,7 @@ $(APP).o: $(APP).c nano_libc.h nano_string.h
 # 4. Link final + urcare automată pe disc
 $(APP).bin: crt0.o nano_libc.o nano_string.o $(APP).o
 	$(LD) $(LDFLAGS) crt0.o nano_libc.o nano_string.o $(APP).o -o $(APP).bin
-	$(CURDIR)/../tools/nan2hdd $(CURDIR)/../hda_v2.img push $(APP).bin $(OS_PATH)
+	$(CURDIR)/../tools/nan3hdd $(CURDIR)/../hda_v3.img push $(APP).bin $(OS_PATH)
 	@echo "Succes! S-a creat și urcat: $(APP).bin (Virtual: $(TEXT_ADDR)) -> $(OS_PATH)"
 
 clean:

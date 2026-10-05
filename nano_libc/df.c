@@ -15,7 +15,7 @@ void print_padded_int(uint32_t val, int target_width) {
 }
 
 int main(int argc, char** argv) {
-    char target_path[128] = "/hdb"; // Implicit
+    char target_path[128] = "/hda"; // Implicit
     
     if (argc > 1) {
         if (argv[1][0] != '/') {

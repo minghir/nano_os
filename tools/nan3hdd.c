@@ -47,7 +47,7 @@ void write_sector(FILE* disk, uint32_t lba, uint8_t* buffer) {
     fseek(disk, lba * SECTOR_SIZE, SEEK_SET);
     fwrite(buffer, 1, SECTOR_SIZE, disk);
 }
-
+/*
 void read_inode(FILE* disk, uint32_t index, InodeV3* out) {
     uint32_t byte_offset = index * sizeof(InodeV3);
     uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
@@ -65,6 +65,41 @@ void write_inode(FILE* disk, uint32_t index, InodeV3* in) {
     read_sector(disk, sector, buf);
     memcpy(buf + offset_in_sector, in, sizeof(InodeV3));
     write_sector(disk, sector, buf);
+}
+*/
+
+void read_inode(FILE* disk, uint32_t index, InodeV3* out) {
+    uint32_t byte_offset = index * sizeof(InodeV3);
+    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
+    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
+    
+    // Alocăm buffer dublu (1024 bytes) pentru inodurile care trec granița de 512!
+    uint8_t buf[SECTOR_SIZE * 2]; 
+    read_sector(disk, sector, buf);
+    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
+        read_sector(disk, sector + 1, buf + SECTOR_SIZE);
+    }
+    
+    memcpy(out, buf + offset_in_sector, sizeof(InodeV3));
+}
+
+void write_inode(FILE* disk, uint32_t index, InodeV3* in) {
+    uint32_t byte_offset = index * sizeof(InodeV3);
+    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
+    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
+    
+    uint8_t buf[SECTOR_SIZE * 2];
+    read_sector(disk, sector, buf);
+    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
+        read_sector(disk, sector + 1, buf + SECTOR_SIZE);
+    }
+    
+    memcpy(buf + offset_in_sector, in, sizeof(InodeV3));
+    
+    write_sector(disk, sector, buf);
+    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
+        write_sector(disk, sector + 1, buf + SECTOR_SIZE);
+    }
 }
 
 uint32_t fat_read(FILE* disk, uint32_t abs_sector) {
@@ -113,7 +148,10 @@ uint32_t find_inode_by_path(FILE* disk, const char* path) {
 
     uint32_t current_inode_idx = 0;
     char path_copy[256];
-    strncpy(path_copy, path, sizeof(path_copy));
+    //strncpy(path_copy, path, sizeof(path_copy));
+	memset(path_copy, 0, sizeof(path_copy));
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+	
     
     char* token = strtok(path_copy, "/");
     while (token != NULL) {
@@ -205,14 +243,22 @@ int main(int argc, char** argv) {
     // --- COMANDA MKDIR ---
     else if (strcmp(command, "mkdir") == 0 && argc == 4) {
         char path_copy[256];
-        strncpy(path_copy, argv[3], sizeof(path_copy));
+        //strncpy(path_copy, argv[3], sizeof(path_copy));
+		memset(path_copy, 0, sizeof(path_copy));
+        strncpy(path_copy, argv[3], sizeof(path_copy) - 1);
+		
         char* last_slash = strrchr(path_copy, '/');
         char dir_path[256] = "/";
         const char* new_dir_name = argv[3];
 
         if (last_slash != NULL) {
             if (last_slash == path_copy) dir_path[1] = '\0';
-            else { *last_slash = '\0'; strncpy(dir_path, path_copy, sizeof(dir_path)); }
+            else { 
+				*last_slash = '\0'; 
+				//strncpy(dir_path, path_copy, sizeof(dir_path));
+				memset(dir_path, 0, sizeof(dir_path));
+                strncpy(dir_path, path_copy, sizeof(dir_path) - 1);				
+			}
             new_dir_name = last_slash + 1;
         }
 
@@ -242,7 +288,10 @@ int main(int argc, char** argv) {
             DirEntryV3* entries = (DirEntryV3*)buf;
             for (int i = 0; i < SECTOR_SIZE / sizeof(DirEntryV3); i++) {
                 if (entries[i].name[0] == '\0') {
-                    strncpy(entries[i].name, new_dir_name, 63);
+                    //strncpy(entries[i].name, new_dir_name, 63);
+					memset(entries[i].name, 0, sizeof(entries[i].name));
+                    strncpy(entries[i].name, new_dir_name, sizeof(entries[i].name) - 1);
+					
                     entries[i].inode_index = new_inode_idx;
                     write_sector(disk, current_sec, buf);
                     saved = 1; break;
@@ -255,22 +304,35 @@ int main(int argc, char** argv) {
     // --- COMANDA PUSH ---
     else if (strcmp(command, "push") == 0 && argc == 5) {
         char path_copy[256];
-        strncpy(path_copy, argv[4], sizeof(path_copy));
+        memset(path_copy, 0, sizeof(path_copy));
+        strncpy(path_copy, argv[4], sizeof(path_copy) - 1);
+        
         char* last_slash = strrchr(path_copy, '/');
         char dir_path[256] = "/";
         const char* file_name = argv[4];
 
         if (last_slash != NULL) {
-            if (last_slash == path_copy) dir_path[1] = '\0';
-            else { *last_slash = '\0'; strncpy(dir_path, path_copy, sizeof(dir_path)); }
+            if (last_slash == path_copy) {
+                dir_path[1] = '\0';
+            } else { 
+                *last_slash = '\0'; 
+                memset(dir_path, 0, sizeof(dir_path));
+                strncpy(dir_path, path_copy, sizeof(dir_path) - 1);
+            }
             file_name = last_slash + 1;
         }
 
         uint32_t parent_inode_idx = find_inode_by_path(disk, dir_path);
-        if (parent_inode_idx == 0xFFFFFFFF) { printf("Director parinte inexistent!\n"); return 1; }
+        if (parent_inode_idx == 0xFFFFFFFF) { 
+            printf("Director parinte inexistent!\n"); 
+            return 1; 
+        }
 
         FILE* local_f = fopen(argv[3], "rb");
-        if (!local_f) { printf("Nu pot citi fisierul sursa\n"); return 1; }
+        if (!local_f) { 
+            printf("Nu pot citi fisierul sursa\n"); 
+            return 1; 
+        }
         fseek(local_f, 0, SEEK_END);
         uint32_t size = ftell(local_f);
         fseek(local_f, 0, SEEK_SET);
@@ -303,24 +365,57 @@ int main(int argc, char** argv) {
         InodeV3 parent_inode;
         read_inode(disk, parent_inode_idx, &parent_inode);
         current_sec = parent_inode.first_sector;
+        
+        uint32_t last_dir_sec = current_sec;
         int saved = 0;
         
-        while (current_sec != FAT_EOF && !saved) {
+        while (current_sec != FAT_EOF && current_sec != FAT_FREE && current_sec != 0 && !saved) {
+            last_dir_sec = current_sec;
             uint8_t buf[SECTOR_SIZE];
             read_sector(disk, current_sec, buf);
             DirEntryV3* entries = (DirEntryV3*)buf;
-            for (int i = 0; i < SECTOR_SIZE / sizeof(DirEntryV3); i++) {
+            
+            for (int i = 0; i < (int)(SECTOR_SIZE / sizeof(DirEntryV3)); i++) {
                 if (entries[i].name[0] == '\0') {
-                    strncpy(entries[i].name, file_name, 63);
+                    memset(entries[i].name, 0, sizeof(entries[i].name));
+                    strncpy(entries[i].name, file_name, sizeof(entries[i].name) - 1);
+                    
                     entries[i].inode_index = new_inode_idx;
                     write_sector(disk, current_sec, buf);
-                    saved = 1; break;
+                    saved = 1; 
+                    break;
                 }
             }
-            if (!saved) current_sec = fat_read(disk, current_sec);
+            if (!saved) {
+                current_sec = fat_read(disk, current_sec);
+            }
         }
         
-        printf("Fisierul '%s' a fost salvat in '%s'.\n", argv[3], dir_path);
+        // LOGICĂ NOUĂ: Dacă directorul s-a umplut, alocăm dinamic un sector nou pentru el
+        if (!saved && last_dir_sec != FAT_EOF && last_dir_sec != 0) {
+            uint32_t new_dir_sec = allocate_fat(disk);
+            if (new_dir_sec != 0xFFFFFFFF) {
+                fat_write(disk, last_dir_sec, new_dir_sec); // Legăm noul sector în lanțul FAT
+                
+                uint8_t buf[SECTOR_SIZE];
+                memset(buf, 0, SECTOR_SIZE);
+                DirEntryV3* entries = (DirEntryV3*)buf;
+                
+                strncpy(entries[0].name, file_name, sizeof(entries[0].name) - 1);
+                entries[0].inode_index = new_inode_idx;
+                write_sector(disk, new_dir_sec, buf);
+                saved = 1;
+            } else {
+                printf("Eroare: Nu mai exista spatiu pe disc pentru a extinde directorul!\n");
+            }
+        }
+        
+        if (saved) {
+            printf("Fisierul '%s' a fost salvat in '%s'.\n", argv[3], dir_path);
+        } else {
+            printf("Eroare critica: Fisierul nu a putut fi adaugat in director.\n");
+        }
+        
         fclose(local_f);
     }// --- COMANDA FORMAT ---
     else if (strcmp(command, "format") == 0) {

@@ -1,0 +1,7 @@
+make: Entering directory '/home/minghir/nano_os/nano_libc'
+gcc -m64 -ffreestanding -fno-pie -c -Wall -Wextra app.c -o app.o 
+ld -T app.ld --defsym TEXT_ADDR=0x800000 crt0.o nano_libc.o nano_string.o app.o -o app.bin
+/home/minghir/nano_os/nano_libc/../tools/nan3hdd /home/minghir/nano_os/nano_libc/../hda_v3.img push app.bin /bin/app
+Fisierul 'app.bin' a fost salvat in '/bin'.
+Succes! S-a creat și urcat: app.bin (Virtual: 0x800000) -> /bin/app
+make: Leaving directory '/home/minghir/nano_os/nano_libc'

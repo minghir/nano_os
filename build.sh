@@ -35,28 +35,28 @@ make kernel.iso
 echo "[Nano OS] Generating IMGs..."
 make img_files
 
-tools/nan2hdd hda_v2.img format
-tools/nan2hdd hda_v2.img mkdir /bin
-tools/nan2hdd hda_v2.img mkdir /sbin
-tools/nan2hdd hda_v2.img mkdir /cfg
-tools/nan2hdd hda_v2.img mkdir /tests
-tools/nan2hdd hda_v2.img mkdir /asm
-tools/nan2hdd hda_v2.img mkdir /data
-tools/nan2hdd hda_v2.img mkdir /data/mp3
+tools/nan3hdd hda_v3.img format 100
+tools/nan3hdd hda_v3.img mkdir /bin
+tools/nan3hdd hda_v3.img mkdir /sbin
+tools/nan3hdd hda_v3.img mkdir /cfg
+tools/nan3hdd hda_v3.img mkdir /tests
+tools/nan3hdd hda_v3.img mkdir /asm
+tools/nan3hdd hda_v3.img mkdir /data
+tools/nan3hdd hda_v3.img mkdir /data/mp3
 
-tools/nan2hdd hda_v2.img push env.cfg /cfg/env.cfg
+tools/nan3hdd hda_v3.img push env.cfg /cfg/env.cfg
 
-tools/nan2hdd hda_v2.img push data/mp3/laser.wav /data/mp3/1.wav
+tools/nan3hdd hda_v3.img push data/mp3/laser.wav /data/mp3/1.wav
 
-tools/nan2hdd hda_v2.img push nanoasm/program.s /asm/program.s
-tools/nan2hdd hda_v2.img push nanoasm/loop.s /asm/loop.s
-tools/nan2hdd hda_v2.img push nanoasm/call.s /asm/call.s
-tools/nan2hdd hda_v2.img push nanoasm/math.s /asm/math.s
-tools/nan2hdd hda_v2.img push nanoasm/mem.s /asm/mem.s
-tools/nan2hdd hda_v2.img push nanoasm/kin.s /asm/kin.s
-tools/nan2hdd hda_v2.img push nanoasm/var.s /asm/var.s
-tools/nan2hdd hda_v2.img push nanoasm/float.s /asm/float.s
-tools/nan2hdd hda_v2.img push nanoasm/julia.s /asm/julia.s
+tools/nan3hdd hda_v3.img push nanoasm/program.s /asm/program.s
+tools/nan3hdd hda_v3.img push nanoasm/loop.s /asm/loop.s
+tools/nan3hdd hda_v3.img push nanoasm/call.s /asm/call.s
+tools/nan3hdd hda_v3.img push nanoasm/math.s /asm/math.s
+tools/nan3hdd hda_v3.img push nanoasm/mem.s /asm/mem.s
+tools/nan3hdd hda_v3.img push nanoasm/kin.s /asm/kin.s
+tools/nan3hdd hda_v3.img push nanoasm/var.s /asm/var.s
+tools/nan3hdd hda_v3.img push nanoasm/float.s /asm/float.s
+tools/nan3hdd hda_v3.img push nanoasm/julia.s /asm/julia.s
 
 
 

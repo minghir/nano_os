@@ -116,12 +116,13 @@ apps: hdd_tools
 iso/boot/kernel.bin: kernel.bin
 	mkdir -p iso/boot/grub
 	cp kernel.bin iso/boot/kernel.bin
-
+	
 kernel.iso: iso/boot/kernel.bin hdd_tools
 	grub-mkrescue -o kernel.iso iso
+	./init_hdd.sh
 	
 img_files:
-	qemu-img create -f raw hda_v2.img 10M
+	qemu-img create -f raw hda_v3.img 50M
 	qemu-img create -f raw hdb_v3.img 50M
 # ============================
 #    Rulare în QEMU
@@ -129,7 +130,8 @@ img_files:
 
 run: kernel.iso hdd_tools apps 
 #	push_hda.sh
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0 -enable-kvm
+	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display sdl
+	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -vga std -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -vga std -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0 -display curses
@@ -147,4 +149,4 @@ clean:
 	rm -rf iso/boot/kernel.bin
 	rm -f nano_libc/*.o nano_libc/*.bin
 	rm -f tools/nan2hdd tools/nan3hdd
-#	rm -f hda.img
+	rm -f hda_v3.img hdb_v3.img

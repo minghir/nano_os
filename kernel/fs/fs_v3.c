@@ -8,10 +8,12 @@
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
 
+extern uint8_t current_drive_id;
+
 // Citim Superblock-ul din Sectorul 1 pentru a afla unde se află tabela FAT
 void read_superblock(SuperblockV3* sb) {
     uint8_t buffer[512];
-    disk_read_sector_drive(1, 1, buffer);
+    disk_read_sector_drive(current_drive_id, 1, buffer);
     for (uint32_t i = 0; i < sizeof(SuperblockV3); i++) {
         ((uint8_t*)sb)[i] = buffer[i];
     }
@@ -29,7 +31,7 @@ uint32_t nfs3_read_fat_entry(uint32_t disk_sector) {
     uint32_t target_sector = sb.fat_start_sector + fat_sector_offset;
 
     uint8_t buffer[512];
-    disk_read_sector_drive(1,target_sector, buffer);
+    disk_read_sector_drive(current_drive_id,target_sector, buffer);
 
     uint32_t* entries = (uint32_t*)buffer;
     return entries[entry_index];
@@ -47,12 +49,12 @@ void nfs3_write_fat_entry(uint32_t disk_sector, uint32_t value) {
     uint32_t target_sector = sb.fat_start_sector + fat_sector_offset;
 
     uint8_t buffer[512];
-    disk_read_sector_drive(1,target_sector, buffer);
+    disk_read_sector_drive(current_drive_id,target_sector, buffer);
 
     uint32_t* entries = (uint32_t*)buffer;
     entries[entry_index] = value;
 
-    disk_write_sector_drive(1, target_sector, buffer);
+    disk_write_sector_drive(current_drive_id, target_sector, buffer);
 }
 
 /**
@@ -124,7 +126,7 @@ int nfs3_get_file_at_index(int index, char* buffer, uint32_t max_len) {
 
     while (current_sector != 0 && current_sector != 0xFFFFFFFF) {
         uint8_t sec_buf[512];
-        disk_read_sector_drive(1, current_sector, sec_buf);
+        disk_read_sector_drive(current_drive_id, current_sector, sec_buf);
 
         for (int e = 0; e < 8; e++) {
             uint8_t* entry_ptr = sec_buf + (e * 64);

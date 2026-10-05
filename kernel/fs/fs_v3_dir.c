@@ -8,6 +8,8 @@
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
 
+extern uint8_t current_drive_id;
+
 // Funcții externe din FAT
 extern uint32_t nfs3_alloc_sector(void);
 extern uint32_t nfs3_append_sector(uint32_t last_sector);
@@ -41,7 +43,7 @@ uint32_t nfs3_find_in_dir(uint32_t parent_inode_index, const char* name) {
 
     while (current_sector != 0xFFFFFFFF && current_sector != 0) {
         uint8_t buffer[512];
-        disk_read_sector_drive(1, current_sector, buffer);
+        disk_read_sector_drive(current_drive_id, current_sector, buffer);
         DirEntryV3* entries = (DirEntryV3*)buffer;
 
         for (uint32_t i = 0; i < entries_per_sector; i++) {
@@ -78,7 +80,7 @@ void nfs3_list_dir(uint32_t dir_inode_index) {
 
     while (current_sector != 0xFFFFFFFF && current_sector != 0) {
         uint8_t buffer[512];
-        disk_read_sector_drive(1, current_sector, buffer);
+        disk_read_sector_drive(current_drive_id, current_sector, buffer);
 
         DirEntryV3* entries = (DirEntryV3*)buffer;
         for (uint32_t i = 0; i < entries_per_sector; i++) {
@@ -164,7 +166,7 @@ int nfs3_create_entry(uint32_t parent_inode_index, const char* name, uint8_t fla
     }
     
     // Scriem sectorul curățat/inițializat pe hdb (drive 1)
-    disk_write_sector_drive(1, first_sec, zero_buf);
+    disk_write_sector_drive(current_drive_id, first_sec, zero_buf);
     // ----------------------------------------------------------------------
 
     // 3. Căutăm loc liber în lanțul de sectoare al directorului părinte
@@ -178,7 +180,7 @@ int nfs3_create_entry(uint32_t parent_inode_index, const char* name, uint8_t fla
 
     while (!placed) {
         uint8_t buffer[512];
-        disk_read_sector_drive(1, current_sector, buffer);
+        disk_read_sector_drive(current_drive_id, current_sector, buffer);
 
         DirEntryV3* entries = (DirEntryV3*)buffer;
         for (uint32_t i = 0; i < entries_per_sector; i++) {
@@ -192,7 +194,7 @@ int nfs3_create_entry(uint32_t parent_inode_index, const char* name, uint8_t fla
                 entries[i].name[j] = '\0';
                 entries[i].inode_index = new_inode_idx;
 
-                disk_write_sector_drive(1, current_sector, buffer);
+                disk_write_sector_drive(current_drive_id, current_sector, buffer);
                 placed = 1;
                 break;
             }
@@ -214,7 +216,7 @@ int nfs3_create_entry(uint32_t parent_inode_index, const char* name, uint8_t fla
             current_sector = new_dir_sec;
             // Curățăm noul sector cu zerouri
             uint8_t zero_buf2[512] = {0};
-            disk_write_sector_drive(1, current_sector, zero_buf2);
+            disk_write_sector_drive(current_drive_id, current_sector, zero_buf2);
         } else {
             last_sector = current_sector;
             current_sector = next_sector;
@@ -237,7 +239,7 @@ int nfs3_delete_entry(uint32_t parent_inode_index, const char* name) {
 
     while (current_sector != 0xFFFFFFFF && current_sector != 0) {
         uint8_t buffer[512];
-        disk_read_sector_drive(1, current_sector, buffer);
+        disk_read_sector_drive(current_drive_id, current_sector, buffer);
 
         DirEntryV3* entries = (DirEntryV3*)buffer;
         for (uint32_t i = 0; i < entries_per_sector; i++) {
@@ -255,7 +257,7 @@ int nfs3_delete_entry(uint32_t parent_inode_index, const char* name) {
                         // Căutăm prin toate sectoarele directorului țintă
                         while (check_sec != 0xFFFFFFFF && check_sec != 0) {
                             uint8_t check_buf[512];
-                            disk_read_sector_drive(1, check_sec, check_buf);
+                            disk_read_sector_drive(current_drive_id, check_sec, check_buf);
                             DirEntryV3* check_entries = (DirEntryV3*)check_buf;
                             
                             for (uint32_t k = 0; k < entries_per_sector; k++) {
@@ -288,7 +290,7 @@ int nfs3_delete_entry(uint32_t parent_inode_index, const char* name) {
                 entries[i].name[0] = '\0';
                 entries[i].inode_index = 0;
 
-                disk_write_sector_drive(1, current_sector, buffer);
+                disk_write_sector_drive(current_drive_id, current_sector, buffer);
                 KLOG_INFO("[NAN3 DIR] Intrare ștearsă cu succes.\n");
                 return 1;
             }

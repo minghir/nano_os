@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+
+
+extern uint8_t current_drive_id;
+
 // Structura pentru interfața virtuală (VFS)
 typedef struct {
     const char* name;

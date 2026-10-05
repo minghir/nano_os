@@ -12,6 +12,8 @@ static char current_v3_path[256] = "/";
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
 
+extern uint8_t current_drive_id;
+
 // Funcții externe FAT
 extern uint32_t nfs3_alloc_sector(void);
 extern uint32_t nfs3_append_sector(uint32_t last_sector);
@@ -117,7 +119,7 @@ static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
 
 void fs_init_v3(void) {
     uint8_t buffer[512];
-    disk_read_sector_drive(1, 1, buffer);
+    disk_read_sector_drive(current_drive_id, 1, buffer);
     SuperblockV3* sb = (SuperblockV3*)buffer;
 
     if (sb->magic[0] == NFS3_MAGIC[0] && sb->magic[1] == NFS3_MAGIC[1] &&
@@ -231,7 +233,7 @@ int fs_write_file_v3(const char* name, const uint8_t* data, uint32_t size) {
             buffer[i] = data[bytes_written + i];
         }
 
-        disk_write_sector_drive(1, current_sector, buffer);
+        disk_write_sector_drive(current_drive_id, current_sector, buffer);
         bytes_written += to_write;
 
         // Dacă mai avem date de scris, mai alocăm un sector în FAT
@@ -270,7 +272,7 @@ int fs_read_file_v3(const char* name, uint8_t* buffer, uint32_t max_size) {
         if (bytes_read >= max_size) break; // Am umplut bufferul cerut
 
         uint8_t sec_buf[512];
-        disk_read_sector_drive(1, current_sector, sec_buf);
+        disk_read_sector_drive(current_drive_id, current_sector, sec_buf);
 
         uint32_t to_read = target_inode.size - bytes_read;
         if (to_read > 512) to_read = 512;
@@ -366,7 +368,7 @@ void fs_get_current_path_v3(char* buffer, uint32_t max_len) {
 
 void fs_fdisk_v3(void) {
     uint8_t buffer[512];
-    disk_read_sector_drive(1, 1, buffer);
+    disk_read_sector_drive(current_drive_id, 1, buffer);
     SuperblockV3* sb = (SuperblockV3*)buffer;
 
     print("--- NanoFS V3 Disk Analysis (hdb) ---\n");
@@ -397,7 +399,7 @@ int nfs3_get_stats(uint32_t* total_sectors, uint32_t* free_sectors) {
     
     for (uint32_t s = 0; s < fat_sectors_count; s++) {
         uint8_t fat_buf[512];
-        disk_read_sector_drive(1, sb.fat_start_sector + s, fat_buf);
+        disk_read_sector_drive(current_drive_id, sb.fat_start_sector + s, fat_buf);
         uint32_t* entries = (uint32_t*)fat_buf;
         
         uint32_t entries_per_sector = 512 / sizeof(uint32_t);

@@ -280,11 +280,11 @@ void kernel_main(unsigned long magic, unsigned long addr) {
                 ttys[t].foreground_pid = init_pid;
             } else {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-                KLOG_FATAL("FATAL ERROR: /sbin/init bad signature!\n");
+                KLOG_FATAL("FATAL ERROR: /hda/sbin/init bad signature!\n");
             }
         } else {
             __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-            KLOG_FATAL("FATAL ERROR: /sbin/init missing!\n");
+            KLOG_FATAL("FATAL ERROR: /hda/sbin/init missing!\n");
         }
     }
 
