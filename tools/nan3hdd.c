@@ -47,59 +47,40 @@ void write_sector(FILE* disk, uint32_t lba, uint8_t* buffer) {
     fseek(disk, lba * SECTOR_SIZE, SEEK_SET);
     fwrite(buffer, 1, SECTOR_SIZE, disk);
 }
-/*
+
 void read_inode(FILE* disk, uint32_t index, InodeV3* out) {
-    uint32_t byte_offset = index * sizeof(InodeV3);
-    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
-    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
+    // Calculăm exact ca în kernel: 42 inoduri per sector
+    uint32_t inodes_per_sec = SECTOR_SIZE / sizeof(InodeV3);
+    uint32_t sector_offset = index / inodes_per_sec;
+    uint32_t entry_index = index % inodes_per_sec;
+    
+    uint32_t sector = sb.inode_start + sector_offset;
+    
     uint8_t buf[SECTOR_SIZE];
     read_sector(disk, sector, buf);
-    memcpy(out, buf + offset_in_sector, sizeof(InodeV3));
+    
+    // Extragem inodul direct din array-ul sectorului
+    InodeV3* inodes = (InodeV3*)buf;
+    *out = inodes[entry_index];
 }
 
 void write_inode(FILE* disk, uint32_t index, InodeV3* in) {
-    uint32_t byte_offset = index * sizeof(InodeV3);
-    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
-    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
+    // Calculăm exact ca în kernel: 42 inoduri per sector
+    uint32_t inodes_per_sec = SECTOR_SIZE / sizeof(InodeV3);
+    uint32_t sector_offset = index / inodes_per_sec;
+    uint32_t entry_index = index % inodes_per_sec;
+    
+    uint32_t sector = sb.inode_start + sector_offset;
+    
     uint8_t buf[SECTOR_SIZE];
     read_sector(disk, sector, buf);
-    memcpy(buf + offset_in_sector, in, sizeof(InodeV3));
+    
+    // Inserăm inodul în array-ul sectorului
+    InodeV3* inodes = (InodeV3*)buf;
+    inodes[entry_index] = *in;
+    
+    // Scriem un singur sector înapoi pe disc
     write_sector(disk, sector, buf);
-}
-*/
-
-void read_inode(FILE* disk, uint32_t index, InodeV3* out) {
-    uint32_t byte_offset = index * sizeof(InodeV3);
-    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
-    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
-    
-    // Alocăm buffer dublu (1024 bytes) pentru inodurile care trec granița de 512!
-    uint8_t buf[SECTOR_SIZE * 2]; 
-    read_sector(disk, sector, buf);
-    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
-        read_sector(disk, sector + 1, buf + SECTOR_SIZE);
-    }
-    
-    memcpy(out, buf + offset_in_sector, sizeof(InodeV3));
-}
-
-void write_inode(FILE* disk, uint32_t index, InodeV3* in) {
-    uint32_t byte_offset = index * sizeof(InodeV3);
-    uint32_t sector = sb.inode_start + (byte_offset / SECTOR_SIZE);
-    uint32_t offset_in_sector = byte_offset % SECTOR_SIZE;
-    
-    uint8_t buf[SECTOR_SIZE * 2];
-    read_sector(disk, sector, buf);
-    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
-        read_sector(disk, sector + 1, buf + SECTOR_SIZE);
-    }
-    
-    memcpy(buf + offset_in_sector, in, sizeof(InodeV3));
-    
-    write_sector(disk, sector, buf);
-    if (offset_in_sector + sizeof(InodeV3) > SECTOR_SIZE) {
-        write_sector(disk, sector + 1, buf + SECTOR_SIZE);
-    }
 }
 
 uint32_t fat_read(FILE* disk, uint32_t abs_sector) {
@@ -120,11 +101,10 @@ void fat_write(FILE* disk, uint32_t abs_sector, uint32_t value) {
 }
 
 uint32_t allocate_fat(FILE* disk) {
-    // Căutăm sectoare libere începând de la zona de date
     for (uint32_t i = sb.data_start; i < sb.total_sectors; i++) {
         if (fat_read(disk, i) == FAT_FREE) {
             fat_write(disk, i, FAT_EOF);
-            return i; // Returnează sectorul absolut
+            return i; 
         }
     }
     return 0xFFFFFFFF;
@@ -141,24 +121,20 @@ uint32_t allocate_inode(FILE* disk) {
     return 0xFFFFFFFF;
 }
 
-
-// Caută un inod navigând prin subdirectoare (ex: "/bb", "/folder/test")
 uint32_t find_inode_by_path(FILE* disk, const char* path) {
-    if (!path || path[0] == '\0' || strcmp(path, "/") == 0) return 0; // Inodul 0 e Root
+    if (!path || path[0] == '\0' || strcmp(path, "/") == 0) return 0; 
 
     uint32_t current_inode_idx = 0;
     char path_copy[256];
-    //strncpy(path_copy, path, sizeof(path_copy));
-	memset(path_copy, 0, sizeof(path_copy));
+    memset(path_copy, 0, sizeof(path_copy));
     strncpy(path_copy, path, sizeof(path_copy) - 1);
-	
     
     char* token = strtok(path_copy, "/");
     while (token != NULL) {
         InodeV3 current_inode;
         read_inode(disk, current_inode_idx, &current_inode);
         
-        if (current_inode.flags != INODE_FLAG_DIR) return 0xFFFFFFFF; // Nu e director
+        if (current_inode.flags != INODE_FLAG_DIR) return 0xFFFFFFFF; 
 
         uint32_t current_sec = current_inode.first_sector;
         uint32_t found_idx = 0xFFFFFFFF;
@@ -168,7 +144,7 @@ uint32_t find_inode_by_path(FILE* disk, const char* path) {
             read_sector(disk, current_sec, buf);
             DirEntryV3* entries = (DirEntryV3*)buf;
             
-            for (int i = 0; i < SECTOR_SIZE / sizeof(DirEntryV3); i++) {
+            for (int i = 0; i < (int)(SECTOR_SIZE / sizeof(DirEntryV3)); i++) {
                 if (entries[i].name[0] != '\0' && strcmp(entries[i].name, token) == 0) {
                     found_idx = entries[i].inode_index;
                     break;
@@ -178,13 +154,12 @@ uint32_t find_inode_by_path(FILE* disk, const char* path) {
             current_sec = fat_read(disk, current_sec);
         }
         
-        if (found_idx == 0xFFFFFFFF) return 0xFFFFFFFF; // Nu a fost găsit tokenul
+        if (found_idx == 0xFFFFFFFF) return 0xFFFFFFFF; 
         current_inode_idx = found_idx;
         token = strtok(NULL, "/");
     }
     return current_inode_idx;
 }
-
 
 int main(int argc, char** argv) {
     if (argc < 3) {
@@ -193,10 +168,11 @@ int main(int argc, char** argv) {
         printf("  %s <disk.img> mkdir <cale_noua>\n", argv[0]);
         printf("  %s <disk.img> push <fisier_linux> <cale_in_nano>\n", argv[0]);
         printf("  %s <disk.img> get <cale_in_nano> <fisier_linux>\n", argv[0]);
-		printf("  %s <disk.img> format\n", argv[0]);
+        printf("  %s <disk.img> format\n", argv[0]);
         return 1;
     }
 
+    int saved = 0;
     const char* img_path = argv[1];
     const char* command = argv[2];
     FILE* disk = fopen(img_path, "r+b");
@@ -208,7 +184,7 @@ int main(int argc, char** argv) {
 
     // --- COMANDA LS ---
     if (strcmp(command, "ls") == 0) {
-        uint32_t target_inode_idx = 0; // Root implicit
+        uint32_t target_inode_idx = 0; 
         if (argc >= 4) {
             target_inode_idx = find_inode_by_path(disk, argv[3]);
             if (target_inode_idx == 0xFFFFFFFF) {
@@ -228,7 +204,7 @@ int main(int argc, char** argv) {
             read_sector(disk, current_sec, buf);
             DirEntryV3* entries = (DirEntryV3*)buf;
             
-            for (int i = 0; i < SECTOR_SIZE / sizeof(DirEntryV3); i++) {
+            for (int i = 0; i < (int)(SECTOR_SIZE / sizeof(DirEntryV3)); i++) {
                 if (entries[i].name[0] != '\0') {
                     InodeV3 child;
                     read_inode(disk, entries[i].inode_index, &child);
@@ -243,10 +219,9 @@ int main(int argc, char** argv) {
     // --- COMANDA MKDIR ---
     else if (strcmp(command, "mkdir") == 0 && argc == 4) {
         char path_copy[256];
-        //strncpy(path_copy, argv[3], sizeof(path_copy));
-		memset(path_copy, 0, sizeof(path_copy));
+        memset(path_copy, 0, sizeof(path_copy));
         strncpy(path_copy, argv[3], sizeof(path_copy) - 1);
-		
+        
         char* last_slash = strrchr(path_copy, '/');
         char dir_path[256] = "/";
         const char* new_dir_name = argv[3];
@@ -254,16 +229,15 @@ int main(int argc, char** argv) {
         if (last_slash != NULL) {
             if (last_slash == path_copy) dir_path[1] = '\0';
             else { 
-				*last_slash = '\0'; 
-				//strncpy(dir_path, path_copy, sizeof(dir_path));
-				memset(dir_path, 0, sizeof(dir_path));
-                strncpy(dir_path, path_copy, sizeof(dir_path) - 1);				
-			}
+                *last_slash = '\0'; 
+                memset(dir_path, 0, sizeof(dir_path));
+                strncpy(dir_path, path_copy, sizeof(dir_path) - 1);                
+            }
             new_dir_name = last_slash + 1;
         }
 
         uint32_t parent_inode_idx = find_inode_by_path(disk, dir_path);
-        if (parent_inode_idx == 0xFFFFFFFF) { printf("Director parinte inexistent!\n"); return 1; }
+        if (parent_inode_idx == 0xFFFFFFFF) { printf("Director parinte inexistent!\n"); fclose(disk); return 1; }
 
         uint32_t new_inode_idx = allocate_inode(disk);
         uint32_t new_data_idx = allocate_fat(disk);
@@ -280,18 +254,16 @@ int main(int argc, char** argv) {
         InodeV3 parent_inode;
         read_inode(disk, parent_inode_idx, &parent_inode);
         uint32_t current_sec = parent_inode.first_sector;
-        int saved = 0;
         
         while (current_sec != FAT_EOF && !saved) {
             uint8_t buf[SECTOR_SIZE];
             read_sector(disk, current_sec, buf);
             DirEntryV3* entries = (DirEntryV3*)buf;
-            for (int i = 0; i < SECTOR_SIZE / sizeof(DirEntryV3); i++) {
+            for (int i = 0; i < (int)(SECTOR_SIZE / sizeof(DirEntryV3)); i++) {
                 if (entries[i].name[0] == '\0') {
-                    //strncpy(entries[i].name, new_dir_name, 63);
-					memset(entries[i].name, 0, sizeof(entries[i].name));
+                    memset(entries[i].name, 0, sizeof(entries[i].name));
                     strncpy(entries[i].name, new_dir_name, sizeof(entries[i].name) - 1);
-					
+                    
                     entries[i].inode_index = new_inode_idx;
                     write_sector(disk, current_sec, buf);
                     saved = 1; break;
@@ -322,15 +294,31 @@ int main(int argc, char** argv) {
             file_name = last_slash + 1;
         }
 
+        // --- SANITIZARE NUME FIȘIER ---
+        char clean_file_name[64];
+        memset(clean_file_name, 0, sizeof(clean_file_name));
+        strncpy(clean_file_name, file_name, 63);
+        
+        for (int j = 0; j < 64; j++) {
+            if (clean_file_name[j] == '\r' || clean_file_name[j] == '\n' || 
+                clean_file_name[j] == '\t' || clean_file_name[j] == ' ') {
+                clean_file_name[j] = '\0';
+                break; 
+            }
+        }
+        // ------------------------------
+
         uint32_t parent_inode_idx = find_inode_by_path(disk, dir_path);
         if (parent_inode_idx == 0xFFFFFFFF) { 
             printf("Director parinte inexistent!\n"); 
+            fclose(disk);
             return 1; 
         }
 
         FILE* local_f = fopen(argv[3], "rb");
         if (!local_f) { 
             printf("Nu pot citi fisierul sursa\n"); 
+            fclose(disk);
             return 1; 
         }
         fseek(local_f, 0, SEEK_END);
@@ -367,7 +355,7 @@ int main(int argc, char** argv) {
         current_sec = parent_inode.first_sector;
         
         uint32_t last_dir_sec = current_sec;
-        int saved = 0;
+        saved = 0;
         
         while (current_sec != FAT_EOF && current_sec != FAT_FREE && current_sec != 0 && !saved) {
             last_dir_sec = current_sec;
@@ -378,7 +366,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < (int)(SECTOR_SIZE / sizeof(DirEntryV3)); i++) {
                 if (entries[i].name[0] == '\0') {
                     memset(entries[i].name, 0, sizeof(entries[i].name));
-                    strncpy(entries[i].name, file_name, sizeof(entries[i].name) - 1);
+                    strncpy(entries[i].name, clean_file_name, sizeof(entries[i].name) - 1);
                     
                     entries[i].inode_index = new_inode_idx;
                     write_sector(disk, current_sec, buf);
@@ -391,17 +379,16 @@ int main(int argc, char** argv) {
             }
         }
         
-        // LOGICĂ NOUĂ: Dacă directorul s-a umplut, alocăm dinamic un sector nou pentru el
         if (!saved && last_dir_sec != FAT_EOF && last_dir_sec != 0) {
             uint32_t new_dir_sec = allocate_fat(disk);
             if (new_dir_sec != 0xFFFFFFFF) {
-                fat_write(disk, last_dir_sec, new_dir_sec); // Legăm noul sector în lanțul FAT
+                fat_write(disk, last_dir_sec, new_dir_sec); 
                 
                 uint8_t buf[SECTOR_SIZE];
                 memset(buf, 0, SECTOR_SIZE);
                 DirEntryV3* entries = (DirEntryV3*)buf;
                 
-                strncpy(entries[0].name, file_name, sizeof(entries[0].name) - 1);
+                strncpy(entries[0].name, clean_file_name, sizeof(entries[0].name) - 1);
                 entries[0].inode_index = new_inode_idx;
                 write_sector(disk, new_dir_sec, buf);
                 saved = 1;
@@ -417,62 +404,57 @@ int main(int argc, char** argv) {
         }
         
         fclose(local_f);
-    }// --- COMANDA FORMAT ---
+    }
+    // --- COMANDA FORMAT ---
     else if (strcmp(command, "format") == 0) {
-        uint32_t total_sec = 102400; // 50MB by default
+        uint32_t total_sec = 102400; 
         if (argc >= 4) {
             total_sec = (atoi(argv[3]) * 1024) / SECTOR_SIZE;
         }
 
-        // Hardcodăm exact valorile din kernel-ul tău (fs_v3.c)
         memcpy(sb.magic, NFS3_MAGIC, 4);
         sb.total_sectors = total_sec;
         sb.fat_start_sector = 2;
-        sb.fat_sectors = 200;       
+        sb.fat_sectors = 200;        
         sb.inode_start = 202;
         sb.inode_count = 1000;      
-        sb.data_start = 1226;       
+        sb.data_start = 1226;        
 
-        // 1. Salvăm Superblock-ul
         uint8_t buf[SECTOR_SIZE] = {0};
         memcpy(buf, &sb, sizeof(SuperblockV3));
         write_sector(disk, 1, buf);
 
-        // 2. Curățăm toată zona FAT
         memset(buf, 0, SECTOR_SIZE);
         for (uint32_t i = 0; i < sb.fat_sectors; i++) {
             write_sector(disk, sb.fat_start_sector + i, buf);
         }
 
-        // 3. Marcăm sectoarele de sistem ca FAT_BAD (0xFFFFFFFE) exact ca în kernel
         for (uint32_t i = 0; i < sb.data_start; i++) {
             fat_write(disk, i, FAT_BAD);
         }
 
-        // 4. Curățăm zona de inoduri
         uint32_t inode_sectors = (sb.inode_count * sizeof(InodeV3) + 511) / SECTOR_SIZE;
         memset(buf, 0, SECTOR_SIZE);
         for (uint32_t i = 0; i < inode_sectors; i++) {
             write_sector(disk, sb.inode_start + i, buf);
         }
 
-        // 5. Creăm Inodul ROOT (Index 0)
         InodeV3 root_inode = {0};
         root_inode.flags = INODE_FLAG_DIR;
         root_inode.size = 0;
         
-        uint32_t root_data_sec = allocate_fat(disk); // Alocă primul sector curat (1226)
+        uint32_t root_data_sec = allocate_fat(disk); 
         root_inode.first_sector = root_data_sec;
         write_inode(disk, 0, &root_inode);
 
-        // Curățăm primul sector de date (cel al rădăcinii)
         memset(buf, 0, SECTOR_SIZE);
         write_sector(disk, root_data_sec, buf);
 
         printf("Succes: Formatare NanoFS V3 completă (%d sectoare).\n", total_sec);
         fclose(disk);
         return 0;
-    }// --- COMANDA GET ---
+    }
+    // --- COMANDA GET ---
     else if (strcmp(command, "get") == 0 && argc == 5) {
         const char* nano_file = argv[3];
         const char* linux_file = argv[4];
@@ -512,7 +494,7 @@ int main(int argc, char** argv) {
             }
         }
     }
-	else {
+    else {
         printf("Comandă necunoscută: '%s'\n", command);
     }
     

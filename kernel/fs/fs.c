@@ -149,6 +149,7 @@ int fs_mkdir(const char* name) {
 int fs_cd(const char* name) {
     if (!name || name[0] == '\0') return 0;
 
+    // Suntem direcționați spre root-ul global
     if (streq(name, "/") || streq(name, "/.")) {
         is_at_global_root = 1;
         return 1;
@@ -156,14 +157,14 @@ int fs_cd(const char* name) {
 
     if (is_at_global_root) {
         if (streq(name, "hda") || streq(name, "/hda")) {
-            current_drive_id = 0; // <--- Setăm corect pentru hda
+            current_drive_id = 0;
             active_fs = &nfs3_driver;
             active_fs->cd("/");
             is_at_global_root = 0;
             return 1;
         }
         if (streq(name, "hdb") || streq(name, "/hdb")) {
-            current_drive_id = 1; // <--- Setăm corect pentru hdb
+            current_drive_id = 1;
             active_fs = &nfs3_driver;
             active_fs->cd("/");
             is_at_global_root = 0;
@@ -182,13 +183,15 @@ int fs_cd(const char* name) {
 
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target != active_fs) {
-        active_fs = target;
-        is_at_global_root = 0;
-    }
     
     if (target && target->cd) {
-        return target->cd(local_path);
+        int success = target->cd(local_path);
+        if (success) {
+            active_fs = target;
+            // FIX CRITIC: Dacă am intrat cu succes într-un path din driver, NU mai suntem în global root!
+            is_at_global_root = 0; 
+            return 1;
+        }
     }
     
     return 0;

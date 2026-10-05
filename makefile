@@ -40,13 +40,20 @@ kernel/%.o: kernel/%.c
 # Regulă automată pentru orice fișier .asm din folderul boot/
 boot/%.o: boot/%.asm
 	$(AS) -f elf64 $< -o $@
+	
+# Tinte helper pentru a forța reasamblarea corectă a boot.o
+boot_gfx.o: boot/multiboot_gfx.asm
+	$(AS) -f elf64 boot/multiboot_gfx.asm -o boot.o
+
+boot_txt.o: boot/multiboot_txt.asm
+	$(AS) -f elf64 boot/multiboot_txt.asm -o boot.o
 
 # Regulă automată pentru fișierele .asm din root (ex: isr_keyboard.asm, timer.asm)
 %.o: %.asm
 	$(AS) -f elf64 $< -o $@
 
-boot.o: boot/multiboot.asm
-	$(AS) -f elf64 boot/multiboot.asm -o boot.o
+boot.o: boot/multiboot_gfx.asm
+	$(AS) -f elf64 boot/multiboot_gfx.asm -o boot.o
 
 isr_timer.o: asm/isr_timer.asm
 	$(AS) -f elf64 asm/isr_timer.asm -o isr_timer.o
@@ -128,9 +135,25 @@ img_files:
 #    Rulare în QEMU
 # ============================
 
-run: kernel.iso hdd_tools apps 
-#	push_hda.sh
-	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display sdl
+run: run_gfx
+
+# Regula pentru Modul Grafic (GFX)
+run_gfx: clean boot_gfx.o $(OBJS) kernel.iso hdd_tools apps
+	qemu-system-x86_64 -cdrom kernel.iso \
+		-drive file=hda_v3.img,format=raw,index=0,media=disk \
+		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
+		-vga std \
+		-display sdl
+		
+# Regula pentru Modul Text (TXT)
+run_txt: clean boot_txt.o $(OBJS) kernel.iso hdd_tools apps
+	qemu-system-x86_64 -cdrom kernel.iso \
+		-drive file=hda_v3.img,format=raw,index=0,media=disk \
+		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
+		-display curses
+
+#run: kernel.iso hdd_tools apps 
+#	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display sdl
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v2.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -vga std -audiodev sdl,id=snd0 -device AC97,audiodev=snd0 -machine pcspk-audiodev=snd0

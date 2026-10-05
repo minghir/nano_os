@@ -17,7 +17,7 @@ TEXT_ADDR = 0x800000
 ifeq ($(APP),shell)
     OS_PATH = /sbin/shell
 else ifeq ($(APP),init)
-    OS_PATH = /sbin/init	
+    OS_PATH = /sbin/init
 else ifeq ($(APP),time)
     OS_PATH = /sbin/time
 else ifeq ($(APP),date)
@@ -45,19 +45,19 @@ else ifeq ($(APP),kill)
 else ifeq ($(APP),free)
     OS_PATH = /sbin/free
 else ifeq ($(APP),cp)
-    OS_PATH = /sbin/cp	
+    OS_PATH = /sbin/cp
 else ifeq ($(APP),mv)
-    OS_PATH = /sbin/mv	
+    OS_PATH = /sbin/mv
 else ifeq ($(APP),df)
     OS_PATH = /bin/df
 else ifeq ($(APP),dmesg)
-    OS_PATH = /bin/dmesg	
+    OS_PATH = /bin/dmesg
 else ifeq ($(APP),mandel)
     OS_PATH = /bin/mandel
 else ifeq ($(APP),mp3_play)
     OS_PATH = /bin/mp3
 else ifeq ($(APP),wavplay)
-    OS_PATH = /bin/wav	
+    OS_PATH = /bin/wav
 else ifeq ($(APP),nanoasm)
     OS_PATH = /bin/asm
 else ifeq ($(APP),nanovi)
@@ -78,7 +78,7 @@ else ifeq ($(APP),crash)
     OS_PATH = /tests/crash
 else ifeq ($(APP),mem_test)
     OS_PATH = /tests/mem_test
-else 
+else
     # Valoare implicită pentru orice alt program nou
     OS_PATH = /bin/$(APP)
 endif

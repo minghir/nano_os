@@ -2,6 +2,7 @@ rm -f hda_v3.img hdb_v3.img
 qemu-img create -f raw hda_v3.img 50M
 qemu-img create -f raw hdb_v3.img 50M
 
+tools/nan3hdd hdb_v3.img format
 tools/nan3hdd hda_v3.img format
 tools/nan3hdd hda_v3.img mkdir /bin
 tools/nan3hdd hda_v3.img mkdir /sbin
