@@ -34,6 +34,15 @@ void syscall_handler(SyscallRegisters* regs) {
     // 2. Rutăm apelul tăind "gunoiul" din partea superioară a lui RAX
     //switch ((uint32_t)regs->rax) {
     switch (syscall_num) {
+		case 0: { // SYSCALL 0 (Probabil sys_read, sys_yield sau getch)
+            // Punem procesorul pe pauză până apare o întrerupere hardware (ex: timer sau tastatură)
+            // Astfel tăiem spam-ul infinit și lăsăm CPU-ul să respire.
+            __asm__ volatile ("sti; hlt");
+            
+            // Alternativ, dacă 0 e sys_read pentru tastatură, aici ai returna caracterul.
+            regs->rax = 0; 
+            break;
+        }
         case SYSCALL_PRINT: {
 			
             char* str = (char*)regs->rdi;
@@ -122,6 +131,19 @@ void syscall_handler(SyscallRegisters* regs) {
             if (prog_name[0] == '/' || prog_name[0] == '.') {
                 string_copy(paths_to_try[try_count++], prog_name);
             } else {
+				
+				// 1. Încercăm MAI ÎNTÂI în directorul curent al procesului care a cerut execuția!
+                if (current_process && current_process->current_path[0] != '\0') {
+                    string_copy(paths_to_try[try_count], current_process->current_path);
+                    int dlen = string_length(paths_to_try[try_count]);
+                    if (dlen > 0 && paths_to_try[try_count][dlen-1] != '/') {
+                        string_concat(paths_to_try[try_count], "/");
+                    }
+                    string_concat(paths_to_try[try_count], prog_name);
+                    try_count++;
+                }
+				
+				// 2. Apoi parcurgem PATH-ul clasic din env_path
                 char path_copy[128];
                 string_copy(path_copy, env_path); 
                 int start_idx = 0;
@@ -133,6 +155,7 @@ void syscall_handler(SyscallRegisters* regs) {
                         char* current_dir = &path_copy[start_idx];
                         start_idx = i + 1;
                         if (string_length(current_dir) == 0) continue;
+						
                         string_copy(paths_to_try[try_count], current_dir);
                         int dirlen = string_length(paths_to_try[try_count]);
                         if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
@@ -713,6 +736,16 @@ print("\n");
 				//KLOG_INFO("[DEBUG KERNEL] -> Nu mai sunt fisiere la indexul \n", index);
 				regs->rax = 0;
 			}
+			break;
+		}
+		case SYSCALL_FORK: {
+			//print("Incer fork!");
+			//sleep_ms(2000);
+			uint32_t child_pid = sys_fork(regs);
+			
+			// În x86-64, valoarea returnată de syscall se pune în rax pentru părinte.
+			// Pentru copil, sys_fork a setat deja explicit rax = 0 în stiva lui privată!
+			regs->rax = (uint64_t)child_pid;
 			break;
 		}
 		default: {

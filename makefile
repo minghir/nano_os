@@ -114,6 +114,7 @@ apps: hdd_tools
 	$(MAKE) -C nano_libc APP=tsr_sleep2
 	$(MAKE) -C nano_libc APP=crash
 	$(MAKE) -C nano_libc APP=mem_test
+	$(MAKE) -C nano_libc APP=test_fork
 
 	
 # ============================

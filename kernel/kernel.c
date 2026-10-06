@@ -12,6 +12,7 @@
 #include "pci.h"
 #include "video.h"
 #include "mouse.h"
+#include "sys.h"
 
 #include "gfx/gfx_term.h"
 
@@ -274,9 +275,21 @@ void kernel_main(unsigned long magic, unsigned long addr) {
                 uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
 
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-
+				
+				
+				
                 uint32_t init_pid = process_create("init", init_entry_point, 0, NULL,
                                                    (uint64_t)init_pml4, init_pages, t);
+												   
+				PCB* init_pcb = get_process_by_pid(init_pid);
+                if (init_pcb) {
+                    init_pcb->cwd_sector = 0; // Sectorul root-ului tău (sau inodul 0)
+                    // Copiem calea "/" în current_path
+                    int idx = 0;
+                    init_pcb->current_path[idx++] = '/';
+                    init_pcb->current_path[idx] = '\0';
+                }
+                
                 ttys[t].foreground_pid = init_pid;
             } else {
                 __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
@@ -289,8 +302,16 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     }
 
     KLOG_DEBUG("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
+	
+	// Setăm starea procesului de kernel (PID 0) la SLEEPING sau ZOMBIE 
+    // ca schedulerul să nu încerce niciodată să se întoarcă pe stiva de boot.
+    if (current_process && current_process->pid == 0) {
+        current_process->state = PROC_SLEEPING; 
+    }
+	
     timer_init(1000);
-
+		
+	/*	
     for (;;) {
 		// Dacă mouse-ul s-a mișcat, redesenăm ecranul!
         if (mouse_moved) {
@@ -300,5 +321,14 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         
         // Așteptăm următoarea întrerupere (Tastatură, Mouse, sau Timer)
         __asm__ volatile ("sti; hlt");
+    }
+	*/
+	
+	__asm__ volatile ("sti");
+
+    // Nu mai avem nevoie de bucla goală cu hlt! 
+    // Lăsăm CPU-ul să ruleze libere procesele din tabelă.
+    while (1) {
+        __asm__ volatile ("hlt");
     }
 }

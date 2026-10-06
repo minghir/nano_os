@@ -43,6 +43,7 @@ typedef struct {
     
     // --- Sistem de Fișiere ---
     uint32_t cwd_sector;      // Current Working Directory! (Înlocuiește variabila globală)
+	char current_path[256];     // Calea text privată a procesului (ex: "/hda/data")
     
     // --- Memorie și Execuție ---
     Registers regs;           // Starea registrelor când e pus pe pauză

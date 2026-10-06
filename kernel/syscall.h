@@ -48,6 +48,7 @@
 #define SYSCALL_SWAP_VIDEO_BUFFERS 41
 #define SYSCALL_DRAW_FRAME		42
 #define SYSCALL_GET_DIR_ENTRIES	43
+#define SYSCALL_FORK			44
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;

@@ -448,4 +448,21 @@ static inline int nano_get_file_name_at(int index, char* buf, int max_len) {
     return (int)success;
 }
 
+static inline int fork(void) {
+    long success = 0;
+    
+    register long rax_val __asm__("rax") = 44; // SYSCALL_FORK
+
+    __asm__ volatile (
+        "int $0x80\n\t"
+        : "=r" (rax_val)
+        : "r" (rax_val)
+        : "memory"
+    );
+
+    success = rax_val;
+    return (int)success;
+}
+
+
 #endif

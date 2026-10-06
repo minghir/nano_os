@@ -11,13 +11,12 @@ uint32_t next_pid = 1;
 uint64_t kernel_cr3 = 0;
 
 void process_init() {
-	// Salvăm CR3-ul de bază al Kernelului O SINGURĂ DATĂ la boot
+    // Salvăm CR3-ul de bază al Kernelului O SINGURĂ DATĂ la boot
     __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_cr3));
-	
-	//salva adresa PML4 globală a kernelului la pornire și să o atribui procesului 0 în
-	uint64_t kernel_pml4;
-	__asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
-	
+    
+    uint64_t kernel_pml4;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
+    
     print("[DEBUG] process_init: Cleaning process table...\n");
     // 1. Curățăm toate sloturile din tabelă
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -33,6 +32,10 @@ void process_init() {
     current_process->cr3 = kernel_pml4;
     current_process->cwd_sector = 1; 
     current_process->tty_id = active_tty;
+    
+    // --- FIX: Inițializăm calea kernelului la root ---
+    current_process->current_path[0] = '/';
+    current_process->current_path[1] = '\0';
     
     print("[DEBUG] process_init: Kernel process (PID 0) initialized as RUNNING.\n");
 }
@@ -88,20 +91,13 @@ uint64_t schedule(uint64_t current_rsp) {
 
 uint32_t process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
     
-    //print("[DEBUG] process_create: Trying to create process '");
-    //print(name);
-    //print("'...\n");
-	
     PCB* p = 0;
     
     // 1. Căutăm un slot liber în tabelă
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_table[i].state == PROC_FREE) {
             p = &process_table[i];
-			process_table[i].tty_id = tty_id;
-            //print("[DEBUG] process_create: Found free slot at index ");
-            // Dacă vrei poți afișa și indexul
-            //print("\n");
+            process_table[i].tty_id = tty_id;
             break;
         }
     }
@@ -117,14 +113,14 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
         p->stack_base = 0;
     }
 
-	// Îi asociezi harta de memorie unică
+    // Îi asociezi harta de memorie unică
     p->cr3 = process_cr3;
-	
-	// Salvăm cele 8 pagini împrăștiate
+    
+    // Salvăm cele 8 pagini împrăștiate
     for(int i = 0; i < MAX_PROG_PAGES; i++) {
         p->prog_pages[i] = prog_pages[i];
     }
-	
+    
     // 2. Populăm datele de bază
     p->pid = next_pid++;
     p->ppid = current_process ? current_process->pid : 0;
@@ -133,8 +129,35 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
     while (name[n] && n < 31) { p->name[n] = name[n]; n++; }
     p->name[n] = '\0';
     
-    p->cwd_sector = current_process ? current_process->cwd_sector : 1;
+    p->cwd_sector = current_process ? current_process->cwd_sector : 0;
+    
+    // Copierea căii text a procesului părinte
+    if (current_process && current_process->current_path[0] != '\0') {
+        int idx = 0; // am pus 0
+        while (current_process->current_path[idx] && idx < 255) {
+            p->current_path[idx] = current_process->current_path[idx];
+            idx++;
+        }
+        p->current_path[idx] = '\0';
+    } else {
+        p->current_path[0] = '/';
+        p->current_path[1] = '\0';
+    }
 
+    // --- LOGURI DE DIAGNOSTIC PENTRU PROCES ȘI CALE ---
+    print("[PROC_CREATE] Nume: ");
+    print(p->name);
+    print(" | PID: ");
+    print_number(p->pid);
+    print(" | PPID: ");
+    print_number(p->ppid);
+    print(" | CWD Inod: ");
+    print_number(p->cwd_sector);
+    print(" | Cale: ");
+    print(p->current_path);
+    print("\n");
+    // --------------------------------------------------
+    
     // 3. Alocăm stiva privată a programului (16 KB)
     uint8_t* stack = (uint8_t*)malloc(16384);
     if (!stack) {
@@ -142,8 +165,8 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
         return 0;
     }
     p->stack_base = (uint64_t)stack;
-	
-	// 4. Calculăm Vârful stivei și o aliniem la 16 octeți
+    
+    // 4. Calculăm Vârful stivei și o aliniem la 16 octeți
     uint64_t stack_top = (uint64_t)(stack + 16384);
     stack_top &= ~0xF; 
 
@@ -157,12 +180,12 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
         byte_ptr[i] = 0;
     }
 
-    // 6. Setăm starea procesorului pentru IRETQ
-    regs->ss = 0x10;        
-    regs->rsp = stack_top + sizeof(Registers); // <-- Punctează fix la vârful aliniat!
+// 6. Setăm starea procesorului pentru IRETQ (User Space - Ring 3)
+    regs->ss = 0x10;          // Selector de date User Mode (Ring 3, ex: 0x20 | 3)
+    regs->rsp = stack_top + sizeof(Registers);  
     regs->rflags = 0x202;     // IF=1 (Întreruperi activate)
-    regs->cs = 0x08;          
-    regs->rip = entry_point;  
+    regs->cs = 0x08;          // Selector de cod User Mode (Ring 3, ex: 0x18 | 3)
+    regs->rip = entry_point;
 
     // 7. Parametrii argc / argv
     regs->rdi = (uint64_t)argc;
@@ -170,11 +193,10 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
 
     // 8. Salvăm RSP-ul final în PCB
     p->regs.rsp = stack_top;
-	
+    
     // 9. Îl marcăm ca pregătit să ruleze
     p->state = PROC_READY;
-	
-    return p->pid; // <--- Returnezi PID-ul alocat
-    //print("[DEBUG] process_create: Process created successfully! PID assigned, state set to PROC_READY.\n");
+    
+    return p->pid; 
 }
 

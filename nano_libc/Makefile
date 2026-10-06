@@ -76,6 +76,8 @@ else ifeq ($(APP),tsr_sleep2)
     OS_PATH = /tests/tsr_sleep2
 else ifeq ($(APP),crash)
     OS_PATH = /tests/crash
+else ifeq ($(APP),test_fork)
+    OS_PATH = /tests/test_fork
 else ifeq ($(APP),mem_test)
     OS_PATH = /tests/mem_test
 else

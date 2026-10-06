@@ -7,7 +7,7 @@
 // Funcții externe de disk I/O din kernel
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
 extern void disk_write_sector_drive(uint8_t drive, uint32_t lba, const uint8_t* buffer);
-
+extern uint32_t get_current_dir_inode(void) ;
 extern uint8_t current_drive_id;
 
 // Citim Superblock-ul din Sectorul 1 pentru a afla unde se află tabela FAT
@@ -115,7 +115,7 @@ int nfs3_get_file_at_index(int index, char* buffer, uint32_t max_len) {
     
     // Folosim exact variabila ta globală/statică care memorează inodul directorului curent în fs_v3.c
     // (Verifică cum se numește în fs_list_files_v3: de obicei current_dir_inode este definită sus în fs_v3.c)
-    extern uint32_t current_dir_inode; // O declarăm extern dacă e nevoie, sau folosim numele corect
+    uint32_t current_dir_inode = get_current_dir_inode();  // O declarăm extern dacă e nevoie, sau folosim numele corect
     
     if (!nfs3_read_inode(current_dir_inode, &dir_inode)) return 0;
     if (dir_inode.flags != INODE_FLAG_DIR) return 0;

@@ -4,9 +4,14 @@
 #include "fs_v3_inode.h"
 #include "fs_v3_dir.h"
 #include "../syslog.h"
+#include "../process.h" // Acces la structura PCB și current_process
+
+extern PCB* current_process;
 
 // Variabilă globală în driver care ține minte calea exactă
-static char current_v3_path[256] = "/";
+//static char current_v3_path[256] = "/";
+// Starea curentă a navigației în NanoFS V3 (Indexul inodului directorului curent)
+//uint32_t current_dir_inode = 0; // Root este inodul 0
 
 // Funcții externe de disk I/O pe hdb (drive 1)
 extern void disk_read_sector_drive(uint8_t drive, uint32_t lba, uint8_t* buffer);
@@ -26,8 +31,48 @@ extern void print(const char* s);
 extern void print_number(uint32_t n);
 extern void newline();
 
-// Starea curentă a navigației în NanoFS V3 (Indexul inodului directorului curent)
-uint32_t current_dir_inode = 0; // Root este inodul 0
+
+uint32_t get_current_dir_inode(void) {
+    if (current_process) {
+        return current_process->cwd_sector;
+    }
+    return 0; // Fallback la Root
+}
+
+void set_current_dir_inode(uint32_t inode) {
+    if (current_process) {
+        current_process->cwd_sector = inode;
+    }
+}
+
+void get_current_v3_path(char* buf, uint32_t max_len) {
+    if (current_process && current_process->current_path[0] != '\0') {
+        int i = 0;
+        while (current_process->current_path[i] && i < (int)max_len - 1) {
+            buf[i] = current_process->current_path[i];
+            i++;
+        }
+        buf[i] = '\0';
+        return;
+    }
+    buf[0] = '/';
+    buf[1] = '\0';
+}
+
+void set_current_v3_path(const char* new_path) {
+    if (current_process) {
+        int i = 0;
+        while (new_path[i] && i < 255) {
+            current_process->current_path[i] = new_path[i];
+            i++;
+        }
+        current_process->current_path[i] = '\0';
+    }
+}
+
+
+
+
 
 // Funcție internă de comparație
 static int nfs3_streq(const char* a, const char* b) {
@@ -195,6 +240,9 @@ static void nfs3_normalize_path(const char* cwd, const char* input, char* output
 static uint32_t nfs3_get_target_inode(const char* path) {
     if (!path || !path[0]) return 0xFFFFFFFF;
     
+	char current_v3_path[256];
+	get_current_v3_path(current_v3_path, sizeof(current_v3_path));
+	
     char abs_path[256];
     nfs3_normalize_path(current_v3_path, path, abs_path);
     
@@ -227,6 +275,9 @@ static uint32_t nfs3_get_target_inode(const char* path) {
 static uint32_t nfs3_get_target_inode_verbose(const char* path) {
     if (!path || !path[0]) return 0xFFFFFFFF;
     
+	char current_v3_path[256];
+	get_current_v3_path(current_v3_path, sizeof(current_v3_path));
+	
     char abs_path[256];
     nfs3_normalize_path(current_v3_path, path, abs_path);
     
@@ -265,6 +316,9 @@ static uint32_t nfs3_get_target_inode_verbose(const char* path) {
 static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
     if (!full_path || !full_path[0]) return 0xFFFFFFFF;
     
+	char current_v3_path[256];
+	get_current_v3_path(current_v3_path, sizeof(current_v3_path));
+	
     char abs_path[256];
     nfs3_normalize_path(current_v3_path, full_path, abs_path);
     
@@ -308,6 +362,8 @@ void fs_init_v3(void) {
     uint8_t buffer[512];
     disk_read_sector_drive(current_drive_id, 1, buffer);
     SuperblockV3* sb = (SuperblockV3*)buffer;
+	
+	
 
     if (sb->magic[0] == NFS3_MAGIC[0] && sb->magic[1] == NFS3_MAGIC[1] &&
         sb->magic[2] == NFS3_MAGIC[2] && sb->magic[3] == NFS3_MAGIC[3]) {
@@ -316,11 +372,12 @@ void fs_init_v3(void) {
         KLOG_WARNING("[NFS3] Disc hdb neformatat. Se rulează formatarea V3...");
         nfs3_format();
     }
-    current_dir_inode = 0; // Root
+    set_current_dir_inode(0);
+	set_current_v3_path("/");
 }
 
 void fs_list_files_v3(const char* path) {
-    uint32_t target_inode = current_dir_inode;
+    uint32_t target_inode = get_current_dir_inode();//current_dir_inode;
 
     if (path != 0 && path[0] != '\0' && !(path[0] == '.' && path[1] == '\0')) {
         char dummy[64];
@@ -501,6 +558,9 @@ int fs_rmdir_v3(const char* name) {
 int fs_cd_v3(const char* name) {
     if (!name || name[0] == '\0') return 0;
 
+	char current_v3_path[256];
+    get_current_v3_path(current_v3_path, sizeof(current_v3_path));
+
     char abs_path[256];
     nfs3_normalize_path(current_v3_path, name, abs_path);
     
@@ -514,26 +574,33 @@ int fs_cd_v3(const char* name) {
         if (inv.flags != INODE_FLAG_DIR) return 0; // Nu e director
     }
     
-    current_dir_inode = target_inode;
-    
+    //current_dir_inode = target_inode;
+    set_current_dir_inode(target_inode);
     // Sincronizăm calea exact cu calea absolută normalizată
+	set_current_v3_path(abs_path);
+	/*
     int i = 0;
     while (abs_path[i] && i < 255) {
         current_v3_path[i] = abs_path[i];
         i++;
     }
     current_v3_path[i] = '\0';
+	*/
     
     return 1;
 }
 
 void fs_get_current_path_v3(char* buffer, uint32_t max_len) {
+	get_current_v3_path(buffer, max_len);
+	/*
     uint32_t i = 0;
+	
     while (current_v3_path[i] && i < max_len - 1) {
         buffer[i] = current_v3_path[i];
         i++;
     }
     buffer[i] = '\0';
+	*/
 }
 
 void fs_fdisk_v3(void) {
@@ -554,7 +621,8 @@ void fs_fdisk_v3(void) {
 
 void fs_format_v3(void) {
     nfs3_format();
-    current_dir_inode = 0;
+    set_current_dir_inode(0);
+	set_current_v3_path("/");
 }
 
 int nfs3_get_stats(uint32_t* total_sectors, uint32_t* free_sectors) {

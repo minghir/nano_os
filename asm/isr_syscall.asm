@@ -4,7 +4,7 @@ extern syscall_handler
 
 section .text
 isr_syscall:
-    ; Salvăm registrele la fel ca la tastatură
+    ; Salvăm registrele generale
     push rax
     push rcx
     push rdx
@@ -21,9 +21,19 @@ isr_syscall:
     push r14
     push r15
 
-    ; Trimitem pointerul sticlei (registrelor) ca argument în RDI
+    ; ========================================================
+    ; FIX CRITIC: Alocăm spațiu pentru xmm0 și padding (16+8=24 bytes)
+    ; pentru ca stiva să se potrivească PERFECT cu structura "Registers"!
+    ; ========================================================
+    sub rsp, 24
+
+    ; Trimitem pointerul stivei (structura Registers) ca argument în RDI
     mov rdi, rsp 
     call syscall_handler
+
+    ; Refacem stiva (ștergem spațiul alocat pentru xmm0 și padding)
+    add rsp, 24
+    ; ========================================================
 
     ; Restaurăm registrele
     pop r15
@@ -42,5 +52,5 @@ isr_syscall:
     pop rcx
     pop rax
 
-    ; ATENȚIE: Fără EOI (out 0x20, al) aici, pentru că e întrerupere software!
+    ; Fără EOI, e întrerupere software!
     iretq

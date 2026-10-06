@@ -105,27 +105,6 @@ size_t get_heap_free() {
     return HEAP_SIZE - get_heap_used();
 }
 
-/*
-// Alocă 1 pagină fizică (4096 octeți) și o umple cu zero
-void* alloc_page() {
-	// Să zicem că limităm memoria fizică gestionată la 128 MB (0x08000000)
-    if (next_free_physical_page >= 0x08000000) {
-        print("KERNEL PANIC: Out of physical memory!");
-        while(1) __asm__ volatile("cli; hlt");
-    }
-	
-    uint64_t page_addr = next_free_physical_page;
-    next_free_physical_page += 4096;
-
-    uint8_t* ptr = (uint8_t*)page_addr;
-    for (int i = 0; i < 4096; i++) {
-        ptr[i] = 0;
-    }
-
-    return (void*)page_addr;
-}
-*/
-
 // Pointer către vârful stivei de pagini fizice libere
 static void* free_pages_head = 0;
 

@@ -6,6 +6,9 @@
 #include "memory.h"
 #include "paging.h"
 #include "tty.h"
+#include "string.h"
+
+extern uint32_t next_pid;
 
 void kernel_reboot() {
     print("System rebooting...\n");
@@ -34,6 +37,16 @@ void kernel_reboot() {
         __asm__ volatile ("cli; hlt");
     }
 }
+
+PCB* get_process_by_pid(uint32_t pid) {
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (process_table[i].state != PROC_FREE && process_table[i].pid == pid) {
+            return &process_table[i];
+        }
+    }
+    return NULL; // Nu a fost găsit
+}
+
 
 void kill_process_by_pid(uint32_t pid) {
     __asm__ volatile ("cli");
@@ -87,51 +100,158 @@ void kill_process_by_pid(uint32_t pid) {
     }
 }
 
-/*
-void kill_process_by_pid(uint32_t pid) {
-    __asm__ volatile ("cli");
+// Creează o copie completă a paginilor de program ale unui proces
+uint64_t* fork_process_memory(uint64_t* parent_prog_pages, uint64_t* new_child_pml4) {
+    // Alocăm un nou array pentru paginile copilului
+    uint64_t* child_pages = (uint64_t*)malloc(MAX_PROG_PAGES * sizeof(uint64_t));
+    if (!child_pages) return NULL;
+
+    for (int i = 0; i < MAX_PROG_PAGES; i++) {
+        if (parent_prog_pages[i] != 0) {
+            // 1. Alocăm o pagină fizică nouă pentru copil
+            void* new_phys_page = alloc_page();
+            if (!new_phys_page) {
+                // Dacă dă eroare, ar trebui să eliberăm ce am alocat până acum (gestionare simplă de eroare)
+                return NULL;
+            }
+
+            // 2. Copiem conținutul paginii fizice a părintelui în noua pagină a copilului
+            // Notă: Putem folosi un memcpy temporar mapând-o sau accesând direct adresele fizice/virtuale
+            // Presupunând că ai o funcție de copiere sau poți folosi maparea temporară:
+            uint8_t* src = (uint8_t*)parent_prog_pages[i]; // sau adresa virtuală corespunzătoare
+            uint8_t* dst = (uint8_t*)new_phys_page;
+            for (int b = 0; b < 4096; b++) {
+                dst[b] = src[b];
+            }
+
+            child_pages[i] = (uint64_t)new_phys_page;
+
+            // 3. Mapăm noua pagină fizică în noul PML4 al copilului la aceeași adresă virtuală (ex: 0x800000 + i*4096)
+            map_page(new_child_pml4, 0x800000 + (i * 4096), (uint64_t)new_phys_page, 
+                     PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        } else {
+            child_pages[i] = 0;
+        }
+    }
+    return child_pages;
+}
+
+uint32_t sys_fork(Registers* parent_regs) {
+    if (!current_process) return 0;
     
+    print("[FORK DEBUG] Incepem clonarea pentru PID: ");
+    print_number(current_process->pid);
+    print("\n");
+
+    // 1. Căutăm slot liber
+    PCB* child = NULL;
     for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (process_table[i].pid == pid) {
-            uint32_t ppid = process_table[i].ppid;
-            int tty_id = process_table[i].tty_id;
-
-            // 1. Trezim părintele (care poate aștepta în sys_wait)
-            for (int j = 0; j < MAX_PROCESSES; j++) {
-                if (process_table[j].pid == ppid) {
-                    process_table[j].state = PROC_READY;
-                    break;
-                }
-            }
-
-            // 2. Eliberăm stiva alocată cu malloc
-            if (process_table[i].stack_base) {
-                free((void*)process_table[i].stack_base);
-                process_table[i].stack_base = 0;
-            }
-
-            // 3. Eliberăm paginile fizice și paginarea (PML4)
-            for (int p = 0; p < 8; p++) {
-                if (process_table[i].prog_pages[p]) {
-                    free_page((void*)process_table[i].prog_pages[p]);
-                    process_table[i].prog_pages[p] = 0;
-                }
-            }
-            if (process_table[i].cr3) {
-                free_process_paging(process_table[i].cr3);
-                process_table[i].cr3 = 0;
-            }
-
-            // 4. Eliberăm slotul procesului
-            process_table[i].state = PROC_FREE;
-            process_table[i].pid = 0;
-            process_table[i].name[0] = '\0';
-
-            // 5. IMPORTANT: Părintele își recuperează instant controlul ecranului!
-            ttys[tty_id].foreground_pid = ppid;
-
+        if (process_table[i].state == PROC_FREE) {
+            child = &process_table[i];
             break;
         }
     }
+    if (!child) {
+        print("[FORK ERROR] Tabela de procese e plina!\n");
+        return 0;
+    }
+
+    // 2. Setăm datele de bază
+    child->pid = next_pid++;
+    child->ppid = current_process->pid;
+    child->tty_id = current_process->tty_id;
+    
+    int n = 0;
+    while (current_process->name[n] && n < 31) { child->name[n] = current_process->name[n]; n++; }
+    child->name[n] = '\0';
+
+    child->cwd_sector = current_process->cwd_sector;
+    for (int i = 0; i < 256; i++) child->current_path[i] = current_process->current_path[i];
+
+    // 3. CLONAREA MEMORIEI DE PROGRAM
+    print("[FORK DEBUG] Clonam paginile de program...\n");
+    uint64_t* child_pml4 = create_process_pml4();
+    if (!child_pml4) {
+        print("[FORK ERROR] Esec la crearea PML4!\n");
+        return 0;
+    }
+    child->cr3 = (uint64_t)child_pml4;
+
+    for (int i = 0; i < MAX_PROG_PAGES; i++) {
+        if (current_process->prog_pages[i] != 0) {
+            uint64_t new_phys = (uint64_t)alloc_page();
+            child->prog_pages[i] = new_phys;
+
+            uint8_t* src = (uint8_t*)(0x800000 + (i * 4096)); 
+            uint8_t* dst = (uint8_t*)new_phys;                
+            
+            for (int b = 0; b < 4096; b++) dst[b] = src[b];
+
+            map_page(child_pml4, 0x800000 + (i * 4096), new_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        } else {
+            child->prog_pages[i] = 0;
+        }
+    }
+
+    // 4. CLONAREA ȘI RELOCAREA STIVEI
+    print("[FORK DEBUG] Clonam stiva (16 KB)...\n");
+    
+    uint64_t parent_stack_start = current_process->stack_base;
+    uint64_t parent_stack_end = parent_stack_start + 16384;
+
+    // SANITY CHECK CRITIC: Registrele părintelui TREBUIE să fie pe stiva lui!
+    if ((uint64_t)parent_regs < parent_stack_start || (uint64_t)parent_regs >= parent_stack_end) {
+        print("[FORK FATAL] parent_regs NU este pe stiva procesului! Offset invalid.\n");
+        return 0;
+    }
+
+    uint8_t* raw_child_stack = (uint8_t*)malloc(16384 + 16);
+    if (!raw_child_stack) {
+        print("[FORK ERROR] Esec malloc stiva copil!\n");
+        return 0;
+    }
+    child->stack_base = (uint64_t)raw_child_stack; 
+
+    // Aliniem manual stiva copilului ca să aibă exact același rest (modulo 16) ca stiva părintelui
+    uint64_t child_start = (uint64_t)raw_child_stack;
+    while ((child_start & 0xF) != (parent_stack_start & 0xF)) {
+        child_start++;
+    }
+    uint8_t* child_stack_aligned = (uint8_t*)child_start;
+    uint8_t* parent_stack_ptr = (uint8_t*)parent_stack_start;
+
+    // Copiem octet cu octet
+    for (int i = 0; i < 16384; i++) {
+        child_stack_aligned[i] = parent_stack_ptr[i];
+    }
+    
+    // Relocăm toți pointerii interni (ex: RBP, RSP salvate)
+    print("[FORK DEBUG] Relocam pointerii din stiva...\n");
+    int64_t stack_offset = (int64_t)child_stack_aligned - (int64_t)parent_stack_start;
+    uint64_t* child_stack_qwords = (uint64_t*)child_stack_aligned;
+    
+    for (int i = 0; i < (16384 / 8); i++) {
+        if (child_stack_qwords[i] >= parent_stack_start && child_stack_qwords[i] <= parent_stack_end) {
+            child_stack_qwords[i] += stack_offset;
+        }
+    }
+    
+    // Găsim structura Registers în noua stivă
+    uint64_t regs_offset = (uint64_t)parent_regs - parent_stack_start;
+    Registers* child_regs = (Registers*)(child_start + regs_offset);
+    
+    // 5. MOMENTUL MAGIC: Setăm RAX = 0 pentru copil
+    child_regs->rax = 0;
+    
+    // Setăm RSP-ul final pentru scheduler
+    child->regs = *child_regs; 
+    child->regs.rsp = (uint64_t)child_regs;
+    
+    child->state = PROC_READY;
+    
+    print("[FORK SUCCESS] Copil creat cu PID: ");
+    print_number(child->pid);
+    print("\n");
+    
+    return child->pid;
 }
-*/

@@ -61,5 +61,5 @@ tools/nan3hdd hda_v3.img push nanoasm/julia.s /asm/julia.s
 
 
 echo "[Nano OS] Running Nano OS in QEMU..."
-make run
+make run_gfx
 
