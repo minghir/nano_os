@@ -51,6 +51,7 @@
 #define SYSCALL_FORK			44
 #define SYSCALL_CREATE_THREAD	45
 #define SYSCALL_THREAD_EXIT		46
+#define SYSCALL_YIELD			47
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {

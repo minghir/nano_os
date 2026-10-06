@@ -929,6 +929,12 @@ print("\n");
 			while (1) { __asm__ volatile ("hlt"); }
 			break;
 		}
+		case SYSCALL_YIELD: {
+			// Trebuie OBLIGATORIU să reactivăm întreruperile (sti) înainte de (hlt).
+			// Altfel, timer-ul (IRQ0) nu va putea trezi procesorul!
+			__asm__ volatile ("sti; hlt" ::: "memory");
+			break;
+		}
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

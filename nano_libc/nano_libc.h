@@ -9,6 +9,14 @@
 #include "../kernel/video.h"
 #include "nano_string.h"
 
+// Tipul de date pentru mutex (volatile ca să nu îl optimizeze compilatorul)
+typedef volatile int nano_mutex_t;
+
+// Inițializarea unui mutex (0 = deblocat, 1 = blocat)
+#define NANO_MUTEX_INIT 0
+
+// Funcția de BLOCARE (Lock)
+
 
 
 // 1. Definim structura exact cum este ea în kernel
@@ -490,6 +498,74 @@ static inline void nano_thread_exit() {
     );
     while(1);
 }
+
+static inline void nano_yield() {
+    register long rax_val __asm__("rax") = 47; // sau ce număr are SYSCALL_YIELD
+    __asm__ volatile ("int $0x80" : : "r" (rax_val) : "memory");
+}
+
+//Spinlock Atomic (Mutex în User-Space)
+//Procesoarele x86-64 au instrucțiuni speciale pe care nu le poate întrerupe nici măcar schedulerul tău. Cea mai utilă este xchg (exchange), care schimbă valoarea dintr-un registru cu una din memorie într-un singur ciclu de ceas atomic.
+//Spinlock-ul de mai sus funcționează perfect, dar are un dezavantaj pe un singur nucleu de procesor: dacă Thread-ul 2 vrea lacătul și Thread-ul 1 îl are, Thread-ul 2 se va învârti de mii de ori în while(1), consumând milisecundele prețioase de la scheduler degeaba, până când îi expiră timpul.
+//Un Mutex adevărat își dă seama că nu are rost să aștepte arzând CPU și cedează de bună voie controlul înapoi scheduler-ului!
+static inline void nano_mutex_spinlock(nano_mutex_t* lock) {
+    int expected = 1;
+    // Buclează până când reușește să schimbe 0 (liber) în 1 (blocat)
+    while (1) {
+        __asm__ volatile (
+            "xchg %0, %1"
+            : "+r" (expected), "+m" (*lock)
+            :
+            : "memory"
+        );
+        // Dacă valoarea anterioară era 0, înseamnă că am pus noi 1 și am luat lacătul!
+        if (expected == 0) {
+            break;
+        }
+        // Dacă era deja 1, altcineva are lacătul, așa că se învârte în buclă (Spin)
+        expected = 1; 
+    }
+}
+
+
+// 1. Funcția de BLOCARE (Yielding Lock) SYSCALL_YIELD
+static inline void nano_mutex_lock(nano_mutex_t* lock) {
+    int expected = 1;
+    while (1) {
+        // Încercăm să luăm lacătul atomic
+        __asm__ volatile (
+            "xchg %0, %1"
+            : "+r" (expected), "+m" (*lock)
+            :
+            : "memory"
+        );
+        
+        // Dacă era 0, am pus noi 1 și am câștigat lacătul! Ieșim din buclă.
+        if (expected == 0) {
+            break; 
+        }
+        
+        // Dacă era deja 1 (altcineva îl are), nu ardem procesorul degeaba!
+        // Cedăm execuția înapoi către scheduler până la următorul tic.
+        nano_yield(); 
+        
+        // Resetăm variabila pentru următoarea încercare
+        expected = 1;
+    }
+}
+
+
+// Funcția de DEBLOCARE (Unlock)
+static inline void nano_mutex_unlock(nano_mutex_t* lock) {
+    // Punem înapoi 0 (liber). Instrucțiunea de scriere pe x86 este natural atomică.
+    __asm__ volatile (
+        "movl $0, %0"
+        : "+m" (*lock)
+        :
+        : "memory"
+    );
+}
+
 
 
 #endif
