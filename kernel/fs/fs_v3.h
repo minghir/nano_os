@@ -24,13 +24,24 @@ typedef struct {
     uint32_t data_start;       // Unde începe zona de date brute
 } __attribute__((packed)) SuperblockV3;
 
-// Inodul (Metadatele fișierului/directorului)
+// Inodul (Metadatele fișierului/directorului - Multi-User & Timestamps)
 typedef struct {
-    uint32_t size;             // Dimensiunea reală în octeți
-    uint32_t first_sector;     // Primul sector din lanțul FAT
-    uint8_t  flags;            // 0x01 = File, 0x02 = Dir
-    uint8_t  reserved[3];      // Aliniere
-} __attribute__((packed)) InodeV3; // 12 octeți
+    uint32_t size;          // Dimensiunea reală în octeți
+    uint32_t first_sector;  // Primul sector din lanțul FAT
+    uint8_t  flags;         // 0x01 = File, 0x02 = Dir
+    uint8_t  reserved[3];   // Aliniere
+    
+    // Multi-User Extensions
+    uint32_t uid;           // ID-ul utilizatorului proprietar
+    uint32_t gid;           // ID-ul grupului proprietar
+    uint16_t permissions;   // Biții de permisiune (ex: 0755 sau 0644)
+    uint16_t reserved_perm; // Aliniere suplimentară pentru aliniere la multipli de 4 octeți
+
+    // Timestamps (Timp Unix timestamp în secunde sau un format intern de date/timp)
+    uint32_t create_time;   // Momentul creării fișierului
+    uint32_t modify_time;   // Ultima modificare a conținutului
+    
+} __attribute__((packed)) InodeV3;
 
 // Intrare în Director cu Nume Extins la 64 de caractere
 typedef struct {
@@ -41,7 +52,6 @@ typedef struct {
 void nfs3_init(void);
 void nfs3_format(void);
 void read_superblock(SuperblockV3* sb);
-
 
 int nfs3_get_file_at_index(int index, char* buffer, uint32_t max_len);
 

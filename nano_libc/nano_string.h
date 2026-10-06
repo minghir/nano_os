@@ -31,6 +31,7 @@
  int snprintf(char* str, uint32_t size, const char* format, ...);
 
 int strncmp(const char* s1, const char* s2, size_t n);
+int strcmp(const char* s1, const char* s2);
 
 #endif // STRING_H
 

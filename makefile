@@ -84,6 +84,7 @@ hdd_tools:
 apps: hdd_tools
 	$(MAKE) -C nano_libc APP=shell
 	$(MAKE) -C nano_libc APP=init
+	$(MAKE) -C nano_libc APP=su
 	$(MAKE) -C nano_libc APP=time
 	$(MAKE) -C nano_libc APP=date
 	$(MAKE) -C nano_libc APP=shutdown
@@ -105,6 +106,7 @@ apps: hdd_tools
 	$(MAKE) -C nano_libc APP=nanoasm
 	$(MAKE) -C nano_libc APP=nanovi
 	$(MAKE) -C nano_libc APP=watch
+	$(MAKE) -C nano_libc APP=whoami
 	$(MAKE) -C nano_libc APP=mp3_play
 	$(MAKE) -C nano_libc APP=wavplay
 	$(MAKE) -C nano_libc APP=chr
@@ -140,7 +142,7 @@ img_files:
 #    Rulare în QEMU
 # ============================
 
-run: run_gfx
+run: run_txt
 
 # Regula pentru Modul Grafic (GFX)
 run_gfx: clean boot_gfx.o $(OBJS) kernel.iso hdd_tools apps

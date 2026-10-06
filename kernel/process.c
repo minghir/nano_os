@@ -154,18 +154,23 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
         p->current_path[1] = '\0';
     }
 
+	// În process_create:
+	p->uid = current_process ? current_process->uid : 0; // Root by default dacă e init
+	p->gid = current_process ? current_process->gid : 0;
+
+
     // --- LOGURI DE DIAGNOSTIC PENTRU PROCES ȘI CALE ---
-    print("[PROC_CREATE] Nume: ");
-    print(p->name);
-    print(" | PID: ");
-    print_number(p->pid);
-    print(" | PPID: ");
-    print_number(p->ppid);
-    print(" | CWD Inod: ");
-    print_number(p->cwd_sector);
-    print(" | Cale: ");
-    print(p->current_path);
-    print("\n");
+    //print("[PROC_CREATE] Nume: ");
+    //print(p->name);
+    //print(" | PID: ");
+    //print_number(p->pid);
+    //print(" | PPID: ");
+    //print_number(p->ppid);
+    //print(" | CWD Inod: ");
+    //print_number(p->cwd_sector);
+    //print(" | Cale: ");
+    //print(p->current_path);
+    //print("\n");
     // --------------------------------------------------
     
     // 3. Alocăm stiva privată a programului (16 KB)

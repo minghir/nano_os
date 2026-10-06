@@ -52,6 +52,9 @@
 #define SYSCALL_CREATE_THREAD	45
 #define SYSCALL_THREAD_EXIT		46
 #define SYSCALL_YIELD			47
+#define SYSCALL_GETUID			48
+#define SYSCALL_SETUID			49
+
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {

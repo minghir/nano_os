@@ -34,6 +34,7 @@ typedef struct {
     uint32_t pid;
     uint32_t ppid;
     uint32_t state;
+	uint32_t uid;
     char name[32];
 } ProcessInfo;
 
@@ -222,7 +223,7 @@ void* memmove(void* dest, const void* src, size_t n);
 uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
 
 size_t strlen(const char* str);
-int strcmp(const char* s1, const char* s2);
+//int strcmp(const char* s1, const char* s2);
 char* strcpy(char* dest, const char* src);
 //int starts_with(const char* text, const char* prefix);
 
@@ -566,6 +567,22 @@ static inline void nano_mutex_unlock(nano_mutex_t* lock) {
     );
 }
 
+static inline uint32_t nano_getuid() {
+    register long rax_val __asm__("rax") = 48; // sau următorul număr liber de syscall
+    __asm__ volatile ("int $0x80\n\t" : "+r" (rax_val) : : "memory");
+    return (uint32_t)rax_val;
+}
 
+static inline int nano_setuid(uint32_t uid) {
+    register long rax_val __asm__("rax") = 49; // Numărul syscall-ului setuid
+    register long rdi_val __asm__("rdi") = (long)uid;
+    __asm__ volatile (
+        "int $0x80\n\t"
+        : "+r" (rax_val)
+        : "r" (rdi_val)
+        : "memory"
+    );
+    return (int)rax_val;
+}
 
 #endif

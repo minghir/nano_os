@@ -16,6 +16,7 @@
 #include "speaker.h"
 #include "drivers/sound/audio.h"
 #include "video.h"
+#include "auth.h"
 
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
@@ -598,6 +599,7 @@ print("\n");
                 uint32_t pid;
                 uint32_t ppid;
                 uint32_t state;
+				uint32_t uid;
                 char name[32];
             } ProcessInfo;
 
@@ -611,6 +613,7 @@ print("\n");
                     user_buf[count].pid = process_table[i].pid;
                     user_buf[count].ppid = process_table[i].ppid;
                     user_buf[count].state = process_table[i].state;
+					user_buf[count].uid   = process_table[i].uid;
                     
                     // Copiem numele
                     int j = 0;
@@ -935,6 +938,31 @@ print("\n");
 			__asm__ volatile ("sti; hlt" ::: "memory");
 			break;
 		}
+		case SYSCALL_GETUID:
+			uint32_t user_id = get_uid();
+			
+			// În x86-64, valoarea returnată de syscall se pune în rax pentru părinte.
+			// Pentru copil, sys_fork a setat deja explicit rax = 0 în stiva lui privată!
+			regs->rax = (uint64_t)user_id;
+			break;
+		case SYSCALL_SETUID: {
+            uint32_t new_uid = (uint32_t)regs->rdi; // Primim noul UID ca argument în RDI
+            
+            // Reguli de securitate elementare:
+            // Doar root (UID 0) poate schimba liber UID-ul oricui, 
+            // sau un proces își poate schimba propriul UID.
+            if (current_process->uid == 0 || current_process->uid == new_uid) {
+                current_process->uid = new_uid;
+                
+                // Opțional, actualizăm și GID-ul corespunzător (simplificat: GID = UID)
+                current_process->gid = new_uid; 
+                
+                regs->rax = 0; // Succes
+            } else {
+                regs->rax = (uint64_t)-1; // Eroare de permisiune (EPERM)
+            }
+            break;
+        }
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

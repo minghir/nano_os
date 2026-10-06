@@ -45,6 +45,12 @@ typedef struct {
     uint32_t cwd_sector;      // Current Working Directory! (Înlocuiește variabila globală)
 	char current_path[256];     // Calea text privată a procesului (ex: "/hda/data")
     
+	// --- User si Group
+	
+	uint32_t uid;       // User ID-ul proprietarului (ex: 0 = root, 1000 = user normal)
+    uint32_t gid;       // Group ID-ul principal
+    uint32_t euid;      // Effective UID (opțional, util pentru setuid binaries pe viitor)
+	
     // --- Memorie și Execuție ---
     Registers regs;           // Starea registrelor când e pus pe pauză
     uint64_t cr3;             // Paging (dacă folosești memorie virtuală)

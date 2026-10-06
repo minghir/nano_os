@@ -18,6 +18,8 @@ ifeq ($(APP),shell)
     OS_PATH = /sbin/shell
 else ifeq ($(APP),init)
     OS_PATH = /sbin/init
+else ifeq ($(APP),su)
+    OS_PATH = /sbin/su
 else ifeq ($(APP),time)
     OS_PATH = /sbin/time
 else ifeq ($(APP),date)
@@ -64,6 +66,8 @@ else ifeq ($(APP),nanovi)
     OS_PATH = /bin/vi
 else ifeq ($(APP),watch)
     OS_PATH = /bin/watch
+else ifeq ($(APP),whoami)
+    OS_PATH = /sbin/whoami
 else ifeq ($(APP),chr)
     OS_PATH = /tests/chr
 else ifeq ($(APP),argt)
