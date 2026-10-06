@@ -49,6 +49,9 @@
 #define SYSCALL_DRAW_FRAME		42
 #define SYSCALL_GET_DIR_ENTRIES	43
 #define SYSCALL_FORK			44
+#define SYSCALL_CREATE_THREAD	45
+#define SYSCALL_THREAD_EXIT		46
+
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {
     uint8_t xmm0[16];

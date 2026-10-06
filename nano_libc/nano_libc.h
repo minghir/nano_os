@@ -464,5 +464,32 @@ static inline int fork(void) {
     return (int)success;
 }
 
+static inline uint32_t nano_create_thread(void (*entry_point)(void*), void* arg) {
+    // Folosești constanta din header (dacă ai inclus syscall.h în user-space) 
+    // SAU pui direct 45 ca număr:
+    register long rax_val __asm__("rax") = 45; 
+    register long rdi_val __asm__("rdi") = (long)entry_point;
+    register long rsi_val __asm__("rsi") = (long)arg;
+
+    __asm__ volatile (
+        "int $0x80\n\t"
+        : "+r" (rax_val)
+        : "r" (rdi_val), "r" (rsi_val)
+        : "memory"
+    );
+
+    return (uint32_t)rax_val; 
+}
+
+static inline void nano_thread_exit() {
+    // Folosești numărul corect (46):
+    register long rax_val __asm__("rax") = 46; 
+    __asm__ volatile (
+        "int $0x80\n\t"
+        : : "r" (rax_val) : "memory"
+    );
+    while(1);
+}
+
 
 #endif

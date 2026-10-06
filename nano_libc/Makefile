@@ -78,8 +78,12 @@ else ifeq ($(APP),crash)
     OS_PATH = /tests/crash
 else ifeq ($(APP),test_fork)
     OS_PATH = /tests/test_fork
+else ifeq ($(APP),test_wait)
+    OS_PATH = /tests/test_wait
 else ifeq ($(APP),mem_test)
     OS_PATH = /tests/mem_test
+else ifeq ($(APP),test_thread)
+    OS_PATH = /tests/test_thread
 else
     # Valoare implicită pentru orice alt program nou
     OS_PATH = /bin/$(APP)

@@ -82,9 +82,19 @@ uint64_t schedule(uint64_t current_rsp) {
     current_process = next_proc;
 
     // 5. Schimbăm memoria virtuală (CR3)
-    if (current_process->cr3 != 0) {
-        __asm__ volatile("mov %0, %%cr3" :: "r"(current_process->cr3));
+    //if (current_process->cr3 != 0) {
+	//	__asm__ volatile("mov %0, %%cr3" :: "r"(current_process->cr3));
+    //}
+	// Oprește rescrierea redundantă a CR3-ului între thread-uri ale aceluiași proces
+    if (next_proc->cr3 != 0) {
+        uint64_t old_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+        if (old_cr3 != next_proc->cr3) {
+            __asm__ volatile("mov %0, %%cr3" :: "r"(next_proc->cr3));
+        }
     }
+	
+	
 
     return current_process->regs.rsp;
 }

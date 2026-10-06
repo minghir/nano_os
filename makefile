@@ -115,6 +115,8 @@ apps: hdd_tools
 	$(MAKE) -C nano_libc APP=crash
 	$(MAKE) -C nano_libc APP=mem_test
 	$(MAKE) -C nano_libc APP=test_fork
+	$(MAKE) -C nano_libc APP=test_wait
+	$(MAKE) -C nano_libc APP=test_thread
 
 	
 # ============================

@@ -11,7 +11,8 @@ int main(int argc, char* argv[]) {
     } else if (pid == 0) {
         // Suntem în procesul COPIL
         nano_print("-> [COPIL] Mi-am facut treaba.\n");
-        
+        while(1){
+		}
         // FOLOSEȘTE EXIT AICI ÎN LOC DE RETURN!
         nano_sys_exit(0); 
     } else {

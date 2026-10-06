@@ -255,3 +255,89 @@ uint32_t sys_fork(Registers* parent_regs) {
     
     return child->pid;
 }
+
+
+uint32_t thread_create(uint64_t entry_point, void* arg) {
+    PCB* p = 0;
+    
+    // 1. Căutăm un slot liber în tabela unificată de task-uri
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (process_table[i].state == PROC_FREE) {
+            p = &process_table[i];
+            p->tty_id = current_process ? current_process->tty_id : 0;
+            break;
+        }
+    }
+    
+    if (!p) {
+        print("[DEBUG] ERROR: Process table full! Cannot create thread.\n");
+        return 0;
+    }
+
+    // 2. MOȘTENIREA RESURSELOR (Magia thread-urilor):
+    // Thread-ul folosește EXACT ACEEAȘI memorie virtuală (CR3) și aceleași pagini ca procesul curent!
+    p->cr3 = current_process ? current_process->cr3 : kernel_cr3;
+    for (int i = 0; i < MAX_PROG_PAGES; i++) {
+        p->prog_pages[i] = current_process ? current_process->prog_pages[i] : 0;
+    }
+    
+    // Populăm datele de identificare
+    p->pid = next_pid++;
+    p->ppid = current_process ? current_process->pid : 0;
+    
+    string_copy(p->name, current_process ? current_process->name : "thread");
+    
+    p->cwd_sector = current_process ? current_process->cwd_sector : 1;
+    if (current_process) {
+        string_copy(p->current_path, current_process->current_path);
+    } else {
+        p->current_path[0] = '/';
+        p->current_path[1] = '\0';
+    }
+
+    // 3. Alocăm o stivă privată dedicată acestui thread (ex: 8 KB)
+    uint8_t* stack = (uint8_t*)malloc(8192);
+    if (!stack) {
+        print("[DEBUG] ERROR: malloc failed for thread stack!\n");
+        p->state = PROC_FREE;
+        return 0;
+    }
+    p->stack_base = (uint64_t)stack;
+    
+    // 4. Aliniem vârful stivei la 16 octeți
+    uint64_t stack_top = (uint64_t)(stack + 8192);
+    stack_top &= ~0xF; 
+
+    // 5. Pregătim structura de registre la vârful stivei
+    stack_top -= sizeof(Registers);
+    Registers* regs = (Registers*)stack_top;
+
+    // Zeroizăm registrele
+    uint8_t* byte_ptr = (uint8_t*)regs;
+    for (uint32_t i = 0; i < sizeof(Registers); i++) {
+        byte_ptr[i] = 0;
+    }
+
+    // 6. Setăm starea pentru IRETQ
+    // (Folosim aceleași segmente ca și procesul curent - ex: Ring 0 sau Ring 3)
+    regs->ss = 0x10;          
+    regs->rsp = stack_top + sizeof(Registers);  
+    regs->rflags = 0x202;     // Întreruperi activate (IF=1)
+    regs->cs = 0x08;          
+    regs->rip = entry_point;  
+
+    // 7. Putem pasa un argument prin RDI (convenție standard)
+    regs->rdi = (uint64_t)arg;
+
+    // 8. Salvăm RSP-ul în PCB
+    p->regs.rsp = stack_top;
+    
+    // 9. Îl punem în starea READY, gata de rulare de către scheduler
+    p->state = PROC_READY;
+    
+    print("[THREAD_CREATE] Thread creat cu succes | TID: ");
+    print_number(p->pid);
+    print("\n");
+
+    return p->pid; 
+}

@@ -269,7 +269,7 @@ print("\n");
             break;
         }
 		
-	
+	/*
 		case SYSCALL_EXIT: {
 			__asm__ volatile ("cli");
 			PCB* exiting_process = current_process;
@@ -381,7 +381,154 @@ print("\n");
             regs->rax = killed ? 1 : 0;
             break;
         }
+		*/
+		case SYSCALL_EXIT: {
+			__asm__ volatile ("cli");
+			PCB* exiting_process = current_process;
+			if (exiting_process) {
+				uint32_t parent_pid = exiting_process->ppid;
+				exiting_process->exit_code = (int)regs->rdi;
+
+				// --- PROTECȚIE MULTITHREADING (Thread Teardown) ---
+				// Oprim forțat și eliberăm stivele tuturor thread-urilor acestui proces (care împart același CR3)
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].state != PROC_FREE && 
+						process_table[i].pid != exiting_process->pid && 
+						process_table[i].cr3 == exiting_process->cr3) {
+						
+						// Am găsit un thread! Îi eliberăm doar stiva privată
+						if (process_table[i].stack_base) {
+							free((void*)process_table[i].stack_base);
+							process_table[i].stack_base = 0;
+						}
+						// Îl scoatem din scheduler
+						process_table[i].state = PROC_FREE;
+						process_table[i].pid = 0;
+						process_table[i].name[0] = '\0';
+					}
+				}
+				// --------------------------------------------------
+
+				// Folosim harta kernelului înainte de eliberarea paginilor procesului
+				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+				// Acum ESTE SIGUR să distrugem memoria, pentru că niciun thread nu o mai folosește
+				for (int p = 0; p < MAX_PROG_PAGES; p++) {
+					if (exiting_process->prog_pages[p] != 0) {
+						free_page((void*)exiting_process->prog_pages[p]);
+						exiting_process->prog_pages[p] = 0;
+					}
+				}
+
+				if (exiting_process->cr3) {
+					free_process_paging(exiting_process->cr3);
+					exiting_process->cr3 = 0;
+				}
+
+				// 1. Îl facem ZOMBIE (păstrăm PID-ul și ppid-ul ca părintele să-l poată culege prin wait)
+				exiting_process->state = PROC_ZOMBIE;
+				
+				int target_tty = exiting_process->tty_id;
+
+				// 2. Căutăm părintele și îl trezim din somn dacă aștepta
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].pid == parent_pid &&
+						process_table[i].state == PROC_SLEEPING) {
+						process_table[i].state = PROC_READY;
+						keyboard_flush();
+						break;
+					}
+				}
+				
+				ttys[target_tty].foreground_pid = parent_pid;
+			}
+
+			// 3. Predăm controlul: scoatem procesul curent și forțăm oprirea
+			current_process = NULL;
+			__asm__ volatile ("sti");
+
+			// Forțăm un hlt până la următorul tic de ceas; 
+			// schedulerul va prelua automat un alt proces READY din tabelă.
+			while (1) { __asm__ volatile ("hlt"); }
+			break;
+		}
 		
+		case SYSCALL_KILL: {
+			int target_pid = (int)regs->rdi;
+			if (target_pid <= 1) { regs->rax = (uint64_t)-1; break; }
+
+			if (current_process && current_process->pid == (uint32_t)target_pid) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+			
+			int killed = 0;
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				PCB* victim = &process_table[i];
+				if (victim->state != PROC_FREE && victim->pid == (uint32_t)target_pid) {
+					
+					// --- PROTECȚIE MULTITHREADING PENTRU KILL ---
+					// Omorâm și toate thread-urile victimei înainte să-i ștergem memoria
+					for (int t = 0; t < MAX_PROCESSES; t++) {
+						if (process_table[t].state != PROC_FREE &&
+							process_table[t].pid != victim->pid &&
+							process_table[t].cr3 == victim->cr3) {
+							
+							if (process_table[t].stack_base) {
+								free((void*)process_table[t].stack_base);
+								process_table[t].stack_base = 0;
+							}
+							process_table[t].state = PROC_FREE;
+							process_table[t].pid = 0;
+							process_table[t].name[0] = '\0';
+						}
+					}
+					// --------------------------------------------
+
+					// A. Eliberăm stiva (Heap) principală
+					if (victim->stack_base) {
+						free((void*)victim->stack_base);
+						victim->stack_base = 0;
+					}
+
+					// B. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
+					for (int p = 0; p < MAX_PROG_PAGES; p++) {
+						if (victim->prog_pages[p] != 0) {
+							free_page((void*)victim->prog_pages[p]);
+							victim->prog_pages[p] = 0;
+						}
+					}
+
+					// C. Eliberăm toate paginile Ierarhiei Paging
+					if (victim->cr3) {
+						free_process_paging(victim->cr3);
+						victim->cr3 = 0;
+					}
+
+					uint32_t parent_pid = victim->ppid;
+					victim->state = PROC_FREE;
+					victim->pid = 0;
+					victim->name[0] = '\0';
+					
+					int target_tty = victim->tty_id;
+					
+					for (int parent_idx = 0; parent_idx < MAX_PROCESSES; parent_idx++) {
+						PCB* parent = &process_table[parent_idx];
+						if (parent->pid == parent_pid && parent->state == PROC_SLEEPING) {
+							parent->state = PROC_READY;
+							keyboard_flush();
+							break;
+						}
+					}
+					ttys[target_tty].foreground_pid = parent_pid;
+					
+					killed = 1;
+					break;
+				}
+			}
+			regs->rax = killed ? 1 : 0;
+			break;
+		}
 		
 		case SYSCALL_WAIT: {
 			int has_children = 0;
@@ -428,6 +575,7 @@ print("\n");
 			}
 
 			// Când s-a trezit (pentru că un copil a murit), culegem copilul zombie
+			int found_after_sleep = 0;
 			for (int i = 0; i < MAX_PROCESSES; i++) {
 				if (process_table[i].state == PROC_ZOMBIE && process_table[i].ppid == current_process->pid) {
 					dead_child_pid = process_table[i].pid;
@@ -436,6 +584,9 @@ print("\n");
 					process_table[i].ppid = 0;
 					regs->rax = dead_child_pid;
 					break;
+				}
+				if (!found_after_sleep) { //fallback
+					regs->rax = (uint64_t)-1; // Eroare sau 0
 				}
 			}
 			break;
@@ -746,6 +897,36 @@ print("\n");
 			// În x86-64, valoarea returnată de syscall se pune în rax pentru părinte.
 			// Pentru copil, sys_fork a setat deja explicit rax = 0 în stiva lui privată!
 			regs->rax = (uint64_t)child_pid;
+			break;
+		}
+		case SYSCALL_CREATE_THREAD: {
+            uint64_t entry_point = regs->rdi; // Argumentul 1: adresa funcției
+            void* arg = (void*)regs->rsi;     // Argumentul 2: argumentul transmis funcției
+
+            // Apelăm funcția internă de kernel pe care ai creat-o
+            uint32_t tid = thread_create(entry_point, arg);
+
+            // Returnăm ID-ul thread-ului (TID) în RAX
+            regs->rax = (uint64_t)tid;
+            break;
+        }
+		case SYSCALL_THREAD_EXIT: {
+			__asm__ volatile ("cli");
+			if (current_process) {
+				// ATENȚIE: Nu apelăm free() pe stivă aici, deoarece încă rulăm pe ea!
+				// O lăsăm să fie eliberată în momentul în care slotul va fi reutilizat 
+				// de un alt thread nou, exact așa cum faci și la procese.
+
+				// Eliberăm doar slotul din tabelă
+				current_process->state = PROC_FREE;
+				current_process->pid = 0;
+				current_process->name[0] = '\0';
+			}
+			current_process = NULL;
+			__asm__ volatile ("sti");
+
+			// Forțăm schedulerul să preia un alt task
+			while (1) { __asm__ volatile ("hlt"); }
 			break;
 		}
 		default: {
