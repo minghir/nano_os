@@ -26,5 +26,6 @@ int main(int argc, char** argv) {
         nano_print("\n");
     }
     
-    return 0; // Se va transforma în SYSCALL_EXIT magic prin crt0.asm!
+    //return 0; // Se va transforma în SYSCALL_EXIT magic prin crt0.asm!
+    nano_sys_exit(0); // Ieșim din program cu codul 0
 }

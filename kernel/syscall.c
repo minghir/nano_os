@@ -424,7 +424,7 @@ print("\n");
 			current_process->state = PROC_SLEEPING;
 			
 			while (current_process->state == PROC_SLEEPING) {
-				__asm__ volatile ("sti; hlt");
+                __asm__ volatile ("sti; hlt" ::: "memory");
 			}
 
 			// Când s-a trezit (pentru că un copil a murit), culegem copilul zombie

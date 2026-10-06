@@ -25,6 +25,9 @@ isr_timer:
     sub rsp, 16
     movdqu [rsp], xmm0
 
+    mov r12, rsp
+    and rsp, -16
+
     ; 2. Apelăm funcția ta veche care numără tick-urile (opțional)
     call timer_irq
 
@@ -33,7 +36,7 @@ isr_timer:
     out 0x20, al
 
     ; 4. SCHEDULING! (Aici e magia)
-    mov rdi, rsp        ; RDI = argument 1 (current_rsp)
+    mov rdi, r12         ; RDI = argument 1 (current_rsp)
     call schedule       ; Apelăm C-ul! Returnează noul RSP în RAX.
     mov rsp, rax        ; SCHIMBĂM STIVA PE STIVA NOULUI PROCES! 
                         ; (CR3 a fost deja schimbat de C în interiorul funcției)

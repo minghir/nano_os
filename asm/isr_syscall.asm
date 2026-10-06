@@ -27,9 +27,12 @@ isr_syscall:
     ; ========================================================
     sub rsp, 24
 
-    ; Trimitem pointerul stivei (structura Registers) ca argument în RDI
-    mov rdi, rsp 
+    ; Păstrăm cadrul și aliniem stiva conform ABI-ului înainte de apelul C.
+    mov r12, rsp
+    mov rdi, r12
+    and rsp, -16
     call syscall_handler
+    mov rsp, r12
 
     ; Refacem stiva (ștergem spațiul alocat pentru xmm0 și padding)
     add rsp, 24

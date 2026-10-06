@@ -3,7 +3,7 @@ CC = gcc
 AS = nasm
 LD = ld
 
-CFLAGS = -m64 -ffreestanding -fno-pie -c -Wall -Wextra
+CFLAGS = -m64 -mno-red-zone -ffreestanding -fno-pie -c -Wall -Wextra
 ASFLAGS = -f elf64
 
 # Aplicația curentă (ex: make APP=ps sau make APP=shell)

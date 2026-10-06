@@ -249,14 +249,14 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
 
     for (int t = 0; t < MAX_TTYS; t++) {
-        uint64_t init_pages[8];
-        for (int p = 0; p < 8; p++) {
+        uint64_t init_pages[MAX_PROG_PAGES];
+        for (int p = 0; p < MAX_PROG_PAGES; p++) {
             init_pages[p] = (uint64_t)alloc_page();
         }
 
         uint64_t* init_pml4 = create_process_pml4();
 
-        for (int p = 0; p < 8; p++) {
+        for (int p = 0; p < MAX_PROG_PAGES; p++) {
             map_page(init_pml4,
                      0x800000 + (p * 4096),
                      init_pages[p],

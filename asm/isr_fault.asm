@@ -27,8 +27,11 @@ isr14:
     movdqu [rsp], xmm0
 
     ; 2. Trimitem pointerul la stivă ca argument (RDI) către funcția C page_fault_handler
-    mov rdi, rsp
+    mov r12, rsp
+    mov rdi, r12
+    and rsp, -16
     call page_fault_handler
+    mov rsp, r12
 
     ; 3. Restaurare registre
     movdqu xmm0, [rsp]

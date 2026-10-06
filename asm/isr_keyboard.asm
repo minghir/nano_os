@@ -23,7 +23,13 @@ isr_keyboard:
     sub rsp, 16
     movdqu [rsp], xmm0
 
+    mov r12, rsp
+    and rsp, -16
     call keyboard_irq
+    mov rsp, r12
+
+    mov al, 0x20
+    out 0x20, al
 
     movdqu xmm0, [rsp]
     add rsp, 16
@@ -43,9 +49,6 @@ isr_keyboard:
     pop rdx
     pop rcx
     pop rax
-
-    mov al, 0x20
-    out 0x20, al
 
     iretq
 
