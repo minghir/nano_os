@@ -1,0 +1,18 @@
+Cine ți-a făcut această listă știe exact cum se proiectează un sistem de operare serios! Sunt exact primitivele pe care se bazează orice kernel modern sau librărie standard (cum ar fi POSIX/pthreads).
+Toate aceste elemente au o logică impecabilă și duc Nano OS la următorul nivel de maturitate. Hai să le privim prin prisma a ceea ce ai deja și să vedem cam care ar fi ordinea naturală de atac:
+1. Thread Detached & Reclaim automat al stivelor (Prioritate: Mare 🔴)
+•	Problema acum: În testul tău de join, dacă un thread își dă exit, el rămâne în starea ZOMBIE până când cineva îi dă join. Dar ce-ar fi dacă vrei să pornești un thread de fundal (de ex. un player audio sau un daemon) pe care nu vrei să îl aștepți niciodată? Dacă nimeni nu dă join pe el, rămâne blocat în tabelă ca ZOMBIE pe vecie (Memory Leak).
+•	Soluția: Un flag detached în PCB. Dacă un thread e creat ca detached, în momentul în care apelează SYSCALL_THREAD_EXIT, kernelul îi eliberează singur stiva și resetează slotul la PROC_FREE instant, fără să mai lase cadavrul pe ¯\(ツ)/¯.
+2. Sleep Queue / Wait Queue adevărată (Prioritate: Medie-Mare 🟡)
+•	Problema acum: Când un proces vrea să trezească pe altcineva sau când face join, kernelul tău scanează liniar toată tabela process_table (for (int i = 0; i < MAX_PROCESSES; i++)). La 50 de thread-uri e ok, dar la mii sau într-un sistem încărcat devine ineficient.
+•	Soluția: În loc să scanezi toată tabela de procese ca să găsești cine așteaptă după un TID sau un mutex, fiecare obiect de sincronizare (sau fiecare stare) poate avea propria sa coadă simplă de aşteptare (wait queue).
+3. Semafoare (Semaphores) (Prioritate: Medie 🟢)
+•	Ai un mutex (care e un lacăt binar: 0 sau 1). Un semafor este un mutex cu contor (poate permite $N$ accesări simultane). Este excelent pentru probleme de tip Producer-Consumer (de exemplu, o coadă de mesaje între tastatură și shell sau între procese).
+4. Condition Variables (Prioritate: Medie 🔵)
+•	Sunt perechea ideală pentru mutex-uri. Îi permit unui thread să adoarmă elegant pe o condiție („Așteaptă până când bufferul nu mai este gol”) fără să facă bucle consumatoare de CPU (busy waiting), trezindu-se instant când un alt thread semnalizează (signal/broadcast).
+5. Reader/Writer Locks (Prioritate: Mică / Avansată 🟣)
+•	Optimizare fină pentru cazurile în care ai multe thread-uri care doar citesc date și foarte puține care scriu. Permite citire concurentă simultană, dar blochează totul strict la scriere.
+Cu ce începem?
+Dacă ar fi să alegem pasul următor cel mai util pentru stabilitatea stivei de multithreading pe care tocmai ai construit-o, Thread-urile Detached și Reclaim-ul automat ar completa perfect familia de thread-uri.
+Vrei să creăm mecanismul de thread-uri detached sau preferi să trecem la semafoare?
+

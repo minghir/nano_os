@@ -501,14 +501,30 @@ static inline uint32_t nano_create_thread(void (*entry_point)(void*), void* arg)
     return (uint32_t)rax_val; 
 }
 
-static inline void nano_thread_exit() {
-    // Folosești numărul corect (46):
-    register long rax_val __asm__("rax") = 46; 
+static inline uint32_t nano_thread_create(void* entry_point, void* arg) {
+    uint64_t tid;
     __asm__ volatile (
-        "int $0x80\n\t"
-        : : "r" (rax_val) : "memory"
+        "mov $24, %%rax\n"     // IMPORTANT: Înlocuiește 24 cu numărul tău real pentru SYSCALL_CREATE_THREAD
+        "mov %1, %%rdi\n"
+        "mov %2, %%rsi\n"
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r" (tid)
+        : "r" ((uint64_t)entry_point), "r" ((uint64_t)arg)
+        : "rax", "rdi", "rsi"
     );
-    while(1);
+    return (uint32_t)tid;
+}
+
+
+static inline void nano_thread_exit(int exit_code) {
+    __asm__ volatile (
+        "mov $46, %%rax\n"     // 25 = înlocuiește cu numărul tău pentru SYSCALL_THREAD_EXIT
+        "mov %0, %%rdi\n"
+        "int $0x80\n"
+        :: "r" ((uint64_t)exit_code) : "rax", "rdi"
+    );
+    while(1); // Nu ar trebui să se mai întoarcă aici niciodată
 }
 
 static inline void nano_yield() {
@@ -577,6 +593,34 @@ static inline void nano_mutex_unlock(nano_mutex_t* lock) {
         : "memory"
     );
 }
+
+static inline int nano_thread_join(uint32_t tid) {
+    uint64_t ret;
+    
+    while (1) {
+        __asm__ volatile (
+            "mov $50, %%rax\n"     // Folosește numărul corect de syscall pentru JOIN
+            "mov %1, %%rdi\n"
+            "int $0x80\n"
+            "mov %%rax, %0\n"
+            : "=r" (ret)
+            : "r" ((uint64_t)tid)
+            : "rax", "rdi"
+        );
+        
+        // Dacă am primit -2, înseamnă că syscall-ul tocmai ne-a trecut în SLEEPING.
+        // Imediat cum se termină `int 0x80`, noi (firul curent) suntem adormiți de kernel.
+        // Așa că bucla asta NU VA CONSUMA CPU. 
+        // Când copilul moare, ne trezește (ne face READY), iar noi dăm automat un nou `int 0x80`!
+        if ((int64_t)ret != -2) {
+            break; // A returnat un cod real sau -1 (eroare), putem ieși.
+        }
+    }
+    
+    return (int)ret;
+}
+
+
 
 static inline uint32_t nano_getuid() {
     register long rax_val __asm__("rax") = 48; // sau următorul număr liber de syscall

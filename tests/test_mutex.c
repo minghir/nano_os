@@ -18,7 +18,7 @@ void worker_thread(void* arg) {
         // Așteptăm un pic neblocați ca să dăm șansa și părintelui
         for (volatile int d = 0; d < 5000000; d++); 
     }
-    nano_thread_exit();
+    nano_thread_exit(0);
 }
 
 int main() {

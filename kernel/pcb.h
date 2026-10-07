@@ -65,5 +65,7 @@ typedef struct {
     // --- Control ---
     int exit_code;            // Codul returnat la final (ex: return 0 din main)
 	int tty_id;               // TTY-ul de care aparține procesul
+	
+	uint32_t waiting_for_tid;   // ID-ul thread-ului pe care acest task îl așteaptă (prin join)
 } PCB;
 #endif

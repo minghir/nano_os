@@ -36,7 +36,7 @@ void worker_thread(void* arg) {
     nano_print("] Mi-am terminat treaba. Ies curat.\n");
     nano_mutex_unlock(&screen_lock);
     
-    nano_thread_exit();
+    nano_thread_exit(0);
 }
 
 int main(int argc, char* argv[]) {

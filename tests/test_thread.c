@@ -58,7 +58,7 @@ void worker_thread(void* arg) {
     }
     
     nano_print("[THREAD SECUNDAR] Mi-am terminat treaba. Ies curat.\n");
-    nano_thread_exit();
+    nano_thread_exit(0);
 }
 
 int main(int argc, char* argv[]) {

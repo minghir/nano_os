@@ -99,7 +99,7 @@ void kill_process_by_pid(uint32_t pid) {
         }
     }
 }
-
+/*
 // Creează o copie completă a paginilor de program ale unui proces
 uint64_t* fork_process_memory(uint64_t* parent_prog_pages, uint64_t* new_child_pml4) {
     // Alocăm un nou array pentru paginile copilului
@@ -135,7 +135,7 @@ uint64_t* fork_process_memory(uint64_t* parent_prog_pages, uint64_t* new_child_p
     }
     return child_pages;
 }
-
+*/
 uint32_t sys_fork(Registers* parent_regs) {
     if (!current_process) return 0;
     

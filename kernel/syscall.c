@@ -916,14 +916,26 @@ print("\n");
 		case SYSCALL_THREAD_EXIT: {
 			__asm__ volatile ("cli");
 			if (current_process) {
-				// ATENȚIE: Nu apelăm free() pe stivă aici, deoarece încă rulăm pe ea!
-				// O lăsăm să fie eliberată în momentul în care slotul va fi reutilizat 
-				// de un alt thread nou, exact așa cum faci și la procese.
+				// 1. În loc de PROC_FREE, îl trecem în PROC_ZOMBIE
+				// Asta permite părinților să găsească thread-ul și să îi citească rezultatul
+				current_process->state = PROC_ZOMBIE;
+				
+				// Salvăm codul de ieșire primit prin RDI (dacă implementezi un exit(code))
+				current_process->exit_code = (int)regs->rdi; 
 
-				// Eliberăm doar slotul din tabelă
-				current_process->state = PROC_FREE;
-				current_process->pid = 0;
-				current_process->name[0] = '\0';
+				// 2. Trezim orice thread care stătea blocat în "join" așteptând acest PID
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].state == PROC_SLEEPING && 
+						process_table[i].waiting_for_tid == current_process->pid) {
+						
+						// Îl facem READY pentru a fi preluat din nou de scheduler
+						process_table[i].state = PROC_READY;
+						process_table[i].waiting_for_tid = 0;
+					}
+				}
+
+				// ATENȚIE: Nu apelăm free() pe stivă aici, deoarece încă rulăm pe ea!
+				// O lăsăm să fie eliberată curat și sigur de către SYSCALL_THREAD_JOIN.
 			}
 			current_process = NULL;
 			__asm__ volatile ("sti");
@@ -936,6 +948,49 @@ print("\n");
 			// Trebuie OBLIGATORIU să reactivăm întreruperile (sti) înainte de (hlt).
 			// Altfel, timer-ul (IRQ0) nu va putea trezi procesorul!
 			__asm__ volatile ("sti; hlt" ::: "memory");
+			break;
+		}
+		case SYSCALL_THREAD_JOIN: {
+			uint32_t target_tid = (uint32_t)regs->rdi;
+			PCB* target = NULL;
+
+			// 1. Căutăm thread-ul în tabelă
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].pid == target_tid && process_table[i].state != PROC_FREE) {
+					target = &process_table[i];
+					break;
+				}
+			}
+
+			// Dacă nu există sau a fost deja eliberat complet, ieșim cu -1
+			if (!target) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			// 2. Dacă thread-ul încă rulează, îi spunem procesului curent să se culce 
+			// și returnăm -2 ca să știe librăria că trebuie să reapeleze syscall-ul mai târziu.
+			if (target->state != PROC_ZOMBIE) {
+				current_process->state = PROC_SLEEPING;
+				current_process->waiting_for_tid = target_tid;
+				
+				regs->rax = (uint64_t)-2; // -2 înseamnă "Încă rulează, try again"
+				break; // IEȘIM imediat din syscall! Fără bucle while în kernel!
+			}
+
+			// 3. În acest punct, target este 100% ZOMBIE. Preluăm codul returnat.
+			regs->rax = (uint64_t)target->exit_code;
+
+			// 4. ELIBERAREA MEMORIEI
+			if (target->stack_base) {
+				free((void*)target->stack_base); 
+				target->stack_base = 0;
+			}
+
+			// 5. Eliberăm definitiv slotul
+			target->state = PROC_FREE;
+			target->pid = 0;
+			target->name[0] = '\0';
 			break;
 		}
 		case SYSCALL_GETUID:

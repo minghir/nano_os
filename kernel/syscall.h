@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 
-
+/*
 // Codurile pentru Syscall-uri (System Call Numbers)
 #define SYSCALL_PRINT       1  // Afișează un șir de caractere (string) pe ecran
 #define SYSCALL_READLINE    2  // Citește o linie de text de la tastatură într-un buffer
@@ -54,7 +54,62 @@
 #define SYSCALL_YIELD			47
 #define SYSCALL_GETUID			48
 #define SYSCALL_SETUID			49
+#define SYSCALL_THREAD_JOIN		50
 
+*/
+
+typedef enum {
+    SYSCALL_PRINT = 1,
+    SYSCALL_READLINE,
+    SYSCALL_MALLOC,
+    SYSCALL_SLEEP,
+    SYSCALL_DATETIME,
+    SYSCALL_EXEC,
+    SYSCALL_SHUTDOWN,
+    SYSCALL_LIST_FILES,
+    SYSCALL_CD,
+    SYSCALL_CREATE_FILE,
+    SYSCALL_WRITE_FILE,
+    SYSCALL_FORMAT,
+    SYSCALL_DELETE_FILE,
+    SYSCALL_READ_FILE,
+    SYSCALL_MKDIR,
+    SYSCALL_PRINT_INT,
+    SYSCALL_READ_CHAR,
+    SYSCALL_CLEAR_SCREEN,
+    SYSCALL_PWD,
+    SYSCALL_EXIT,
+    SYSCALL_PS,
+    SYSCALL_WAIT,
+    SYSCALL_KILL,
+    SYSCALL_MEMINFO,
+    SYSCALL_GETCWD,
+    SYSCALL_NEWLINE,
+    SYSCALL_SYSLOG,
+    SYSCALL_GETLOG,
+    SYSCALL_HAS_CHAR,
+    SYSCALL_FREE,
+    SYSCALL_PRINT_FLOAT,
+    SYSCALL_REBOOT,
+    SYSCALL_GETPID,
+    SYSCALL_BEEP,
+    SYSCALL_SET_CURSOR_SHAPE,
+    SYSCALL_PLAY_AUDIO,
+    SYSCALL_MOUNT,
+    SYSCALL_FDISK,
+    SYSCALL_DISK_STATS,
+    SYSCALL_VIDEO_INFO,
+    SYSCALL_SWAP_VIDEO_BUFFERS,
+    SYSCALL_DRAW_FRAME,
+    SYSCALL_GET_DIR_ENTRIES,
+    SYSCALL_FORK,
+    SYSCALL_CREATE_THREAD,
+    SYSCALL_THREAD_EXIT,
+    SYSCALL_YIELD,
+    SYSCALL_GETUID,
+    SYSCALL_SETUID,
+    SYSCALL_THREAD_JOIN
+} SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
 typedef struct {

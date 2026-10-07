@@ -35,7 +35,7 @@ void worker(void* arg)
     nano_print_int(id);
     nano_print("] done\n");
 
-    nano_thread_exit();
+    nano_thread_exit(0);
 }
 
 int main()

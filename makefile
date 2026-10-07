@@ -80,49 +80,12 @@ kernel.bin: $(OBJS)
 
 hdd_tools:
 	$(MAKE) -C tools
+	
+tests: hdd_tools
+	$(MAKE) -C tests
 		
-apps: hdd_tools
-	$(MAKE) -C nano_libc APP=shell
-	$(MAKE) -C nano_libc APP=init
-	$(MAKE) -C nano_libc APP=su
-	$(MAKE) -C nano_libc APP=time
-	$(MAKE) -C nano_libc APP=date
-	$(MAKE) -C nano_libc APP=shutdown
-	$(MAKE) -C nano_libc APP=ls
-	$(MAKE) -C nano_libc APP=format
-	$(MAKE) -C nano_libc APP=rm
-	$(MAKE) -C nano_libc APP=cat
-	$(MAKE) -C nano_libc APP=mkdir
-	$(MAKE) -C nano_libc APP=touch
-	$(MAKE) -C nano_libc APP=cp
-	$(MAKE) -C nano_libc APP=mv
-	$(MAKE) -C nano_libc APP=df
-	$(MAKE) -C nano_libc APP=pwd
-	$(MAKE) -C nano_libc APP=ps
-	$(MAKE) -C nano_libc APP=kill
-	$(MAKE) -C nano_libc APP=free
-	$(MAKE) -C nano_libc APP=dmesg
-	$(MAKE) -C nano_libc APP=mandel
-	$(MAKE) -C nano_libc APP=nanoasm
-	$(MAKE) -C nano_libc APP=nanovi
-	$(MAKE) -C nano_libc APP=watch
-	$(MAKE) -C nano_libc APP=whoami
-	$(MAKE) -C nano_libc APP=mp3_play
-	$(MAKE) -C nano_libc APP=wavplay
-	$(MAKE) -C nano_libc APP=chr
-	$(MAKE) -C nano_libc APP=argt
-	$(MAKE) -C nano_libc APP=test_malloc
-	$(MAKE) -C nano_libc APP=test_sleep
-	$(MAKE) -C nano_libc APP=tsr_sleep2
-	$(MAKE) -C nano_libc APP=crash
-	$(MAKE) -C nano_libc APP=mem_test
-	$(MAKE) -C nano_libc APP=test_fork
-	$(MAKE) -C nano_libc APP=test_wait
-	$(MAKE) -C nano_libc APP=test_thread
-	$(MAKE) -C nano_libc APP=test_mutex
-	$(MAKE) -C nano_libc APP=mthreads_test
-	$(MAKE) -C nano_libc APP=mthr_test2
-
+apps: hdd_tools tests
+	$(MAKE) -C src
 	
 # ============================
 #    ISO cu GRUB
@@ -134,7 +97,7 @@ iso/boot/kernel.bin: kernel.bin
 	
 kernel.iso: iso/boot/kernel.bin hdd_tools
 	grub-mkrescue -o kernel.iso iso
-	./init_hdd.sh
+	#
 	
 img_files:
 	qemu-img create -f raw hda_v3.img 50M
@@ -146,20 +109,22 @@ img_files:
 run: run_txt
 
 # Regula pentru Modul Grafic (GFX)
-run_gfx: clean boot_gfx.o $(OBJS) kernel.iso hdd_tools apps
+run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
+	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-vga std \
 		-display sdl
-		
+	./init_hdd.sh	
 # Regula pentru Modul Text (TXT)
-run_txt: clean boot_txt.o $(OBJS) kernel.iso hdd_tools apps
+run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
+	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-display curses
-
+	
 #run: kernel.iso hdd_tools apps 
 #	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display sdl
 	#qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk  -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -device AC97,audiodev=snd0
@@ -175,9 +140,10 @@ run_txt: clean boot_txt.o $(OBJS) kernel.iso hdd_tools apps
 # ============================
 
 clean:
-	rm -f *.o kernel/*.o boot/*.o src/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
+	$(MAKE) -C src clean
+	$(MAKE) -C tests clean
+	rm -f *.o kernel/*.o boot/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
 	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o kernel/gfx/*.o
 	rm -rf iso/boot/kernel.bin
-	rm -f nano_libc/*.o nano_libc/*.bin
 	rm -f tools/nan2hdd tools/nan3hdd
 	rm -f hda_v3.img hdb_v3.img
