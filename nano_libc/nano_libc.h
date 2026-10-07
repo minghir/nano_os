@@ -231,7 +231,18 @@ char* strcpy(char* dest, const char* src);
 int atoi(const char* str);
 char* itoa(int value, char* str, int base);
 
-void sleep(uint32_t milliseconds);
+static inline void nano_sleep(uint32_t milliseconds) {
+    __asm__ volatile (
+        "int $0x80"
+        : // Nu avem variabile de ieșire
+        : "a" ((uint64_t)SYSCALL_SLEEP), "D" ((uint64_t)milliseconds) // "a" forțează RAX = 4, "D" forțează RDI = milliseconds
+        : "cc", "memory"
+    );
+}
+
+static inline void sleep(uint32_t milliseconds) {
+	return nano_sleep(milliseconds);
+}
 
 // 2. Funcția pe care o va apela programul tău
 void get_time(DateTime* dt);

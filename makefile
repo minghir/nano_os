@@ -121,6 +121,7 @@ apps: hdd_tools
 	$(MAKE) -C nano_libc APP=test_thread
 	$(MAKE) -C nano_libc APP=test_mutex
 	$(MAKE) -C nano_libc APP=mthreads_test
+	$(MAKE) -C nano_libc APP=mthr_test2
 
 	
 # ============================

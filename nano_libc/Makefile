@@ -90,8 +90,8 @@ else ifeq ($(APP),test_thread)
     OS_PATH = /tests/test_thread
 else ifeq ($(APP),test_mutex)
     OS_PATH = /tests/test_mutex
-else ifeq ($(APP),mthreads_test)
-    OS_PATH = /tests/mthreads_test
+else ifeq ($(APP),mthr_test2)
+    OS_PATH = /tests/mthr_test2
 else
     # Valoare implicită pentru orice alt program nou
     OS_PATH = /bin/$(APP)

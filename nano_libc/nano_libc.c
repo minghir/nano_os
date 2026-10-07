@@ -157,14 +157,7 @@ char* itoa(int value, char* str, int base) {
     return str;
 }
 
-void sleep(uint32_t milliseconds) {
-    __asm__ volatile (
-        "int $0x80"
-        : // Nu avem variabile de ieșire
-        : "a" ((uint64_t)SYSCALL_SLEEP), "D" ((uint64_t)milliseconds) // "a" forțează RAX = 4, "D" forțează RDI = milliseconds
-        : "cc", "memory"
-    );
-}
+
 
 void get_time(DateTime* dt) {
     __asm__ volatile (
