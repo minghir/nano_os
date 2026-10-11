@@ -10,7 +10,7 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c) $(wildcard kernel/gfx/*.c)
+C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c) $(wildcard kernel/gfx/*.c) $(wildcard kernel/drivers/network/*.c) $(wildcard kernel/drivers/network/e1000/*.c)
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
@@ -115,6 +115,8 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-vga std \
+		-net nic,model=e1000 \
+		-net user \
 		-display sdl
 	./init_hdd.sh	
 # Regula pentru Modul Text (TXT)
@@ -123,6 +125,8 @@ run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
+		-net nic,model=e1000 \
+		-net user \
 		-display curses
 	
 #run: kernel.iso hdd_tools apps 

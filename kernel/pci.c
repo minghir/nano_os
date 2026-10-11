@@ -2,8 +2,12 @@
 
 #include "pci.h"
 #include "io.h"     
+#include "syslog.h"
+#include "string.h"
 #include "drivers/sound/audio.h"
 #include "drivers/sound/ac97/ac97.h"
+#include "drivers/network/network.h"
+#include "drivers/network/e1000/e1000.h"
 // #include "sys.h" // Dacă ai funcții de print/log în kernel
 
 // Citirea unui registru PCI (pe 32 de biți)
@@ -61,7 +65,7 @@ void pci_scan_bus() {
 
                 // Verificăm dacă este AC'97 Controller (Intel: Vendor 0x8086, Device 0x2415)
 				if (vendor_id == 0x8086 && device_id == 0x2415) {
-					print("[PCI] Gasit controler audio Intel AC'97!\n");
+					KLOG_INFO("[PCI] Gasit controler audio Intel AC'97!\n");
 					
 					// 1. Citim BAR0 (Mixer Base Address) și BAR1 (Bus Master Base Address)
 					uint32_t bar0 = pci_config_read(bus, slot, func, 0x10);
@@ -83,6 +87,41 @@ void pci_scan_bus() {
 					AudioDriver* audio_drv = ac97_get_driver();
 					if (audio_drv && audio_drv->init) {
 						audio_drv->init(mixer_base, bm_base);
+					}
+				}
+				
+				// Verificăm dacă este Intel e1000 Network Card (Vendor: 0x8086, Device: 0x100E)
+				if (vendor_id == 0x8086 && device_id == 0x100E) {
+					KLOG_INFO("[PCI] Gasit placa de retea Intel e1000!\n");
+					
+					// 1. E1000 folosește în principal BAR0 ca Memory-Mapped I/O (MMIO), nu porturi I/O!
+					uint32_t bar0 = pci_config_read(bus, slot, func, 0x10);
+					
+					// Verificăm dacă BAR0 este de tip Memory Space (bitul 0 ar trebui să fie 0)
+					uint64_t mmio_base = (bar0 & 0xFFFFFFF0); // Adresa fizică de 32 de biți
+
+					// 2. Activăm Bus Master (bit 2) și Memory Space Access (bit 1) în Command Register (Offset 0x04)
+					uint32_t cmd_reg = pci_config_read(bus, slot, func, 0x04);
+					cmd_reg |= (1 << 2) | (1 << 1); // Bus Master + Memory Space
+					pci_config_write(bus, slot, func, 0x04, cmd_reg);
+
+					// 3. Citim linia de întrerupere (IRQ) de la offset-ul 0x3C (байtul inferior)
+					uint32_t reg_line = pci_config_read(bus, slot, func, 0x3C);
+					uint8_t irq = (uint8_t)(reg_line & 0xFF);
+					
+					// Folosim snprintf (pe care îl ai în string.h) ca să formatăm informația într-un buffer
+					char log_buf[128];
+					snprintf(log_buf, sizeof(log_buf), "   -> MMIO Base: 0x%x, IRQ Line: %d\n", (uint32_t)mmio_base, irq);
+					KLOG_INFO(log_buf);
+
+					// 4. Inițializăm driverul e1000 trecându-i adresa MMIO
+					// Înregistrăm driverul în subsistemul de rețea
+					net_register_driver(e1000_get_driver());
+
+					// Inițializăm folosind interfețele vtable
+					NetDriver* net_drv = e1000_get_driver();
+					if (net_drv && net_drv->init) {
+						net_drv->init(mmio_base, irq);
 					}
 				}
 

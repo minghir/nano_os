@@ -108,7 +108,8 @@ typedef enum {
     SYSCALL_YIELD,
     SYSCALL_GETUID,
     SYSCALL_SETUID,
-    SYSCALL_THREAD_JOIN
+    SYSCALL_THREAD_JOIN,
+	SYSCALL_NET_SEND
 } SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly

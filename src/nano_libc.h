@@ -640,4 +640,26 @@ static inline int nano_setuid(uint32_t uid) {
     return (int)rax_val;
 }
 
+static inline int nano_net_send(const void* data, uint32_t length) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_NET_SEND), "D" (data), "S" (length)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int nano_ping(uint32_t dest_ip) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_NET_SEND), "D" (dest_ip)
+        : "memory"
+    );
+    return ret;
+}
+
 #endif

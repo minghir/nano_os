@@ -15,6 +15,7 @@
 #include "string.h"
 #include "speaker.h"
 #include "drivers/sound/audio.h"
+#include "drivers/network/network.h"
 #include "video.h"
 #include "auth.h"
 
@@ -1018,6 +1019,63 @@ print("\n");
             }
             break;
         }
+		case SYSCALL_NET_SEND: {
+			KLOG_INFO("[SYSCALL] Primit SYSCALL_NET_SEND (Ping)\n");
+			
+			uint32_t dest_ip = (uint32_t)regs->rdi;
+
+			uint8_t packet[128];
+			for (int i = 0; i < sizeof(packet); i++) packet[i] = 0;
+
+			// --- Construirea pachetului Ethernet / IPv4 / ICMP ---
+			for (int i = 0; i < 6; i++) packet[i] = 0xFF; // Broadcast
+			
+			uint8_t my_mac[6];
+			net_get_mac(my_mac);
+			for (int i = 0; i < 6; i++) packet[6 + i] = my_mac[i];
+			
+			packet[12] = 0x08; packet[13] = 0x00; // IPv4
+
+			packet[14] = 0x45; 
+			packet[15] = 0x00; 
+			packet[16] = 0x00; packet[17] = 42; 
+			packet[18] = 0xAB; packet[19] = 0xCD; 
+			packet[20] = 0x00; packet[21] = 0x00; 
+			packet[22] = 64;   
+			packet[23] = 1;    // ICMP
+			packet[24] = 0x00; packet[25] = 0x00; 
+
+			packet[26] = 10; packet[27] = 0; packet[28] = 2; packet[29] = 15; // IP Sursă
+			packet[30] = (dest_ip >> 24) & 0xFF;
+			packet[31] = (dest_ip >> 16) & 0xFF;
+			packet[32] = (dest_ip >> 8) & 0xFF;
+			packet[33] = dest_ip & 0xFF; // IP Destinație
+
+			packet[34] = 8;    // ICMP Echo Request
+			packet[35] = 0;    
+			packet[36] = 0; packet[37] = 0; 
+			packet[38] = 0x12; packet[39] = 0x34; 
+			packet[40] = 0x00; packet[41] = 0x01; 
+
+			// 1. Salvăm CR3-ul curent (al procesului de user-space)
+			uint64_t old_cr3;
+			__asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+
+			// 2. Obținem și comutăm pe CR3-ul de bază al kernelului 
+			// (Poți folosi variabialta ta globală de kernel_cr3 sau poți citi PML4-ul inițial/de sistem)
+			// Dacă ai o variabilă globală kernel_cr3, o folosești direct:
+			extern uint64_t kernel_cr3; // sau cum o ai denumită în kernelul tău
+			__asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+			// 3. Apelăm transmisia prin driverul e1000 (acum vizibil în spațiul kernel)
+			net_send_packet(packet, 60);
+
+			// 4. Revenim la CR3-ul procesului de user-space înainte de a ieși din syscall
+			__asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+			
+			regs->rax = 0; // Succes
+			break;
+		}
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);
