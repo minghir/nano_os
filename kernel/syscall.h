@@ -110,7 +110,18 @@ typedef enum {
     SYSCALL_SETUID,
     SYSCALL_THREAD_JOIN,
 	SYSCALL_NET_SEND,
-	SYSCALL_NET_RECV
+	SYSCALL_NET_RECV,
+	// --- Noi syscall-uri pentru rețea / sockets în User-Space ---
+    SYSCALL_SOCKET,
+    SYSCALL_BIND,
+    SYSCALL_LISTEN,
+    SYSCALL_ACCEPT,
+    SYSCALL_SEND,
+    SYSCALL_RECV,
+    SYSCALL_CLOSE,
+	SYSCALL_TTY_INJECT,
+	SYSCALL_SET_TTY,
+	SYSCALL_READ_TTY_OUTPUT
 } SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly

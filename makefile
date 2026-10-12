@@ -10,7 +10,18 @@ CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
-C_SOURCES = $(wildcard kernel/*.c)  $(wildcard kernel/drivers/*.c) $(wildcard kernel/drivers/sound/*.c) $(wildcard kernel/drivers/sound/ac97/*.c) $(wildcard kernel/fs/*.c) $(wildcard kernel/gfx/*.c) $(wildcard kernel/drivers/network/*.c) $(wildcard kernel/drivers/network/e1000/*.c)
+C_SOURCES = $(wildcard kernel/*.c)  \
+			$(wildcard kernel/drivers/*.c) \
+			$(wildcard kernel/drivers/sound/*.c) \
+			$(wildcard kernel/drivers/sound/ac97/*.c) \
+			$(wildcard kernel/fs/*.c) \
+			$(wildcard kernel/gfx/*.c) \
+			$(wildcard kernel/drivers/network/*.c) \
+			$(wildcard kernel/drivers/network/e1000/*.c) \
+			thirdparty/uip/uip/uip.c \
+            thirdparty/uip/uip/uip_arp.c \
+            thirdparty/uip/uip/timer.c
+			
 C_OBJS = $(C_SOURCES:.c=.o)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
@@ -73,6 +84,11 @@ isr_mouse.o: asm/isr_mouse.asm
 isr_e1000.o: asm/isr_e1000.asm
 	$(AS) -f elf64 asm/isr_e1000.asm -o isr_e1000.o
 
+
+# Regulă automată pentru fișierele C din thirdparty/uip/
+thirdparty/uip/uip/%.o: thirdparty/uip/uip/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Linkarea kernel-ului
 kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) $(OBJS) -o kernel.bin
@@ -119,7 +135,7 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-vga std \
 		-net nic,model=e1000 \
-		-net user \
+		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
 		-display sdl
 
 # Regula pentru Modul Text (TXT)
@@ -129,7 +145,7 @@ run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-net nic,model=e1000 \
-		-net user \
+		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
 		-display curses
 	
 #run: kernel.iso hdd_tools apps 
@@ -151,6 +167,7 @@ clean:
 	$(MAKE) -C tests clean
 	rm -f *.o kernel/*.o boot/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
 	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o kernel/gfx/*.o
+	rm -f thirdparty/uip/uip/*.o
 	rm -rf iso/boot/kernel.bin
 	rm -f tools/nan2hdd tools/nan3hdd
 	rm -f hda_v3.img hdb_v3.img

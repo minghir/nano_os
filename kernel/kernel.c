@@ -251,7 +251,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     uint64_t old_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
 
-    for (int t = 0; t < MAX_TTYS; t++) {
+    for (int t = 0; t < 4; t++) {
         uint64_t init_pages[MAX_PROG_PAGES];
         for (int p = 0; p < MAX_PROG_PAGES; p++) {
             init_pages[p] = (uint64_t)alloc_page();
@@ -304,7 +304,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         }
     }
 
-    KLOG_DEBUG("[DEBUG] 4 TTY processes created! Entering scheduler loop...\n");
+    // TTY-urile de la indexul 4 în sus rămân libere pentru daemoni de rețea (Telnet/SSH)
+	KLOG_DEBUG("[DEBUG] 4 workspace TTYs created. Network TTYs 4+ reserved.\n");
 	
 	// Setăm starea procesului de kernel (PID 0) la SLEEPING sau ZOMBIE 
     // ca schedulerul să nu încerce niciodată să se întoarcă pe stiva de boot.
@@ -313,25 +314,13 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     }
 	
     timer_init(1000);
-		
-	/*	
-    for (;;) {
-		// Dacă mouse-ul s-a mișcat, redesenăm ecranul!
-        if (mouse_moved) {
-            mouse_moved = 0; // Resetăm flag-ul
-            gfx_redraw_tty(active_tty); 
-        }
-        
-        // Așteptăm următoarea întrerupere (Tastatură, Mouse, sau Timer)
-        __asm__ volatile ("sti; hlt");
-    }
-	*/
 	
 	__asm__ volatile ("sti");
 
     // Nu mai avem nevoie de bucla goală cu hlt! 
     // Lăsăm CPU-ul să ruleze libere procesele din tabelă.
     while (1) {
+		
         __asm__ volatile ("hlt");
     }
 }

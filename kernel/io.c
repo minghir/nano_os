@@ -36,6 +36,16 @@ void io_set_graphical_mode(int cols, int rows) {
 }
 
 
+static void tty_output_push(int tty_id, char c) {
+    if (tty_id < 0 || tty_id >= MAX_TTYS) return;
+    TTY* t = &ttys[tty_id];
+    uint16_t next = (t->output_queue_write + 1) % sizeof(t->output_queue);
+    if (next != t->output_queue_read) {
+        t->output_queue[t->output_queue_write] = (uint8_t)c;
+        t->output_queue_write = next;
+    }
+}
+
 
 // Convertor VGA (4-bit) -> ARGB (32-bit)
 static uint32_t vga_to_argb(uint8_t vga_color) {
@@ -119,26 +129,7 @@ void cursor_init() {
     }
     cursor_update();
 }
-/*
-void gfx_redraw_tty(int tty_id) {
-    if (tty_id != active_tty) return;
-    if (is_gfx_mode) {
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            int col = i % term_cols;
-            int row = i / term_cols;
-            uint16_t cell = ttys[tty_id].screen_buffer[i];
-            char c = (cell & 0xFF) ? (cell & 0xFF) : ' ';
-            uint8_t fg = (cell >> 8) & 0x0F;
-            gterm_draw_char(col, row, c, vga_to_argb(fg), 0x00000000);
-        }
-    } else {
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            physical_vga[i] = ttys[tty_id].screen_buffer[i];
-        }
-    }
-    cursor_update();
-}
-*/
+
 static uint16_t last_screen_buffer[MAX_TTYS][256 * 128];
 
 void gfx_redraw_tty(int tty_id) {
@@ -173,49 +164,6 @@ void gfx_redraw_tty(int tty_id) {
 // În structura ta TTY sau ca array static în fișierul tău de randare TTY:
 // static uint16_t last_screen_buffer[MAX_TERM_HEIGHT][MAX_TERM_WIDTH]; // sau alocat dinamic
 // Cache static separat pentru fiecare TTY (presupunând dimensiunea maximă de 256x128 caractere)
-
-/*
-void gfx_redraw_tty(int tty_id) {
-    if (tty_id != active_tty) return;
-    
-    if (is_gfx_mode) {
-        int changed_cells = 0;
-        
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            uint16_t new_cell = ttys[tty_id].screen_buffer[i];
-            
-            // Verificăm folosind array-ul static local, nu structura TTY
-            if (new_cell != last_screen_buffer[tty_id][i]) {
-                int col = i % term_cols;
-                int row = i / term_cols;
-                
-                char c = (new_cell & 0xFF) ? (new_cell & 0xFF) : ' ';
-                uint8_t fg = (new_cell >> 8) & 0x0F;
-                uint8_t bg = (new_cell >> 12) & 0x0F; 
-                
-                // Randonăm fontul 8x16 DOAR pentru celula modificată!
-                gterm_draw_char(col, row, c, vga_to_argb(fg), vga_to_argb(bg));
-                
-                // Salvăm în cache-ul static
-                last_screen_buffer[tty_id][i] = new_cell;
-                changed_cells++;
-            }
-        }
-        
-        // Facem swap doar dacă s-a modificat efectiv ceva pe ecran
-        if (changed_cells > 0) {
-            video_swap_buffers();
-        }
-        
-    } else {
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            physical_vga[i] = ttys[tty_id].screen_buffer[i];
-        }
-    }
-    cursor_update();
-}
-*/
-
 
 static void scroll_screen_tty(int target_tty) {
     for (int i = 0; i < term_cols * (term_rows - 1); i++) {
@@ -292,7 +240,7 @@ static void print_to_tty(const char* s, int target_tty) {
             ttys[target_tty].cursor = cursor;
             continue;
         }
-
+		
         if (character == '\b') {
             if (cursor > 0) {
                 cursor--;
@@ -330,8 +278,24 @@ static void print_to_tty(const char* s, int target_tty) {
     if (target_tty == active_tty) cursor_update();
 }
 
+/*
 void print(const char* s) {
     int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    print_to_tty(s, target_tty);
+}
+*/
+
+void print(const char* s) {
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    
+    // 1. Trimitem fluxul RAW, absolut intact (cu tot cu coduri ANSI) către TTY-ul de rețea
+    const char* p = s;
+    while (*p) {
+        tty_output_push(target_tty, *p);
+        p++;
+    }
+    
+    // 2. Trimitem spre afișare locală unde codurile vor fi procesate grafic
     print_to_tty(s, target_tty);
 }
 
@@ -340,7 +304,11 @@ void print_syslog(const char* s) {
 }
 
 void newline() {
-    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+		
+	int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    tty_output_push(target_tty, '\n');
+	
+    //int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
     int cursor = ttys[target_tty].cursor;
     
     if (is_gfx_mode) draw_cursor_gfx(target_tty, 0);
@@ -425,14 +393,6 @@ void pic_remap() {
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
 }
-
-/*
-void pic_enable_irq(int irq) {
-    uint8_t mask = inb(0x21);
-    mask &= ~(1 << irq);
-    outb(0x21, mask);
-}
-*/
 
 void pic_enable_irq(int irq) {
     if (irq < 8) {

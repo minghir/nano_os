@@ -115,6 +115,9 @@ void pci_scan_bus() {
 					snprintf(log_buf, sizeof(log_buf), "   -> MMIO Base: 0x%x, IRQ Line: %d\n", (uint32_t)mmio_base, irq);
 					KLOG_INFO(log_buf);
 
+					
+
+
 					// 4. Inițializăm driverul e1000 trecându-i adresa MMIO
 					// Înregistrăm driverul în subsistemul de rețea
 					net_register_driver(e1000_get_driver());
@@ -124,6 +127,10 @@ void pci_scan_bus() {
 					if (net_drv && net_drv->init) {
 						net_drv->init(mmio_base, irq);
 					}
+					
+					// La pornirea kernelului / rețelei:
+					
+					net_subsystem_init();
 				}
 
                 // Dacă nu e multi-function și suntem la funcția 0, putem sărim peste restul funcțiilor din acest slot

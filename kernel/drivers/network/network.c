@@ -2,6 +2,14 @@
 #include "../../syslog.h" // pentru print-uri de kernel
 #include "../../string.h" // pentru print-uri de kernel
 
+#include "../../../thirdparty/uip/uip/uip.h"
+#include "../../../thirdparty/uip/uip/uip_arp.h"
+
+// Bufferul global pe care uIP îl folosește pentru I/O (trebuie să aibă exact dimensiunea UIP_CONF_BUFFER_SIZE)
+// Folosim dimensiunea exactă pe care o așteaptă uIP (UIP_BUFSIZE + 2 = 1502 octeți)
+//uint8_t uip_buf[1502] __attribute__((aligned(16)));
+
+extern void e1000_receive_packets(void);
 static NetDriver* current_net_driver = 0;
 
 void net_register_driver(NetDriver* driver) {
@@ -56,7 +64,7 @@ void net_send_test_packet(void) {
     const char* msg = "Hello from Nano OS Networking Stack!";
     int msg_len = string_length(msg);
     
-    for (int i = 0; i < msg_len && (14 + i) < sizeof(packet); i++) {
+    for (uint32_t i = 0; i < msg_len && (14 + i) < sizeof(packet); i++) {
         packet[14 + i] = (uint8_t)msg[i];
     }
 
@@ -129,14 +137,22 @@ static void net_handle_arp(const uint8_t* packet) {
 }
 
 
+// Funcții helper pentru blocarea întreruperilor pe x86-64
+static inline uint64_t net_lock(void) {
+    uint64_t flags;
+    __asm__ volatile ("pushfq; popq %0; cli" : "=r"(flags));
+    return flags;
+}
+
+static inline void net_unlock(uint64_t flags) {
+    __asm__ volatile ("pushq %0; popfq" : : "r"(flags));
+}
+
 void net_enqueue_packet(const uint8_t* data, uint16_t length) {
     if (length >= 14) {
-        // Obținem adresa noastră MAC
         uint8_t my_mac[6];
         net_get_mac(my_mac);
 
-        // Verificăm dacă pachetul este trimis de NOI înșine (Sursa MAC din pachet == MAC-ul nostru)
-        // Octeții 6-11 din headerul Ethernet reprezintă Sursa MAC
         int sent_by_us = 1;
         for (int i = 0; i < 6; i++) {
             if (data[6 + i] != my_mac[i]) {
@@ -144,24 +160,13 @@ void net_enqueue_packet(const uint8_t* data, uint16_t length) {
                 break;
             }
         }
-
-        // Dacă pachetul este generat de propria noastră placă, îl ignorăm complet (evităm bucla infinită!)
-        if (sent_by_us) {
-            return;
-        }
-
-        uint16_t eth_type = (data[12] << 8) | data[13];
-        
-        // Dacă este un ARP Request extern, îi răspundem
-        if (eth_type == 0x0806) {
-            net_handle_arp(data);
-            return; 
-        }
+        if (sent_by_us) return;
     }
 
-    // Coada normală pentru IP / ICMP / UDP externe
+    // Punem ORICE pachet valid (IP sau ARP) în coada protejată
+    uint64_t flags = net_lock();
     int next = (rx_head + 1) % MAX_RX_QUEUE;
-    if (next != rx_tail) {
+    if (next != rx_head) {
         for (int i = 0; i < length; i++) {
             rx_queue[rx_head].data[i] = data[i];
         }
@@ -169,10 +174,14 @@ void net_enqueue_packet(const uint8_t* data, uint16_t length) {
         rx_queue[rx_head].ready = 1;
         rx_head = next;
     }
+    net_unlock(flags);
 }
 
 int net_dequeue_packet(uint8_t* buffer, uint16_t max_len) {
+    // Protejăm secțiunea critică a cozii
+    uint64_t flags = net_lock();
     if (rx_tail == rx_head && !rx_queue[rx_tail].ready) {
+        net_unlock(flags);
         return 0; 
     }
     int len = rx_queue[rx_tail].length;
@@ -183,5 +192,150 @@ int net_dequeue_packet(uint8_t* buffer, uint16_t max_len) {
     }
     rx_queue[rx_tail].ready = 0;
     rx_tail = (rx_tail + 1) % MAX_RX_QUEUE;
+    net_unlock(flags);
     return len;
+}
+
+
+
+void nano_start_tcp_server(void) {
+	return;
+    // Ascultă pe portul 8080 (convertit în network byte order cu HTONS)
+    uip_listen(htons(8080));
+	uip_listen(htons(23));
+}
+
+/*
+void nano_uip_appcall(void) {
+    if (uip_connected()) {
+        KLOG_INFO("[TCP] Conexiune stabilita cu succes!\n");
+    }
+    
+    if (uip_newdata()) {
+        KLOG_INFO("[TCP] Date primite de la client!\n");
+    }
+
+    // Dacă clientul cere date sau s-a conectat, îi trimitem un răspuns HTTP simplu
+    if (uip_connected() || uip_newdata()) {
+        const char* html = "HTTP/1.0 200 OK\r\nContent-Length: 23\r\n\r\nHello from Nano OS TCP!";
+        uip_send(html, 48);
+    }
+}
+*/
+
+
+// Asigură-te că uIP este configurat să folosească o structură de stare în appstate (dacă e suportat de uIP.conf)
+// Sau putem folosi variabile statice simple pentru o sesiune unică de test.
+
+extern void socket_uip_appcall(void);
+
+void nano_uip_appcall(void) {
+    uint16_t lport = ntohs(uip_conn->lport);
+
+    if (lport == 8080) {
+        // Păstrăm serverul HTTP static original pe portul 8080
+        if (uip_connected()) {
+            const char* response = "HTTP/1.0 200 OK\r\nContent-Length: 23\r\n\r\nHello from Nano OS TCP!";
+            uip_send(response, string_length(response));
+        }
+        if (uip_acked()) {
+            uip_close();
+        }
+    } else {
+        // Toate celelalte porturi (cum ar fi 2323 pentru telnetd din User-Space) 
+        // sunt preluate automat de subsistemul nostru de socket-uri!
+        socket_uip_appcall();
+    }
+}
+
+
+
+// Setează adresele IP inițiale pentru uIP (de ex: Nano OS = 10.0.2.15, Gateway = 10.0.2.2)
+void nano_uip_init_network(void) {
+    uip_ipaddr_t ipaddr;
+
+    // Setează IP-ul nostru: 10.0.2.15
+    uip_ipaddr(ipaddr, 10, 0, 2, 15);
+    uip_sethostaddr(ipaddr);
+
+    // Setează Gateway-ul: 10.0.2.2
+    uip_ipaddr(ipaddr, 10, 0, 2, 2);
+    uip_setdraddr(ipaddr);
+
+    // Setează Masca de rețea: 255.255.255.0
+    uip_ipaddr(ipaddr, 255, 255, 255, 0);
+    uip_setnetmask(ipaddr);
+}
+
+// Funcția cheie apelată când sosește un pachet fizic de la e1000
+void nano_uip_feed_packet(const uint8_t* data, uint16_t length) {
+    if (length > sizeof(uip_buf)) return;
+
+    for (uint16_t i = 0; i < length; i++) {
+        uip_buf[i] = data[i];
+    }
+    uip_len = length;
+
+    uint16_t eth_type = (uip_buf[12] << 8) | uip_buf[13];
+
+    if (eth_type == 0x0806) {
+        // Pachet ARP: lăsăm uIP să proceseze (învață MAC-ul gateway-ului / răspunde)
+        uip_arp_arpin();
+        if (uip_len > 0) {
+            net_send_raw_packet(uip_buf, uip_len);
+        }
+    } 
+    else if (eth_type == 0x0800) {
+        // Actualizăm tabela ARP din headerul IP și trimitem în uIP
+        uip_arp_ipin();
+        uip_input();
+
+        // Dacă uIP a generat un răspuns (ex: SYN-ACK), îl trimitem pe rețea
+        if (uip_len > 0) {
+            uip_arp_out(); 
+            net_send_raw_packet(uip_buf, uip_len);
+        }
+    }
+}
+
+
+// Funcție periodică apelată din timer pentru a gestiona timerele TCP și retransmisiile
+// Funcție periodică apelată din timer (la fiecare 0.5 secunde)
+extern uint64_t kernel_cr3;
+
+void net_poll_periodic(void) {
+    uint64_t old_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+
+    if (kernel_cr3 != 0 && old_cr3 != kernel_cr3) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+    }
+
+    // --- POLLED RX: Verificăm direct placa e1000 dacă a sosit ceva ---
+    e1000_receive_packets();
+
+    // Scoatem din coadă și trimitem la uIP
+    uint8_t temp_packet[1500];
+    int len = net_dequeue_packet(temp_packet, sizeof(temp_packet));
+    if (len > 0) {
+        nano_uip_feed_packet(temp_packet, len);
+    }
+
+    for (int i = 0; i < UIP_CONNS; i++) {
+        uip_periodic(i);
+        if (uip_len > 0) {
+            uip_arp_out();
+            net_send_raw_packet(uip_buf, uip_len);
+        }
+    }
+
+    if (kernel_cr3 != 0 && old_cr3 != kernel_cr3) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+    }
+}
+
+void net_subsystem_init(void) {
+    uip_init();              // 1. Resetează și pregătește stiva uIP
+    nano_uip_init_network(); // 2. Setează IP-ul, Gateway-ul și masca
+    nano_start_tcp_server(); // 3. Pornește ascultătorul pe portul 8080
 }

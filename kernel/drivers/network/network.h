@@ -37,5 +37,11 @@ static int rx_tail = 0;
 void net_enqueue_packet(const uint8_t* data, uint16_t length);
 int net_dequeue_packet(uint8_t* buffer, uint16_t max_len);
 
+void nano_uip_appcall(void);
+void nano_uip_init_network(void);
+void nano_uip_feed_packet(const uint8_t* data, uint16_t length);
+void nano_start_tcp_server(void);
+void net_poll_periodic(void);
+void net_subsystem_init(void);
 
 #endif

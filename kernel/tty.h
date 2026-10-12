@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define MAX_TTYS 4
+#define MAX_TTYS 8
 #define MAX_TERM_COLS 128
 #define MAX_TERM_ROWS 48
 
@@ -15,6 +15,10 @@ typedef struct {
     uint8_t keyboard_queue_read;
     uint8_t keyboard_queue_write;
 	uint32_t foreground_pid; // PID-ul procesului care rulează acum în "față" pe acest TTY
+	// Nou: Coada liniară pentru fluxul de ieșire (Output Stream)
+    uint8_t output_queue[2048];
+    uint16_t output_queue_read;
+    uint16_t output_queue_write;
 } TTY;
 
 // Le declarăm extern ca să poată fi folosite de io.c

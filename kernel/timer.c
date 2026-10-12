@@ -12,7 +12,7 @@ extern volatile int mouse_moved;
 extern int active_tty;
 extern void gfx_redraw_tty(int tty_id);
 
-extern void e1000_irq_handler(void* regs);
+
 
 // Funcție helper pentru formatare cu zero în față (2-digits)
 static void int_to_str_padded(uint8_t n, char* buf) {
@@ -40,6 +40,13 @@ void delay_ms(uint32_t ms) {
 }
 
 
+// Declarăm funcția externă din network.c
+extern void net_poll_periodic(void);
+
+// Declarăm flag-ul extern sau global
+volatile int net_poll_flag = 0;
+static uint32_t net_timer_counter = 0;
+
 void timer_irq() {
     timer_ticks++;
 	
@@ -51,7 +58,13 @@ void timer_irq() {
         gfx_redraw_tty(active_tty);
     }
 
-    //e1000_irq_handler(0);
+    // Apelăm verificarea periodică de rețea la fiecare 50 de tick-uri (0.5 secunde)
+    net_timer_counter++;
+    if (net_timer_counter >= 50) {
+        net_timer_counter = 0;
+        //net_poll_flag = 1;
+		net_poll_periodic();
+    }
 }
 
 void timer_init(uint32_t frequency) {
@@ -108,3 +121,7 @@ DateTime get_current_time() {
     return dt;
 }
 
+// Funcția cerută de uIP pentru ceas (returnează numărul total de tick-uri)
+unsigned long clock_time(void) {
+    return (unsigned long)timer_ticks;
+}

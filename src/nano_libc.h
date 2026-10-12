@@ -674,4 +674,126 @@ static inline int nano_net_recv(void* buffer, uint32_t max_len) {
     return ret;
 }
 
+
+// --- Socket Wrappers pentru User-Space (Ring 3) ---
+
+static inline int socket(int domain, int type, int protocol) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_SOCKET), "D" (domain), "S" (type), "d" (protocol)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int bind(int fd, uint16_t port) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_BIND), "D" (fd), "S" (port)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int listen(int fd, int backlog) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_LISTEN), "D" (fd), "S" (backlog)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int accept(int server_fd) {
+    int ret;
+    while (1) {
+        __asm__ volatile(
+            "int $0x80"
+            : "=a" (ret)
+            : "a" (SYSCALL_ACCEPT), "D" (server_fd)
+            : "memory"
+        );
+        // Dacă kernelul a returnat -2, înseamnă că ne-a adormit în PROC_SLEEPING.
+        // Când un client se conectează, kernelul ne trezește și repetăm apelul automat.
+        if (ret != -2) {
+            break;
+        }
+    }
+    return ret;
+}
+
+static inline int send_socket(int fd, const void* buf, uint32_t len) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_SEND), "D" (fd), "S" (buf), "d" (len)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int recv_socket(int fd, void* buf, uint32_t max_len) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_RECV), "D" (fd), "S" (buf), "d" (max_len)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int close_socket(int fd) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_CLOSE), "D" (fd)
+        : "memory"
+    );
+    return ret;
+}
+
+// --- TTY Wrappers pentru User-Space ---
+
+static inline int nano_tty_inject(int tty_id, char c) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_TTY_INJECT), "D" (tty_id), "S" (c)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int nano_set_tty(int tty_id) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_SET_TTY), "D" (tty_id)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int nano_read_tty_output(int tty_id, char* buf, uint32_t max_len) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_READ_TTY_OUTPUT), "D" (tty_id), "S" (buf), "d" (max_len)
+        : "memory"
+    );
+    return ret;
+}
+
 #endif
