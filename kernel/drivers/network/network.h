@@ -22,4 +22,20 @@ void net_send_test_packet(void);
 
 void net_send_ping(uint32_t dest_ip);
 
+
+#define MAX_RX_QUEUE 16
+typedef struct {
+    uint8_t data[2048];
+    uint16_t length;
+    int ready;
+} RxPacket;
+
+static RxPacket rx_queue[MAX_RX_QUEUE];
+static int rx_head = 0;
+static int rx_tail = 0;
+
+void net_enqueue_packet(const uint8_t* data, uint16_t length);
+int net_dequeue_packet(uint8_t* buffer, uint16_t max_len);
+
+
 #endif

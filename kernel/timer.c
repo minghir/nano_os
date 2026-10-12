@@ -12,6 +12,8 @@ extern volatile int mouse_moved;
 extern int active_tty;
 extern void gfx_redraw_tty(int tty_id);
 
+extern void e1000_irq_handler(void* regs);
+
 // Funcție helper pentru formatare cu zero în față (2-digits)
 static void int_to_str_padded(uint8_t n, char* buf) {
     buf[0] = '0' + (n / 10);
@@ -49,7 +51,7 @@ void timer_irq() {
         gfx_redraw_tty(active_tty);
     }
 
-    
+    //e1000_irq_handler(0);
 }
 
 void timer_init(uint32_t frequency) {

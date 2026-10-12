@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "../network.h" // Presupunând că ai definit NetDriver în net.h
+#include "../../../pcb.h"
 
 // Descriptorii e1000 (echivalentul lui ac97_bd_t de la sunet)
 typedef struct {
@@ -26,5 +27,8 @@ typedef struct {
 
 // Funcția publică care expune vtable-ul către subsistemul PCI / Net
 NetDriver* e1000_get_driver(void);
+
+void e1000_receive_packets(void);
+void e1000_irq_handler(Registers* regs);
 
 #endif

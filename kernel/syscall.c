@@ -19,6 +19,10 @@
 #include "video.h"
 #include "auth.h"
 
+
+extern void e1000_irq_handler(void* regs);
+
+
 extern char env_path[];
 extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
@@ -1035,6 +1039,32 @@ print("\n");
 			__asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
 			
 			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_NET_RECV: {
+			uint8_t* user_dest = (uint8_t*)regs->rdi;
+            uint32_t max_len = (uint32_t)regs->rsi;
+
+            // ADAUGĂ 'static' AICI PENTRU A EVITA STACK OVERFLOW!
+            static uint8_t temp_buf[2048]; 
+            
+            uint64_t old_cr3;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+            __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+            int len = net_dequeue_packet(temp_buf, max_len);
+
+            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+
+			if (len > 0) {
+				// Copiem pachetul în siguranță în bufferul user-space
+				for (int i = 0; i < len; i++) {
+					user_dest[i] = temp_buf[i];
+				}
+				regs->rax = (uint64_t)len;
+			} else {
+				regs->rax = 0; // Nimic primit încă
+			}
 			break;
 		}
 		default: {

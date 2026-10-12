@@ -103,6 +103,7 @@ void pci_scan_bus() {
 					// 2. Activăm Bus Master (bit 2) și Memory Space Access (bit 1) în Command Register (Offset 0x04)
 					uint32_t cmd_reg = pci_config_read(bus, slot, func, 0x04);
 					cmd_reg |= (1 << 2) | (1 << 1); // Bus Master + Memory Space
+					cmd_reg &= ~(1 << 10);          // (Șterge bitul "Interrupt Disable")
 					pci_config_write(bus, slot, func, 0x04, cmd_reg);
 
 					// 3. Citim linia de întrerupere (IRQ) de la offset-ul 0x3C (байtul inferior)

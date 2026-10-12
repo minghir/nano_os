@@ -25,7 +25,7 @@ ASM_OBJS = $(notdir $(ASM_SOURCES:.asm=.o))
 # Cel mai simplu: redenumim boot/multiboot.asm în boot/boot.asm sau tratăm excepția.
 
 # Toate obiectele pentru linkare
-OBJS = boot.o isr_keyboard.o isr_timer.o isr_syscall.o isr_fault.o isr_mouse.o $(C_OBJS)
+OBJS = boot.o isr_keyboard.o isr_timer.o isr_syscall.o isr_fault.o isr_mouse.o isr_e1000.o $(C_OBJS)
 
 all: kernel.bin
 
@@ -69,6 +69,9 @@ isr_fault.o: asm/isr_fault.asm
 	
 isr_mouse.o: asm/isr_mouse.asm
 	$(AS) -f elf64 asm/isr_mouse.asm -o isr_mouse.o
+	
+isr_e1000.o: asm/isr_e1000.asm
+	$(AS) -f elf64 asm/isr_e1000.asm -o isr_e1000.o
 
 # Linkarea kernel-ului
 kernel.bin: $(OBJS)
@@ -118,7 +121,7 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 		-net nic,model=e1000 \
 		-net user \
 		-display sdl
-	./init_hdd.sh	
+
 # Regula pentru Modul Text (TXT)
 run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
 	./init_hdd.sh

@@ -244,8 +244,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     KLOG_INFO("KERNEL:Enviroment loaded.\n");
 
     pci_scan_bus();
-	test_mac();
-	net_send_test_packet();
+	//test_mac();
+	//net_send_test_packet();
     KLOG_INFO("Loading Init daemons on all TTYs...\n");
 
     uint64_t old_cr3;

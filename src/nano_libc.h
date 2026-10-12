@@ -662,4 +662,16 @@ static inline int nano_ping(uint32_t dest_ip) {
     return ret;
 }
 
+// Wrapper pentru recepție în user-space
+static inline int nano_net_recv(void* buffer, uint32_t max_len) {
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_NET_RECV), "D" (buffer), "S" (max_len)
+        : "memory"
+    );
+    return ret;
+}
+
 #endif

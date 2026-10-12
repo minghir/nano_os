@@ -46,6 +46,12 @@ static uint8_t tx_buffers[E1000_NUM_TX_DESC][E1000_MAX_PKT_SIZE] __attribute__((
 
 static uint32_t tx_cur = 0;
 
+#define E1000_IMS 0x00D0 // Interrupt Mask Set
+#define E1000_IMS_RXDW  (1 << 7)  // Receive Descriptor Write Back
+#define E1000_IMS_RXT0  (1 << 6)  // Receiver Timer Interrupt
+
+
+// --- Inițializarea Ring-urilor RX / TX ---
 // --- Inițializarea Ring-urilor RX / TX ---
 static void e1000_init_rx_tx(void) {
     static e1000_rx_desc rx_ring_array[E1000_NUM_RX_DESC] __attribute__((aligned(16)));
@@ -59,6 +65,7 @@ static void e1000_init_rx_tx(void) {
         rx_descs[i].address = (uint64_t)(uintptr_t)rx_buffers[i];
         rx_descs[i].status = 0;
         rx_descs[i].errors = 0;
+        rx_descs[i].length = 0;
     }
 
     e1000_write(E1000_RDBAL, (uint32_t)(uintptr_t)rx_descs);
@@ -80,15 +87,42 @@ static void e1000_init_rx_tx(void) {
     e1000_write(E1000_TDH, 0);
     e1000_write(E1000_TDT, 0);
 
-    // 3. Activare RCTL (Recepție)
-    uint32_t rctl = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 15);
+    // 3. Activare RCTL (Recepție cu setările corecte pentru QEMU)
+    // Bit 1: RX Enable (EN)
+    // Bit 2: Store Bad Packets (opțional 0)
+    // Bit 3: Unicast Promiscuous Enabled (UPE) - ca să prindă orice pachet destinat nouă
+    // Bit 4: Multicast Promiscuous Enabled (MPE)
+    // Bit 15: Broadcast Accept Mode (BAM)
+    // Bit 26: Strip Ethernet CRC (SECRC) - CRITIC pentru a nu corupe mărimea pachetului!
+    uint32_t rctl = (1 << 1)   | // RX Enable
+                    (1 << 3)   | // Unicast Promiscuous
+                    (1 << 4)   | // Multicast Promiscuous
+                    (1 << 15)  | // Broadcast Accept
+                    (1 << 26)  ;//| // Strip CRC din pachetele recepționate
+					//(1 << 6);    // (MAC Loopback Mode)
+    
     e1000_write(E1000_RCTL, rctl);
 
     // 4. Activare TCTL (Transmisie)
     uint32_t tctl = (1 << 1) | (1 << 3) | (0x0F << 4) | (0x3FF << 12);
     e1000_write(E1000_TCTL, tctl);
+	
+	// --- ADAUGĂ ACESTE LINII CRITICE PENTRU IRQ ---
+    // Setăm Receive Delay Timer (RDTR) și Receive Absolute Delay Timer (RADV)
+    // Altfel, e1000 poate să aștepte la infinit sau să nu declanșeze întreruperea RXDW imediat.
+    e1000_write(0x2820, 0); // E1000_RDTR (offset 0x2820) = 0 (fără întârziere)
+    e1000_write(0x282C, 0); // E1000_RADV (offset 0x282C) = 0
+    
+    // 5. Curățăm mai întâi orice întrerupere veche pendinte din ICR citindu-l
+    volatile uint32_t dummy = e1000_read(0x00C0);
+    (void)dummy;
 
-    KLOG_INFO("[E1000] Inelele RX/TX au fost initializate si activate!\n");
+    // 6. Setăm registrul IMS (Interrupt Mask Set) pentru a permite întreruperile de RX
+    uint32_t ims = e1000_read(E1000_IMS);
+    ims |= E1000_IMS_RXDW | E1000_IMS_RXT0;
+    e1000_write(E1000_IMS, ims);
+
+    KLOG_INFO("[E1000] Inelele RX/TX si IMS au fost configurate cu succes!\n");
 }
 
 static void e1000_init_impl(uint64_t mmio_base, __attribute__((unused)) uint8_t irq) {
@@ -127,8 +161,11 @@ static void e1000_init_impl(uint64_t mmio_base, __attribute__((unused)) uint8_t 
     e1000_init_rx_tx();
 
     KLOG_INFO("[E1000] Placa de retea e1000 este pregatita!\n");
+	KLOG_INFO("[E1000] Linia IRQ primita de la PCI este: ");
+	print_number(irq); // sau metoda ta de afișare a numerelor în log
+	
 }
-
+/*
 static void e1000_send_packet_impl(const uint8_t* data, uint32_t length) {
     KLOG_INFO("[E1000] Intraree in send_packet\n");
     if (g_mmio_base == 0 || length > E1000_MAX_PKT_SIZE) return;
@@ -142,7 +179,9 @@ static void e1000_send_packet_impl(const uint8_t* data, uint32_t length) {
 
     KLOG_INFO("[E1000] Setare descriptori TX...\n");
     tx_descs[idx].length = (uint16_t)length;
-    tx_descs[idx].cmd = (1 << 0) | (1 << 1); // EOP + RS
+    //tx_descs[idx].cmd = (1 << 0) | (1 << 1); // EOP + RS
+	// Folosește 0x0B (Adică: Bitul 0 - End Of Packet, Bitul 1 - Insert FCS/CRC, Bitul 3 - Report Status)
+    tx_descs[idx].cmd = (1 << 0) | (1 << 1) | (1 << 3);
     tx_descs[idx].status = 0;
 
     tx_cur = (tx_cur + 1) % E1000_NUM_TX_DESC;
@@ -150,6 +189,24 @@ static void e1000_send_packet_impl(const uint8_t* data, uint32_t length) {
     KLOG_INFO("[E1000] Scriere in registrul TDT...\n");
     e1000_write(E1000_TDT, tx_cur);
     KLOG_INFO("[E1000] Pachet transmis cu succes prin e1000!\n");
+}
+*/
+static void e1000_send_packet_impl(const uint8_t* data, uint32_t length) {
+    if (g_mmio_base == 0 || length > E1000_MAX_PKT_SIZE) return;
+
+    uint32_t idx = tx_cur;
+
+    for (uint32_t i = 0; i < length; i++) {
+        tx_buffers[idx][i] = data[i];
+    }
+
+    tx_descs[idx].length = (uint16_t)length;
+    tx_descs[idx].cmd = (1 << 0) | (1 << 1) | (1 << 3); // EOP + IFCS + RS
+    tx_descs[idx].status = 0;
+
+    tx_cur = (tx_cur + 1) % E1000_NUM_TX_DESC;
+    
+    e1000_write(E1000_TDT, tx_cur);
 }
 
 static void e1000_get_mac_impl(uint8_t* mac_out) {
@@ -166,6 +223,64 @@ static void e1000_get_mac_impl(uint8_t* mac_out) {
     mac_out[5] = (high >> 8) & 0xFF;
 }
 
+//Pasul 3: Scrierea Handlerului de Întreruperi (e1000_irq_handler)
+//Aceasta esteima inimii pentru RX. Când vine un pachet, procesul este:
+//Citirea registrului ICR (Interrupt Cause Read): Foarte important! Când citești din ICR, placa e1000 își șterge starea de întrerupere internă. Dacă uiți să citești ICR, linia de întrerupere va rămâne blocată sus, iar sistemul se va bloca.
+//Verificarea motivului întreruperii: Dacă bitul de RX este setat, procesăm inelul RX.
+//Trimiterea EOI (End of Interrupt): Anunțăm controlerul de întreruperi (PIC sau APIC) că am terminat.
+#define E1000_ICR 0x00C0 // Interrupt Cause Read
+
+// Adaugă asta deasupra funcției (la fel ca în syscall.c)
+extern uint64_t kernel_cr3;
+
+void e1000_irq_handler(Registers* regs) {
+    (void)regs;
+    uint64_t old_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+    __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+    uint32_t icr = e1000_read(E1000_ICR);
+    if (icr == 0) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+        return;
+    }
+
+    // STERGE / COMENTEAZA ORICE KLOG_INFO AICI!
+    // KLOG_INFO("[E1000] Pachet sau intrerupere procesata!\n");
+
+    if (icr & (E1000_IMS_RXDW | E1000_IMS_RXT0)) {
+        e1000_receive_packets();
+    }
+
+    __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+}
+
+
+//Pasul 4: Procesarea pachetelor primite (e1000_receive_packets)
+//În această funcție parcurgem inelul RX folosind pointerul curent (de obicei ținut într-o variabilă rx_cur), verificăm dacă descriptorul are bitul DD (Descriptor Done) setat, extragem pachetul și actualizăm RDT (Receive Descriptor Tail).
+static uint32_t rx_cur = 0;
+
+void e1000_receive_packets(void) {
+    while (1) {
+        if (!(rx_descs[rx_cur].status & 0x1)) break; 
+
+        uint16_t len = rx_descs[rx_cur].length;
+        uint8_t* packet_data = rx_buffers[rx_cur];
+
+        net_enqueue_packet(packet_data, len);
+
+        // STERGE / COMENTEAZA SI ASTA!
+        // KLOG_INFO("[E1000] Pachet RX interceptat si pus in coada!\n");
+
+        rx_descs[rx_cur].status = 0;
+        uint32_t old_rx_cur = rx_cur;
+        rx_cur = (rx_cur + 1) % E1000_NUM_RX_DESC;
+        e1000_write(E1000_RDT, old_rx_cur);
+    }
+}
+
+
+
 static NetDriver e1000_driver = {
     .name = "Intel e1000",
     .init = e1000_init_impl,
@@ -176,3 +291,7 @@ static NetDriver e1000_driver = {
 NetDriver* e1000_get_driver(void) {
     return &e1000_driver;
 }
+
+
+
+
