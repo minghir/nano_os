@@ -19,6 +19,8 @@
 
 #include <stdint.h>
 
+extern int is_gfx_mode;
+extern int desktop_mode;
 
 // Definiție parțială a structurii Multiboot Info
 typedef struct multiboot_info {
@@ -212,9 +214,11 @@ void kernel_main(unsigned long magic, unsigned long addr) {
             video_init(fb_physical_address, screen_width, screen_height, screen_pitch, mb_info->framebuffer_bpp);
 
             VideoModeInfo* mode = video_get_info();
-            gterm_init(mode->fb_addr, mode->width, mode->height, mode->pitch);
+            //gterm_init(mode->fb_addr, mode->width, mode->height, mode->pitch);
+			gterm_init((uint64_t)mode->back_buffer, mode->width, mode->height, mode->pitch);
             io_set_graphical_mode(mode->cols, mode->rows);
-            
+			desktop_mode = 0;
+            is_gfx_mode = 1;
 			mouse_init();
 			
             gfx_redraw_tty(active_tty);

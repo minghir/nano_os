@@ -4,6 +4,7 @@
 #include "config.h"
 #include "mouse.h"
 
+
 volatile uint32_t timer_ticks = 0;
 
 extern void cursor_blink_tick();
@@ -11,6 +12,7 @@ extern void cursor_blink_tick();
 extern volatile int mouse_moved;
 extern int active_tty;
 extern void gfx_redraw_tty(int tty_id);
+extern int desktop_mode;
 
 
 
@@ -50,13 +52,16 @@ static uint32_t net_timer_counter = 0;
 void timer_irq() {
     timer_ticks++;
 	
-	cursor_blink_tick();
+	if (!desktop_mode) {
+		cursor_blink_tick();
+	}
 	
 	// 2. DACĂ MOUSE-UL S-A MIȘCAT, REDESENĂM ECRANUL IMEDIAT!
     if (mouse_moved) {
-        mouse_moved = 0;
-        gfx_redraw_tty(active_tty);
-    }
+		mouse_moved = 0;
+		
+		
+	}
 
     // Apelăm verificarea periodică de rețea la fiecare 50 de tick-uri (0.5 secunde)
     net_timer_counter++;

@@ -4,6 +4,7 @@
 #include "fs_v3_inode.h"
 #include "fs_v3_dir.h"
 #include "../syslog.h"
+#include "../string.h"
 #include "../process.h" // Acces la structura PCB și current_process
 
 extern PCB* current_process;
@@ -302,9 +303,9 @@ static uint32_t nfs3_get_target_inode_verbose(const char* path) {
         uint32_t next_inode = nfs3_find_in_dir(temp_inode, folder);
         if (next_inode == 0xFFFFFFFF) {
             // Aici șepăm exact ce nu a fost găsit!
-            print("Eroare: Componenta '");
-            print(folder);
-            print("' nu există pe disc!\n");
+            KLOG_ERROR("Eroare: Componenta '");
+            KLOG_ERROR(folder);
+            KLOG_ERROR("' nu există pe disc!\n");
             return 0xFFFFFFFF;
         }
         temp_inode = next_inode;
@@ -313,6 +314,7 @@ static uint32_t nfs3_get_target_inode_verbose(const char* path) {
 }
 
 /// Rezolvă calea pentru Creare / Ștergere (separă Părintele de Numele fișierului)
+/*
 static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
     if (!full_path || !full_path[0]) return 0xFFFFFFFF;
     
@@ -355,6 +357,56 @@ static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
     
     return nfs3_get_target_inode(dir_path);
 }
+*/
+
+static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
+    if (!full_path || !full_path[0]) return 0xFFFFFFFF;
+    
+    char abs_path[256];
+
+    // DACĂ CALEA ESTE ABSOLUTĂ (începe cu '/'), o folosim direct!
+    if (full_path[0] == '/') {
+        string_copy(abs_path, full_path);
+    } else {
+        // Altfel, o combinăm cu calea curentă a procesului
+        char current_v3_path[256];
+        get_current_v3_path(current_v3_path, sizeof(current_v3_path));
+        nfs3_normalize_path(current_v3_path, full_path, abs_path);
+    }
+    
+    int last_slash = -1;
+    int len = 0;
+    while (abs_path[len]) {
+        if (abs_path[len] == '/') last_slash = len;
+        len++;
+    }
+    
+    if (last_slash <= 0) {
+        int i = 0;
+        while (abs_path[i + 1]) { filename_out[i] = abs_path[i + 1]; i++; }
+        filename_out[i] = '\0';
+        return 0; // Părintele este Root-ul partiției (Inode 0 sau Root Inode)
+    }
+    
+    int i = 0;
+    int fn_start = last_slash + 1;
+    while (abs_path[fn_start + i]) {
+        filename_out[i] = abs_path[fn_start + i];
+        i++;
+    }
+    filename_out[i] = '\0';
+    
+    char dir_path[256];
+    for (int j = 0; j < last_slash; j++) dir_path[j] = abs_path[j];
+    dir_path[last_slash] = '\0';
+    
+    if (dir_path[0] == '\0') {
+        dir_path[0] = '/';
+        dir_path[1] = '\0';
+    }
+    
+    return nfs3_get_target_inode(dir_path);
+}
 
 // --- Implementarea interfeței VFS pentru V3 ---
 
@@ -376,6 +428,7 @@ void fs_init_v3(void) {
 	set_current_v3_path("/");
 }
 
+/*
 void fs_list_files_v3(const char* path) {
     uint32_t target_inode = get_current_dir_inode();//current_dir_inode;
 
@@ -396,6 +449,47 @@ void fs_list_files_v3(const char* path) {
 
     nfs3_list_dir(target_inode);
 }
+*/
+void fs_list_files_v3(const char* path) {
+    uint32_t target_inode = get_current_dir_inode();
+
+    if (path != 0 && path[0] != '\0' && !(path[0] == '.' && path[1] == '\0')) {
+        char dummy[64];
+        target_inode = nfs3_resolve_path(path, dummy);
+        
+        if (path[0] == '/' && path[1] == '\0') {
+            target_inode = 0; // Root-ul
+        } else {
+            uint32_t found = nfs3_find_in_dir(target_inode, dummy);
+            if (found == 0) {
+                print("Error: Path does not exist.\n");
+                return;
+            }
+            
+            InodeV3 inv;
+            nfs3_read_inode(found, &inv);
+            
+            // VERIFICĂM DACĂ ESTE FIȘIER SAU DIRECTOR
+            if (inv.flags == INODE_FLAG_DIR) {
+                target_inode = found;
+                nfs3_list_dir(target_inode); // Dacă e director, afișăm conținutul
+            } else {
+                // Dacă este FIȘIER, afișăm doar informația despre acest fișier!
+                print("[FILE] ");
+                print(dummy);
+                print(" - ");
+                char size_buf[32];
+                simple_itoa(inv.size, size_buf); // sau funcția ta de transformare în string
+                print(size_buf);
+                print(" bytes\n");
+                return;
+            }
+        }
+    } else {
+        nfs3_list_dir(target_inode);
+    }
+}
+
 
 int fs_create_file_v3(const char* name, uint32_t size) {
     char target_filename[64];
@@ -655,6 +749,135 @@ int nfs3_get_stats(uint32_t* total_sectors, uint32_t* free_sectors) {
     return 1;
 }
 
+int nfs3_append_file(const char* name, const char* data) {
+    if (!name || name[0] == '\0' || !data) return 0;
+    
+    uint32_t data_len = 0;
+    while (data[data_len]) data_len++;
+    if (data_len == 0) return 1;
+
+    char target_filename[64];
+    uint32_t parent_inode = nfs3_resolve_path(name, target_filename);
+    if (parent_inode == 0xFFFFFFFF || target_filename[0] == '\0') return 0;
+
+    // Căutăm fișierul. Dacă nu există, îl creăm acum!
+    uint32_t target_inode_idx = nfs3_find_in_dir(parent_inode, target_filename);
+    if (target_inode_idx == 0xFFFFFFFF) {
+        if (!nfs3_create_entry(parent_inode, target_filename, INODE_FLAG_FILE, 0)) {
+            return 0; 
+        }
+        target_inode_idx = nfs3_find_in_dir(parent_inode, target_filename);
+        if (target_inode_idx == 0xFFFFFFFF) return 0;
+    }
+
+    InodeV3 target_inode;
+    if (!nfs3_read_inode(target_inode_idx, &target_inode)) return 0;
+
+    if (target_inode.flags == INODE_FLAG_DIR) {
+        return 0; 
+    }
+
+    // Cazul 1: Fișierul este complet gol
+    if (target_inode.size == 0 || target_inode.first_sector == 0 || target_inode.first_sector == 0xFFFFFFFF) {
+        uint32_t current_sector = nfs3_alloc_sector();
+        if (current_sector == 0) return 0; // Disk full
+        
+        target_inode.first_sector = current_sector;
+        target_inode.size = 0;
+        
+        uint32_t bytes_written = 0;
+        while (bytes_written < data_len) {
+            uint32_t to_write = data_len - bytes_written;
+            if (to_write > 512) to_write = 512;
+
+            uint8_t buffer[512] = {0};
+            for (uint32_t i = 0; i < to_write; i++) {
+                buffer[i] = data[bytes_written + i];
+            }
+
+            disk_write_sector_drive(current_drive_id, current_sector, buffer);
+            bytes_written += to_write;
+            target_inode.size += to_write;
+
+            if (bytes_written < data_len) {
+                uint32_t next_sector = nfs3_append_sector(current_sector);
+                if (next_sector == 0) break;
+                current_sector = next_sector;
+            }
+        }
+
+        nfs3_write_inode(target_inode_idx, &target_inode);
+        return 1;
+    }
+
+    // Cazul 2: Găsim ultimul sector cu PROTECȚIE ANTI-BUCLĂ (Max 1024 sectoare)
+    uint32_t current_sector = target_inode.first_sector;
+    uint32_t next_sector = nfs3_read_fat_entry(current_sector);
+    int safety_counter = 0;
+    
+    while (next_sector != FAT_FREE && next_sector != FAT_EOF && next_sector != 0xFFFFFFFF && safety_counter < 1024) {
+        current_sector = next_sector;
+        next_sector = nfs3_read_fat_entry(current_sector);
+        safety_counter++;
+    }
+
+    uint32_t remainder_in_sector = target_inode.size % 512;
+    uint32_t bytes_written = 0;
+
+    // Dacă ultimul sector mai are spațiu liber
+    if (remainder_in_sector > 0 && remainder_in_sector < 512) {
+        uint8_t buffer[512];
+        disk_read_sector_drive(current_drive_id, current_sector, buffer);
+
+        uint32_t space_left = 512 - remainder_in_sector;
+        uint32_t to_copy = data_len;
+        if (to_copy > space_left) to_copy = space_left;
+
+        for (uint32_t i = 0; i < to_copy; i++) {
+            buffer[remainder_in_sector + i] = data[i];
+        }
+
+        disk_write_sector_drive(current_drive_id, current_sector, buffer);
+        bytes_written += to_copy;
+        target_inode.size += to_copy;
+    }
+
+    // Dacă mai avem date de scris
+    if (bytes_written < data_len) {
+        if (remainder_in_sector == 0) {
+            uint32_t new_sec = nfs3_append_sector(current_sector);
+            if (new_sec == 0) {
+                nfs3_write_inode(target_inode_idx, &target_inode);
+                return 0;
+            }
+            current_sector = new_sec;
+        }
+
+        while (bytes_written < data_len) {
+            uint32_t to_write = data_len - bytes_written;
+            if (to_write > 512) to_write = 512;
+
+            uint8_t buffer[512] = {0};
+            for (uint32_t i = 0; i < to_write; i++) {
+                buffer[i] = data[bytes_written + i];
+            }
+
+            disk_write_sector_drive(current_drive_id, current_sector, buffer);
+            bytes_written += to_write;
+            target_inode.size += to_write;
+
+            if (bytes_written < data_len) {
+                uint32_t next_sec = nfs3_append_sector(current_sector);
+                if (next_sec == 0) break;
+                current_sector = next_sec;
+            }
+        }
+    }
+
+    nfs3_write_inode(target_inode_idx, &target_inode);
+    return 1;
+}
+
 // Exportul oficial al driverului V3 compatibil VFS
 FileSystemInterface nfs3_driver = {
     .name = "NFS3",
@@ -671,5 +894,6 @@ FileSystemInterface nfs3_driver = {
     .get_current_path = fs_get_current_path_v3,
     .fdisk = fs_fdisk_v3,
     .format = fs_format_v3,
-	.get_file_at_index = nfs3_get_file_at_index
+	.get_file_at_index = nfs3_get_file_at_index,
+	.append_file = nfs3_append_file
 };

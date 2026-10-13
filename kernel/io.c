@@ -1,4 +1,5 @@
 #include "io.h"
+#include "fs/fs.h"
 #include "idt.h"
 #include "tty.h"
 #include "process.h"
@@ -23,10 +24,12 @@ static int cursor_visible = 1;
 static uint32_t blink_counter = 0;
 #define BLINK_INTERVAL_MS 400
 
+extern int desktop_mode;
 
-extern void gterm_draw_cursor_box(int x, int y, uint32_t color);
-extern int mouse_x; // Coordonata X curentă a mouse-ului
-extern int mouse_y; // Coordonata Y curentă a mouse-ului
+
+//extern void gterm_draw_cursor_box(int x, int y, uint32_t color);
+//extern int mouse_x; // Coordonata X curentă a mouse-ului
+//extern int mouse_y; // Coordonata Y curentă a mouse-ului
 
 // Funcție pentru a activa modul grafic din kernel_main
 void io_set_graphical_mode(int cols, int rows) {
@@ -80,6 +83,7 @@ static volatile uint8_t keyboard_queue_write = 0;
 
 
 static void draw_cursor_gfx(int tty_id, int show) {
+	if (desktop_mode) return;
     if (tty_id != active_tty || !is_gfx_mode) return;
     int pos = ttys[tty_id].cursor;
     int col = pos % term_cols;
@@ -98,7 +102,8 @@ static void draw_cursor_gfx(int tty_id, int show) {
 
 void cursor_blink_tick() {
     if (!is_gfx_mode) return; // Doar în mod grafic
-    
+    if (desktop_mode) return;
+	
     blink_counter++;
     if (blink_counter >= BLINK_INTERVAL_MS) {
         blink_counter = 0;
@@ -109,6 +114,7 @@ void cursor_blink_tick() {
 
 
 void cursor_update() {
+	if (desktop_mode) return;
     if (is_gfx_mode) {
         cursor_visible = 1;     // Forțăm cursorul să fie vizibil când tastăm/scriem
         blink_counter = 0;      // Resetăm contorul de clipire
@@ -132,8 +138,12 @@ void cursor_init() {
 
 static uint16_t last_screen_buffer[MAX_TTYS][256 * 128];
 
+
 void gfx_redraw_tty(int tty_id) {
+	if (desktop_mode) return; 
+    
     if (tty_id != active_tty) return;
+	
     if (is_gfx_mode) {
         for (int i = 0; i < term_cols * term_rows; i++) {
             int col = i % term_cols;
@@ -150,7 +160,7 @@ void gfx_redraw_tty(int tty_id) {
             gterm_draw_char(col, row, c, vga_to_argb(fg), vga_to_argb(bg));
         }
 		
-		gterm_draw_cursor_box(mouse_x, mouse_y, 0x00FFFFFF);
+		//gterm_draw_cursor_box(mouse_x, mouse_y, 0x00FFFFFF);
 		video_swap_buffers();
     } else {
         for (int i = 0; i < term_cols * term_rows; i++) {
@@ -160,12 +170,49 @@ void gfx_redraw_tty(int tty_id) {
     cursor_update();
 }
 
+/*
+void gfx_redraw_tty(int tty_id) {
+    if (tty_id != active_tty) return;
 
+    if (is_gfx_mode) {
+        // Redesenăm doar caracterele text din TTY, dar FĂRĂ să suprascriem 
+        // cu pixeli de fundal negru dacă celula este un spațiu gol (' ')
+        for (int i = 0; i < term_cols * term_rows; i++) {
+            int col = i % term_cols;
+            int row = i / term_cols;
+            uint16_t cell = ttys[tty_id].screen_buffer[i];
+            char c = cell & 0xFF;
+            
+            // Dacă celula este un simplu spațiu, O SĂRIM! 
+            // Astfel, nu mai ștergem pixelii dedesubt (cum ar fi fereastra ta GUI)!
+            if (c == 0 || c == ' ') {
+                continue; 
+            }
+
+            uint8_t fg = (cell >> 8) & 0x0F;
+            uint8_t bg = (cell >> 12) & 0x0F; 
+            
+            // Desenăm doar caracterul text, lăsând fundalul transparent
+            gterm_draw_char(col, row, c, vga_to_argb(fg), vga_to_argb(bg));
+        }
+        
+        // Desenăm cursorul mouse-ului
+        gterm_draw_cursor_box(mouse_x, mouse_y, 0x00FFFFFF);
+        video_swap_buffers();
+    } else {
+        for (int i = 0; i < term_cols * term_rows; i++) {
+            physical_vga[i] = ttys[tty_id].screen_buffer[i];
+        }
+    }
+    cursor_update();
+}
+*/
 // În structura ta TTY sau ca array static în fișierul tău de randare TTY:
 // static uint16_t last_screen_buffer[MAX_TERM_HEIGHT][MAX_TERM_WIDTH]; // sau alocat dinamic
 // Cache static separat pentru fiecare TTY (presupunând dimensiunea maximă de 256x128 caractere)
 
 static void scroll_screen_tty(int target_tty) {
+	if (desktop_mode) return;
     for (int i = 0; i < term_cols * (term_rows - 1); i++) {
         ttys[target_tty].screen_buffer[i] = ttys[target_tty].screen_buffer[i + term_cols];
     }
@@ -178,6 +225,7 @@ static void scroll_screen_tty(int target_tty) {
 }
 
 static void print_to_tty(const char* s, int target_tty) {
+	if (desktop_mode) return;
     int cursor = ttys[target_tty].cursor;
     uint16_t current_vga_attr = ttys[target_tty].current_vga_attr;
 
@@ -284,7 +332,7 @@ void print(const char* s) {
     print_to_tty(s, target_tty);
 }
 */
-
+/*
 void print(const char* s) {
     int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
     
@@ -298,13 +346,39 @@ void print(const char* s) {
     // 2. Trimitem spre afișare locală unde codurile vor fi procesate grafic
     print_to_tty(s, target_tty);
 }
+*/
+
+void print(const char* s) {
+	if (desktop_mode) return;
+    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+    
+    // ==========================================================
+    // REDIRECȚIONARE VFS STDOUT CĂTRE FIȘIER
+    // ==========================================================
+    if (current_process != 0 && current_process->has_stdout_redirect) {
+        // Trimitem textul prin VFS, lăsând sistemul de fișiere să-l gestioneze
+        fs_append_file(current_process->stdout_file, s);
+        return; // Oprim fluxul – nu mai ajunge la ecran / TTY
+    }
+    // ==========================================================
+    
+    // 1. Fluxul RAW către TTY-ul de rețea
+    const char* p = s;
+    while (*p) {
+        tty_output_push(target_tty, *p);
+        p++;
+    }
+    
+    // 2. Afișarea locală
+    print_to_tty(s, target_tty);
+}
 
 void print_syslog(const char* s) {
     print_to_tty(s, 0);
 }
 
 void newline() {
-		
+	if (desktop_mode) return;
 	int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
     tty_output_push(target_tty, '\n');
 	
@@ -323,6 +397,7 @@ void newline() {
 }
 
 void clear_screen() {
+	if (desktop_mode) return;
     int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
     for (int index = 0; index < term_cols * term_rows; index++) {
         ttys[target_tty].screen_buffer[index] = ttys[target_tty].current_vga_attr | ' ';
@@ -492,6 +567,18 @@ void keyboard_read_line(char* buffer, uint32_t max_length) {
 }
 
 void keyboard_irq() {
+	uint8_t status = inb(0x64);
+    
+    // Verificăm dacă există date în buffer (Bit 0)
+    if (!(status & 0x01)) return;
+    
+    // VERIFICARE CRUCIALĂ: Este acest pachet pentru MOUSE (Bit 5)?
+    if (status & 0x20) {
+        // DOAR confirmăm întreruperea la PIC-ul Master în caz de suprapunere
+        outb(0x20, 0x20);
+        return; // <-- FĂRĂ inb(0x60) aici!
+    }
+	
     uint8_t scancode = inb(0x60);
     static uint8_t ctrl_pressed = 0;
     static uint8_t shift_pressed = 0;

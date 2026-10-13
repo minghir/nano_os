@@ -32,6 +32,10 @@ void process_init() {
     current_process->cr3 = kernel_pml4;
     current_process->cwd_sector = 1; 
     current_process->tty_id = active_tty;
+	
+	// --- Inițializare redirecționare STDOUT pentru Kernel ---
+    current_process->has_stdout_redirect = 0;
+    current_process->stdout_file[0] = '\0';
     
     // --- FIX: Inițializăm calea kernelului la root ---
     current_process->current_path[0] = '/';
@@ -141,6 +145,13 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
     
     p->cwd_sector = current_process ? current_process->cwd_sector : 0;
     
+	
+	// --- INIȚIALIZARE REDIRECȚIONARE STDOUT ---
+    p->has_stdout_redirect = 0;
+    p->stdout_file[0] = '\0';
+    // ------------------------------------------
+	
+	
     // Copierea căii text a procesului părinte
     if (current_process && current_process->current_path[0] != '\0') {
         int idx = 0; // am pus 0

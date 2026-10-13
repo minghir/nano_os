@@ -9,5 +9,5 @@ void gterm_putchar(char c);
 void gterm_print(const char* str);
 void gterm_clear();
 void gterm_draw_char(int col, int row, unsigned char c, uint32_t fg, uint32_t bg);
-void gterm_draw_cursor_box(int x, int y, uint32_t color);
+//void gterm_draw_cursor_box(int x, int y, uint32_t color);
 #endif

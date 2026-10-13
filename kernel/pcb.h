@@ -67,5 +67,9 @@ typedef struct {
 	int tty_id;               // TTY-ul de care aparține procesul
 	
 	uint32_t waiting_for_tid;   // ID-ul thread-ului pe care acest task îl așteaptă (prin join)
+	
+	// --- I/O Redirection (Adăugat aici) ---
+    int has_stdout_redirect;    // 1 dacă output-ul este redirecționat spre fișier, 0 dacă e la TTY
+    char stdout_file[64];       // Calea fișierului unde se va scrie (ex: "files.txt")
 } PCB;
 #endif

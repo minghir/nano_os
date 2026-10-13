@@ -579,15 +579,7 @@ static const unsigned char fallback_glyph[16] = {
     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 };
 
-/*
-static void put_pixel(int x, int y, uint32_t color) {
-    VideoModeInfo* mode = video_get_info();
-    if (x < 0 || x >= (int)mode->width || y < 0 || y >= (int)mode->height) return;
-    uint32_t* screen = (uint32_t*)mode->fb_addr;
-    uint32_t index = (y * (mode->pitch / 4)) + x;
-    screen[index] = color;
-}
-*/
+
 static void put_pixel(int x, int y, uint32_t color) {
     VideoModeInfo* mode = video_get_info();
     if (x < 0 || x >= (int)mode->width || y < 0 || y >= (int)mode->height) return;
@@ -598,33 +590,6 @@ static void put_pixel(int x, int y, uint32_t color) {
         mode->back_buffer[index] = color;
     }
 }
-/*
-void gterm_draw_char(int col, int row, unsigned char c, uint32_t fg, uint32_t bg) {
-    int start_x = col * 8;
-    int start_y = row * 16;
-    
-    const unsigned char* glyph = font8x16[c];
-    
-    int empty = 1;
-    for (int i = 0; i < 16; i++) {
-        if (glyph[i] != 0) {
-            empty = 0;
-            break;
-        }
-    }
-    if (empty && c != ' ') {
-        glyph = fallback_glyph;
-    }
-
-    for (int y = 0; y < 16; y++) {
-        unsigned char line = glyph[y];
-        for (int x = 0; x < 8; x++) {
-            uint32_t color = (line & (1 << (7 - x))) ? fg : bg;
-            put_pixel(start_x + x, start_y + y, color);
-        }
-    }
-}
-*/
 
 void gterm_draw_char(int col, int row, unsigned char c, uint32_t fg, uint32_t bg) {
     VideoModeInfo* mode = video_get_info();
@@ -674,26 +639,6 @@ void gterm_draw_char(int col, int row, unsigned char c, uint32_t fg, uint32_t bg
     }
 }
 
-/*
-void gterm_clear() {
-    VideoModeInfo* mode = video_get_info();
-    uint32_t* screen = (uint32_t*)mode->fb_addr;
-    
-    for (uint32_t y = 0; y < mode->height; y++) {
-        for (uint32_t x = 0; x < mode->width; x++) {
-            screen[(y * (mode->pitch / 4)) + x] = bg_color;
-        }
-    }
-    cursor_x = 0;
-    cursor_y = 0;
-    
-    for (int r = 0; r < TERM_HEIGHT; r++) {
-        for (int c = 0; c < TERM_WIDTH; c++) {
-            text_buffer[r][c] = ' ';
-        }
-    }
-}
-*/
 
 void gterm_clear() {
     VideoModeInfo* mode = video_get_info();
@@ -784,7 +729,7 @@ void gterm_print(const char* str) {
         gterm_putchar(*str++);
     }
 }
-
+/*
 void gterm_draw_cursor_box(int x, int y, uint32_t color) {
     // Sablon simplu de săgeată de mouse (8x12 pixeli)
     static const uint8_t cursor_shape[12] = {
@@ -811,3 +756,4 @@ void gterm_draw_cursor_box(int x, int y, uint32_t color) {
         }
     }
 }
+*/

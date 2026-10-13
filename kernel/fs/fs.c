@@ -90,6 +90,22 @@ void fs_init(void) {
     active_fs = &nfs3_driver; 
     is_at_global_root = 1;
 }
+/*
+void fs_list_files(const char* path) {
+    if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
+        print("VFS Root Directory Contents:\n");
+        print("[DIR]  hda  (NanoFS V3 - Disk 1)\n");
+        print("[DIR]  hdb  (NanoFS V3 - Disk 2)\n");
+        return;
+    }
+
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+    if (target && target->list_files) {
+        target->list_files(local_path);
+    }
+}
+*/
 
 void fs_list_files(const char* path) {
     if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
@@ -101,6 +117,15 @@ void fs_list_files(const char* path) {
 
     char local_path[128];
     FileSystemInterface* target = vfs_route(path, local_path);
+    
+    // DACĂ CALEA ÎNCEPE CU /hda, forțăm explicit interfața lui hda!
+    if (path && path[0] == '/' && path[1] == 'h' && path[2] == 'd' && path[3] == 'a') {
+        // Dacă vfs_route a lăsat local_path gol sau greșit pentru subdirectoare absolute:
+        if (local_path[0] == '\0') {
+            string_copy(local_path, "/");
+        }
+    }
+
     if (target && target->list_files) {
         target->list_files(local_path);
     }
@@ -239,4 +264,13 @@ int fs_get_file_at_index(int index, char* buffer, uint32_t max_len) {
         return active_fs->get_file_at_index(index, buffer, max_len);
     }
     return 0;
+}
+
+int fs_append_file(const char* path, const char* data) {
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+    
+    if (target && target->append_file) {
+        target->append_file(local_path, data);
+    }
 }

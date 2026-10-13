@@ -282,6 +282,46 @@ int main() {
             continue;
         }
 
+
+		// ==========================================================
+        // DETECTARE REDIRECȚIONARE OUTPUT (ex: ls > files.txt)
+        // ==========================================================
+        char* redirect_file = NULL;
+        for (int i = 0; command_buffer[i] != '\0'; i++) {
+            if (command_buffer[i] == '>') {
+                command_buffer[i] = '\0'; // Tăiem șirul aici (comanda se oprește)
+                redirect_file = &command_buffer[i + 1];
+                
+                // Eliminăm spațiile de la începutul numelui fișierului
+                while (*redirect_file == ' ' || *redirect_file == '\t') {
+                    redirect_file++;
+                }
+                
+                // Eliminăm eventualele spații sau caractere newline de la final
+                int r_len = strlen(redirect_file);
+                while (r_len > 0 && (redirect_file[r_len - 1] == ' ' || redirect_file[r_len - 1] == '\t' || redirect_file[r_len - 1] == '\n' || redirect_file[r_len - 1] == '\r')) {
+                    redirect_file[r_len - 1] = '\0';
+                    r_len--;
+                }
+                break;
+            }
+        }
+		// Dacă avem o redirecționare, creăm/pregătim fișierul destinație
+        if (redirect_file != NULL && redirect_file[0] != '\0') {
+            // Creăm fișierul (sau îl resetăm dacă exista deja)
+            nano_create_file(redirect_file, 0);
+            
+            // Aici putem anunța kernelul că procesul curent are redirect activ
+            // (sau putem folosi un syscall dedicat de setare a stdout-ului)
+            nano_set_stdout_file(redirect_file);
+        } else {
+            nano_set_stdout_file(NULL); // Resetăm la TTY normal
+        }
+		
+        // ==========================================================
+
+
+
         if (history_count == 0 || strcmp(history[history_count - 1], command_buffer) != 0) {
             if (history_count < MAX_HISTORY) {
                 string_copy(history[history_count], command_buffer);
@@ -455,6 +495,7 @@ int main() {
                 }
             }
         }
+		nano_set_stdout_file(NULL);
     }
 
     return 0;

@@ -19,6 +19,7 @@
 #include "drivers/network/socket.h"
 #include "video.h"
 #include "auth.h"
+#include "mouse.h"
 
 
 extern void e1000_irq_handler(void* regs);
@@ -29,6 +30,8 @@ extern char kernel_log_buffer[KERNEL_LOG_SIZE];
 
 extern int term_cols;
 extern int term_rows;
+
+extern int desktop_mode;
 
 void syscall_handler(SyscallRegisters* regs) {
 	
@@ -1075,6 +1078,130 @@ print("\n");
             regs->rax = copied;
             break;
         }
+		
+		case SYSCALL_SET_STDOUT: {
+			const char* path = (const char*)regs->rdi;
+			
+			if (current_process != 0) {
+				if (path == 0 || path[0] == '\0') {
+					// Resetăm la TTY normal
+					current_process->has_stdout_redirect = 0;
+					current_process->stdout_file[0] = '\0';
+				} else {
+					// Activăm redirecționarea către fișierul dat
+					current_process->has_stdout_redirect = 1;
+					int i = 0;
+					while (path[i] != '\0' && i < 63) {
+						current_process->stdout_file[i] = path[i];
+						i++;
+					}
+					current_process->stdout_file[i] = '\0';
+				}
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0; // Eroare (fără context de proces)
+			}
+			break;
+		}
+		case SYSCALL_GFX_PRESENT: {
+			int x = (int)regs->rdi;
+			int y = (int)regs->rsi;
+			int w = (int)regs->rdx;
+			int h = (int)regs->rcx;
+			uint32_t* user_pixels = (uint32_t*)regs->r8;
+
+			// Aflăm pe ce TTY rulează procesul curent!
+			int tty_id = (current_process != 0) ? current_process->tty_id : active_tty;
+			
+			// Dacă procesul nu aparține de TTY-ul activ curent, poate nu vrem să desenăm pe ecran acum, 
+			// sau desenăm oricum în backbuffer-ul global.
+			VideoModeInfo* mode = video_get_info();
+			if (!mode || !mode->back_buffer) {
+				regs->rax = 0;
+				break;
+			}
+
+			uint32_t pitch_pixels = mode->pitch / 4;
+
+			for (int row = 0; row < h; row++) {
+				int target_y = y + row;
+				if (target_y < 0 || target_y >= (int)mode->height) continue;
+
+				int copy_w = w;
+				int start_x = x;
+				int src_offset = 0;
+
+				if (start_x < 0) {
+					src_offset = -start_x;
+					copy_w += start_x;
+					start_x = 0;
+				}
+				if (start_x + copy_w > (int)mode->width) {
+					copy_w = (int)mode->width - start_x;
+				}
+				if (copy_w <= 0) continue;
+
+				uint32_t* dest_row = &mode->back_buffer[(target_y * pitch_pixels) + start_x];
+				uint32_t* src_row  = &user_pixels[(row * w) + src_offset];
+
+				memcpy(dest_row, src_row, copy_w * 4);
+			}
+
+			// Facem swap doar dacă procesul este pe TTY-ul activ curent!
+			if (tty_id == active_tty) {
+				video_swap_buffers();
+			}
+			
+			regs->rax = 1;
+			break;
+		}
+		case SYSCALL_DESKTOP_MODE: {
+			int mode = (int)regs->rdi; // Preluăm argumentul din RDI
+			desktop_mode = mode;       // Setăm starea (0 sau 1)
+			
+			if (desktop_mode) {
+				KLOG_INFO("Trec in desktop mode (GUI activ)\n");
+			} else {
+				KLOG_INFO("Reviz la mod text TTY\n");
+			}
+			
+			regs->rax = 0; // Returnăm succes
+			break;
+		}
+		case SYSCALL_GET_TTY_BUFFER: {
+			int tty_id = (int)regs->rdi;
+			uint16_t* user_buffer = (uint16_t*)regs->rsi;
+			
+			if (tty_id >= 0 && tty_id < MAX_TTYS && user_buffer != 0) {
+				// Copiem memoria TTY-ului direct în aplicația utilizator!
+				memcpy(user_buffer, ttys[tty_id].screen_buffer, term_cols * term_rows * 2);
+				regs->rax = 1;
+			} else {
+				regs->rax = 0;
+			}
+			break;
+		}
+		case SYSCALL_GET_MOUSE_STATE: {
+			// În arhitectura x86_64, primul argument (pointerul) vine în RDI
+			MouseState* user_state = (MouseState*)regs->rdi;
+			
+			if (user_state != 0) {
+				// Preluăm datele globale din mouse.c
+				extern int mouse_x;
+				extern int mouse_y;
+				extern uint8_t mouse_buttons;
+				
+				// Scriem direct în memoria aplicației din User-Space!
+				user_state->x = mouse_x;
+				user_state->y = mouse_y;
+				user_state->buttons = mouse_buttons;
+				
+				regs->rax = 1; // Returnăm 1 pentru succes
+			} else {
+				regs->rax = 0; // Eroare, pointer invalid
+			}
+			break;
+		}
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

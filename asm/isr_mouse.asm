@@ -4,8 +4,6 @@ extern mouse_handler_main
 section .text
 isr_mouse:
     cli
-    ; Salvăm registrele volatile conform System V AMD64 ABI
-    push r12
     push rax
     push rcx
     push rdx
@@ -16,12 +14,16 @@ isr_mouse:
     push r10
     push r11
 
-    mov r12, rsp
+    ; Aliniere sigură folosind RBP
+    push rbp
+    mov rbp, rsp
     and rsp, -16
+    
     call mouse_handler_main
-    mov rsp, r12
+    
+    mov rsp, rbp
+    pop rbp
 
-    ; Restaurăm registrele
     pop r11
     pop r10
     pop r9
@@ -31,7 +33,6 @@ isr_mouse:
     pop rdx
     pop rcx
     pop rax
-    pop r12
     
-    sti
+    ; sti (opțional, iretq restaurează oricum RFLAGS cu interrupt flag-ul corect)
     iretq

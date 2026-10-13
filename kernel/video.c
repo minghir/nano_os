@@ -7,6 +7,8 @@ static VideoModeInfo current_video_mode = {0};
 // 1024 x 768 pixeli x 4 octeți (32 bpp) = 3.14 MB
 static uint32_t static_back_buffer[1024 * 768];
 
+int desktop_mode = 0;
+
 void video_init(uint64_t fb_addr, uint32_t width, uint32_t height, uint32_t pitch, uint8_t bpp) {
     current_video_mode.fb_addr = fb_addr;
     current_video_mode.width = width;

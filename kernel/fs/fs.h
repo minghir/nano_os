@@ -24,7 +24,10 @@ typedef struct {
     void (*fdisk)(void);
     void (*format)(void);
 	int  (*get_file_at_index)(int index, char* buffer, uint32_t max_len);
+	int (*append_file)(const char* path, const char* data);
 } FileSystemInterface;
+
+
 
 // --- API-ul public unificat (Dispatcher-ul) ---
 void fs_switch_driver(const char* name);
@@ -44,6 +47,7 @@ void fs_get_current_path(char* buffer, uint32_t max_len);
 void fs_fdisk(void);
 void fs_format(void);
 int  fs_get_file_at_index(int index, char* buffer, uint32_t max_len);
+int fs_append_file(const char* path, const char* data);
 // Permitem schimbarea sau exportul driverului NAN2
 extern FileSystemInterface nan2_driver;
 

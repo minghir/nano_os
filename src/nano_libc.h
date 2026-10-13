@@ -7,6 +7,7 @@
 
 #include "../kernel/syscall.h"
 #include "../kernel/video.h"
+#include "../kernel/mouse.h"
 #include "nano_string.h"
 
 // Tipul de date pentru mutex (volatile ca să nu îl optimizeze compilatorul)
@@ -796,4 +797,64 @@ static inline int nano_read_tty_output(int tty_id, char* buf, uint32_t max_len) 
     return ret;
 }
 
+static inline int nano_set_stdout_file(const char* filepath) {
+    int result = 0;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(result)
+        : "a"(SYSCALL_SET_STDOUT), "D"(filepath) // RDI conține calea fișierului
+        : "memory"
+    );
+    return result;
+}
+
+static inline int nano_gfx_present(int x, int y, int w, int h, uint32_t* pixels) {
+    register uint64_t syscall_num __asm__("rax") = SYSCALL_GFX_PRESENT;
+    register uint64_t arg_x       __asm__("rdi") = (uint64_t)x;
+    register uint64_t arg_y       __asm__("rsi") = (uint64_t)y;
+    register uint64_t arg_w       __asm__("rdx") = (uint64_t)w;
+    register uint64_t arg_h       __asm__("rcx") = (uint64_t)h;
+    register uint64_t arg_ptr     __asm__("r8")  = (uint64_t)pixels;
+    register uint64_t ret         __asm__("rax");
+
+    __asm__ volatile (
+        "int $0x80"
+        : "=r"(ret)
+        : "r"(syscall_num), "r"(arg_x), "r"(arg_y), "r"(arg_w), "r"(arg_h), "r"(arg_ptr)
+        : "memory"
+    );
+
+    return (int)ret;
+}
+
+static inline void nano_set_desktop_mode(int mode) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a"((uint64_t)SYSCALL_DESKTOP_MODE), "D"((uint64_t)mode)
+        : "cc", "memory"
+    );
+}
+
+static inline int nano_get_tty_buffer(int tty_id, uint16_t* buffer) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"((uint64_t)SYSCALL_GET_TTY_BUFFER), "D"((uint64_t)tty_id), "S"((uint64_t)buffer)
+        : "memory", "cc"
+    );
+    return (int)ret;
+}
+
+static inline int nano_get_mouse_state(MouseState* state) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"((uint64_t)SYSCALL_GET_MOUSE_STATE), "D"((uint64_t)state)
+        : "memory", "cc"
+    );
+    return (int)ret;
+}
 #endif
