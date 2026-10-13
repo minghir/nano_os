@@ -36,7 +36,7 @@ static uint8_t mouse_read() {
     mouse_wait_output();
     return inb(MOUSE_DATA_PORT);
 }
-
+/*
 void mouse_init() {
     uint8_t status;
 
@@ -77,55 +77,81 @@ void mouse_init() {
     pic_enable_irq(1);   // Tastatura
     pic_enable_irq(12);  // Mouse-ul
 }
+*/
+void mouse_init() {
+    // 1. Golește bufferul de I/O
+    while (inb(0x64) & 1) {
+        inb(0x60);
+    }
 
+    // 2. Activează portul auxiliar (mouse-ul) în controlerul 8042
+    mouse_wait_input();
+    outb(0x64, 0xA8);
+
+    // 3. Setează byte-ul de configurare al controlerului 8042
+    mouse_wait_input();
+    outb(0x64, 0x20);
+    mouse_wait_output();
+    uint8_t status = inb(0x60);
+    
+    status |= 0x02;  // Activează IRQ 12
+    status |= 0x01;  // Activează IRQ 1 (Tastatura)
+    status &= ~0x20; // Activează ceasul de mouse
+
+    mouse_wait_input();
+    outb(0x64, 0x60);
+    mouse_wait_input();
+    outb(0x60, status);
+
+    // 4. Trimite setările către mouse FĂRĂ SĂ BLOCĂM KERNELUL DACĂ RĂSPUNSUL ÎNTÂRZIE
+    mouse_write(0xF6); // Set defaults
+    mouse_read();      // Citim ACK-ul (și îl ignorăm dacă e timeout)
+
+    mouse_write(0xF4); // Enable data reporting - CRUCIAL!
+    mouse_read();      // Citim ACK-ul
+
+    // 5. Deblocare explicită în PIC
+    pic_enable_irq(2);  // Cascada Slave PIC
+    pic_enable_irq(1);  // Tastatura
+    pic_enable_irq(12); // Mouse-ul
+}
+// Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
+// Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
 // Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
 void mouse_handler_main() {
-    // 1. Citim mereu portul 0x60 imediat pentru a elibera bufferul hardware.
-    // Dacă nu facem asta, PIC-ul se blochează și mouse-ul îngheață.
-    uint8_t data = inb(0x60);
+    if (!(inb(MOUSE_STATUS_PORT) & 0x01)) {
+        outb(0xA0, 0x20);
+        outb(0x20, 0x20);
+        return;
+    }
 
-    // 2. Ignorăm pachetele de confirmare (ACK = 0xFA) sau resend (0xFE) trimise de hardware la inițializare
+    uint8_t data = inb(MOUSE_DATA_PORT);
+
     if (data == 0xFA || data == 0xFE) {
         outb(0xA0, 0x20); 
         outb(0x20, 0x20);
         return;
     }
 
-    // 3. Reconstruim pachetul de 3 octeți
-    switch (mouse_cycle) {
-        case 0:
-            // Sincronizare: Primul octet trebuie să aibă bitul 3 setat (valoare 0x08).
-            if (data & 0x08) {
-                mouse_byte[0] = data;
-                mouse_cycle = 1;
-            }
-            break;
-            
-        case 1:
-            mouse_byte[1] = data;
-            mouse_cycle = 2;
-            break;
-            
-        case 2:
-            mouse_byte[2] = data;
-            mouse_cycle = 0; // Resetăm ciclul
+    // --- TEST SIMPLIFICAT FĂRĂ CÎCLET STRICT ---
+    // Stocăm direct în bytes și actualizăm la al 3-lea octet primit
+    mouse_byte[mouse_cycle++] = data;
+    
+    if (mouse_cycle >= 3) {
+        mouse_cycle = 0;
 
-            // Extragem deplasarea pe axele X și Y
-            int dx = (int8_t)mouse_byte[1];
-            int dy = (int8_t)mouse_byte[2];
+        int dx = (int8_t)mouse_byte[1];
+        int dy = (int8_t)mouse_byte[2];
 
-            // Extindem biții de semn pentru direcții negative
-            if (mouse_byte[0] & 0x10) dx |= 0xFFFFFF00;
-            if (mouse_byte[0] & 0x20) dy |= 0xFFFFFF00;
+        if (mouse_byte[0] & 0x10) dx |= 0xFFFFFF00;
+        if (mouse_byte[0] & 0x20) dy |= 0xFFFFFF00;
 
-            uint8_t buttons = mouse_byte[0] & 0x07;
+        uint8_t buttons = mouse_byte[0] & 0x07;
 
-            // Trimitem noile coordonate către logica kernelului
-            mouse_update_position(dx, dy, buttons);
-            break;
+        // Apelăm update-ul
+        mouse_update_position(dx, dy, buttons);
     }
 
-    // 4. Trimitem End of Interrupt (EOI) către ambele cipuri PIC
     outb(0xA0, 0x20);
     outb(0x20, 0x20);
 }

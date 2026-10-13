@@ -72,7 +72,7 @@ typedef enum {
 	SYSCALL_GFX_PRESENT,
 	SYSCALL_DESKTOP_MODE,
 	SYSCALL_GET_TTY_BUFFER,
-	SYSCALL_GET_MOUSE_STATE
+	SYSCALL_GET_MOUSE_STATE,
 } SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly
