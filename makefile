@@ -147,6 +147,9 @@ run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
 		-display curses
+		
+build: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
+	./init_hdd.sh
 	
 #run: kernel.iso hdd_tools apps 
 #	qemu-system-x86_64 -cdrom kernel.iso -drive file=hda_v3.img,format=raw,index=0,media=disk -drive file=hdb_v3.img,format=raw,index=1,media=disk -display sdl

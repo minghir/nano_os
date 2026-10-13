@@ -170,7 +170,7 @@ static inline char nano_read_char(void) {
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)17) // RAX = 17 (SYSCALL_READ_CHAR)
+        : "a" ((uint64_t)SYSCALL_READ_CHAR) // RAX = 17 (SYSCALL_READ_CHAR)
         : "cc", "memory"
     );
     return (char)ret;
@@ -180,7 +180,7 @@ static inline void nano_clear_screen(void) {
     __asm__ volatile (
         "int $0x80"
         : 
-        : "a" ((uint64_t)18) // SYSCALL_CLEAR_SCREEN
+        : "a" ((uint64_t)SYSCALL_CLEAR_SCREEN) // SYSCALL_CLEAR_SCREEN
         : "cc", "memory"
     );
 }
@@ -332,7 +332,7 @@ static inline int nano_has_char(void) {
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)18) // SYSCALL_HAS_CHAR = 18
+        : "a" ((uint64_t)SYSCALL_HAS_CHAR) // SYSCALL_HAS_CHAR = 18
         : "cc", "memory"
     );
     return (int)ret;

@@ -3,8 +3,8 @@
 #include "io.h"
 
 // Starea globală a mouse-ului (accesibilă în tot kernelul)
-int mouse_x = 400; // Centrul ecranului implicit
-int mouse_y = 300;
+int mouse_x = 1024 / 2; // Centrul real: 512
+int mouse_y = 768 / 2;  // Centrul real: 384
 uint8_t mouse_buttons = 0;
 volatile int mouse_moved = 0;
 
@@ -14,8 +14,23 @@ volatile int mouse_moved = 0;
 
 // Funcție apelată exclusiv de ps2_mouse.c când primește date brute de la hardware
 void mouse_update_position(int dx, int dy, uint8_t buttons) {
-    mouse_x += dx;
-    mouse_y -= dy; // Inversat pe axa Y deoarece coordonatele ecranului cresc în jos
+    
+    // --- FILTRU ANTI-TELEPORTARE (Drop Packet) ---
+    int limit = 35; // Am crescut puțin limita ca să lăsăm mișcările foarte rapide
+    if (dx > limit || dx < -limit || dy > limit || dy < -limit) {
+        return; 
+    }
+    // ---------------------------------------------
+
+    // --- MULTIPLICATOR DE SENSIBILITATE ---
+    // Înmulțim cu 2 (sau 3) ca să nu mai fii nevoit să plimbi mouse-ul pe toată masa!
+    int sensitivity = 3; 
+    dx *= sensitivity;
+    dy *= sensitivity;
+    // --------------------------------------
+
+    mouse_x += dx; 
+    mouse_y -= dy; 
 
     // Limite ecran (lăsând un mic buffer de 8 pixeli pentru cursor)
     int max_w = DEFAULT_SCREEN_WIDTH - 8;
@@ -28,7 +43,6 @@ void mouse_update_position(int dx, int dy, uint8_t buttons) {
 
     mouse_buttons = buttons;
     mouse_moved = 1;
-	
 }
 
 // Funcție pentru a prelua starea curentă (folosită de handlerul Syscall)
@@ -37,6 +51,4 @@ void mouse_get_state(MouseState* state) {
     state->x = mouse_x;
     state->y = mouse_y;
     state->buttons = mouse_buttons;
-	print("AAAA X:=");
-	print_number(mouse_x);
 }

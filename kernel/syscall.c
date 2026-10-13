@@ -1145,6 +1145,7 @@ print("\n");
 				uint32_t* src_row  = &user_pixels[(row * w) + src_offset];
 
 				memcpy(dest_row, src_row, copy_w * 4);
+				//video_swap_buffers();
 			}
 
 			// Facem swap doar dacă procesul este pe TTY-ul activ curent!

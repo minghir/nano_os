@@ -239,6 +239,56 @@
     buf[i] = '\0';
 }
 
+void _float_to_str(double val, char* buf, int precision) {
+    if (val < 0) {
+        *buf++ = '-';
+        val = -val;
+    }
+
+    // Extragem partea întreagă
+    int64_t int_part = (int64_t)val;
+    double frac_part = val - (double)int_part;
+
+    // Convertim partea întreagă folosind funcția ta existentă
+    char int_buf[32];
+    _int_to_dec(int_part, int_buf);
+    
+    // Copiem partea întreagă în bufferul final
+    char* p = buf;
+    char* src_int = int_buf;
+    while (*src_int) {
+        *p++ = *src_int++;
+    }
+
+    // Adăugăm punctul zecimal dacă precizia > 0
+    if (precision > 0) {
+        *p++ = '.';
+
+        // Multiplicăm partea fracționară pentru a o transforma în întreg
+        for (int i = 0; i < precision; i++) {
+            frac_part *= 10.0;
+        }
+        int64_t frac_int = (int64_t)(frac_part + 0.5); // Rotunjire fină
+
+        // Convertim partea fracționară
+        char frac_buf[32];
+        _int_to_dec(frac_int, frac_buf);
+
+        // Completăm cu zerouri la stânga dacă e nevoie (ex: .05 în loc de .5)
+        int frac_len = string_length(frac_buf);
+        for (int i = 0; i < precision - frac_len; i++) {
+            *p++ = '0';
+        }
+
+        char* src_frac = frac_buf;
+        while (*src_frac) {
+            *p++ = *src_frac++;
+        }
+    }
+    *p = '\0';
+}
+
+
  int snprintf(char* str, uint32_t size, const char* format, ...) {
     if (!str || size == 0 || !format) return 0;
 
@@ -262,6 +312,10 @@
                 int64_t val = va_arg(args, int);
                 _int_to_dec(val, conv_buf);
             } 
+			else if (spec == 'f') {
+                double val = va_arg(args, double); // În va_arg float devine double
+                _float_to_str(val, conv_buf, 6);   // 6 zecimale standard, ca în printf
+            }
             else if (spec == 'x' || spec == 'X') {
                 uint64_t val = va_arg(args, uint64_t);
                 _uint_to_hex(val, conv_buf, (spec == 'X'));
@@ -351,7 +405,12 @@ void nano_printf(const char* format, ...) {
             if (spec == 'd' || spec == 'i') {
                 int64_t val = va_arg(args, int);
                 _int_to_dec(val, conv_buf);
-            } else if (spec == 'x' || spec == 'X') {
+            } 
+			else if (spec == 'f') {
+                double val = va_arg(args, double); // În va_arg float devine double
+                _float_to_str(val, conv_buf, 6);   // 6 zecimale standard, ca în printf
+            }
+			else if (spec == 'x' || spec == 'X') {
                 uint64_t val = va_arg(args, uint64_t);
                 _uint_to_hex(val, conv_buf, (spec == 'X'));
             } else if (spec == 's') {

@@ -36,48 +36,7 @@ static uint8_t mouse_read() {
     mouse_wait_output();
     return inb(MOUSE_DATA_PORT);
 }
-/*
-void mouse_init() {
-    uint8_t status;
 
-    // Golește bufferul de I/O existent să nu blocheze tastatura
-    while (inb(0x64) & 1) {
-        inb(0x60);
-    }
-
-    // 1. Trimite comanda de activare a portului de mouse la controlerul 8042
-    mouse_wait_input();
-    outb(0x64, 0xA8);
-
-    // 2. Citește byte-ul de configurare al controlerului 8042
-    mouse_wait_input();
-    outb(0x64, 0x20);
-    mouse_wait_output();
-    status = inb(0x60);
-    
-    status |= 0x02;  // Activează IRQ 12
-    status |= 0x01;  // Activează IRQ 1 (Tastatura) - CRUCIAL!
-    status &= ~0x20; // Dezactivează ceasul de mouse dacă e cazul
-
-    // Scrie înapoi byte-ul de configurare
-    mouse_wait_input();
-    outb(0x64, 0x60);
-    mouse_wait_input();
-    outb(0x60, status);
-
-    // 3. Resetează mouse-ul și pornește raportarea
-    mouse_write(0xF6); // Set defaults
-    mouse_read();      // ACK
-
-    mouse_write(0xF4); // Enable data reporting
-    mouse_read();      // ACK
-    
-    // Deblochează explicit în PIC
-	pic_enable_irq(2);
-    pic_enable_irq(1);   // Tastatura
-    pic_enable_irq(12);  // Mouse-ul
-}
-*/
 void mouse_init() {
     // 1. Golește bufferul de I/O
     while (inb(0x64) & 1) {
@@ -115,8 +74,7 @@ void mouse_init() {
     pic_enable_irq(1);  // Tastatura
     pic_enable_irq(12); // Mouse-ul
 }
-// Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
-// Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
+
 // Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
 void mouse_handler_main() {
     uint8_t status = inb(MOUSE_STATUS_PORT);
@@ -146,11 +104,24 @@ void mouse_handler_main() {
     } else {
         mouse_byte[2] = data;
         mouse_cycle = 0;
-
+		/*
         // Pachetul marchează overflow pe axele X/Y; valorile nu sunt utilizabile.
         if (!(mouse_byte[0] & 0xC0)) {
             int dx = (int8_t)mouse_byte[1];
             int dy = (int8_t)mouse_byte[2];
+
+            uint8_t buttons = mouse_byte[0] & 0x07;
+            mouse_update_position(dx, dy, buttons);
+        }
+		*/
+		// Pachetul marchează overflow pe axele X/Y; valorile nu sunt utilizabile.
+        if (!(mouse_byte[0] & 0xC0)) {
+            int dx = mouse_byte[1];
+            int dy = mouse_byte[2];
+
+            // Extindem semnul manual folosind biții din Byte 0
+            if (mouse_byte[0] & 0x10) dx |= 0xFFFFFF00;
+            if (mouse_byte[0] & 0x20) dy |= 0xFFFFFF00;
 
             uint8_t buttons = mouse_byte[0] & 0x07;
             mouse_update_position(dx, dy, buttons);
