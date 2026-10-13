@@ -119,7 +119,8 @@ void mouse_init() {
 // Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
 // Handlerul apelat la fiecare IRQ 12 (vectorul 44 din IDT)
 void mouse_handler_main() {
-    if (!(inb(MOUSE_STATUS_PORT) & 0x01)) {
+    uint8_t status = inb(MOUSE_STATUS_PORT);
+    if (!(status & 0x01) || !(status & 0x20)) {
         outb(0xA0, 0x20);
         outb(0x20, 0x20);
         return;
@@ -133,23 +134,27 @@ void mouse_handler_main() {
         return;
     }
 
-    // --- TEST SIMPLIFICAT FĂRĂ CÎCLET STRICT ---
-    // Stocăm direct în bytes și actualizăm la al 3-lea octet primit
-    mouse_byte[mouse_cycle++] = data;
-    
-    if (mouse_cycle >= 3) {
+    if (mouse_cycle == 0) {
+        // Bitul 3 este setat întotdeauna în primul byte al pachetului PS/2.
+        if (data & 0x08) {
+            mouse_byte[0] = data;
+            mouse_cycle = 1;
+        }
+    } else if (mouse_cycle == 1) {
+        mouse_byte[1] = data;
+        mouse_cycle = 2;
+    } else {
+        mouse_byte[2] = data;
         mouse_cycle = 0;
 
-        int dx = (int8_t)mouse_byte[1];
-        int dy = (int8_t)mouse_byte[2];
+        // Pachetul marchează overflow pe axele X/Y; valorile nu sunt utilizabile.
+        if (!(mouse_byte[0] & 0xC0)) {
+            int dx = (int8_t)mouse_byte[1];
+            int dy = (int8_t)mouse_byte[2];
 
-        if (mouse_byte[0] & 0x10) dx |= 0xFFFFFF00;
-        if (mouse_byte[0] & 0x20) dy |= 0xFFFFFF00;
-
-        uint8_t buttons = mouse_byte[0] & 0x07;
-
-        // Apelăm update-ul
-        mouse_update_position(dx, dy, buttons);
+            uint8_t buttons = mouse_byte[0] & 0x07;
+            mouse_update_position(dx, dy, buttons);
+        }
     }
 
     outb(0xA0, 0x20);
