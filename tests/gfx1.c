@@ -84,8 +84,6 @@ int main(int argc, char** argv) {
 
         // 2. Citim starea mouse-ului prin Syscall
         if (nano_get_mouse_state(&mouse)) {
-            if (mouse.buttons & 1) break; // Ieșire la click stânga
-
             // Construim textul pentru coordonate: "X=xxx Y=yyy B=b"
             char buf_x[16], buf_y[16], buf_b[16];
             int_to_str(mouse.x, buf_x);
