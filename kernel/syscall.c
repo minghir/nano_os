@@ -1181,6 +1181,7 @@ print("\n");
 			}
 			break;
 		}
+		/*
 		case SYSCALL_GET_MOUSE_STATE: {
 			// În arhitectura x86_64, primul argument (pointerul) vine în RDI
 			MouseState* user_state = (MouseState*)regs->rdi;
@@ -1195,6 +1196,21 @@ print("\n");
 				user_state->x = mouse_x;
 				user_state->y = mouse_y;
 				user_state->buttons = mouse_buttons;
+				
+				regs->rax = 1; // Returnăm 1 pentru succes
+			} else {
+				regs->rax = 0; // Eroare, pointer invalid
+			}
+			break;
+		}
+		*/
+		case SYSCALL_GET_MOUSE_STATE: {
+			// În arhitectura x86_64, primul argument (pointerul) vine în RDI
+			MouseState* user_state = (MouseState*)regs->rdi;
+			
+			if (user_state != 0) {
+				// Apelăm funcția dedicată care conține și printul tău de debug!
+				mouse_get_state(user_state);
 				
 				regs->rax = 1; // Returnăm 1 pentru succes
 			} else {

@@ -33,5 +33,7 @@
 int strncmp(const char* s1, const char* s2, size_t n);
 int strcmp(const char* s1, const char* s2);
 
+void nano_printf(const char* format, ...);
+
 #endif // STRING_H
 

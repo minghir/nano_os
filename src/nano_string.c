@@ -322,3 +322,63 @@ int strcmp(const char* s1, const char* s2) {
     }
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
+
+// Funcție variadică nano_printf compatibilă cu snprintf-ul tău existent
+void nano_printf(const char* format, ...) {
+    char buffer[256]; // Alocăm un buffer temporar pe stivă pentru mesaj
+    va_list args;
+    va_start(args, format);
+    
+    // Folosim snprintf-ul tău existent pentru a formata string-ul cu argumente variadice
+    // Notă: snprintf-ul tău folosește va_arg intern, dar fiindcă va_list a fost 
+    // deja deschis, putem crea o funcție vsnprintf sau adaptăm direct:
+    va_end(args);
+
+    // Variantă directă și curată bazată pe logica ta existentă de snprintf:
+    va_start(args, format);
+    char* ptr = buffer;
+    uint32_t max_len = sizeof(buffer) - 1;
+    uint32_t written = 0;
+
+    int i = 0;
+    while (format[i] != '\0' && written < max_len) {
+        if (format[i] == '%' && format[i+1] != '\0') {
+            i++;
+            char spec = format[i];
+            char conv_buf[32];
+            char* src = conv_buf;
+
+            if (spec == 'd' || spec == 'i') {
+                int64_t val = va_arg(args, int);
+                _int_to_dec(val, conv_buf);
+            } else if (spec == 'x' || spec == 'X') {
+                uint64_t val = va_arg(args, uint64_t);
+                _uint_to_hex(val, conv_buf, (spec == 'X'));
+            } else if (spec == 's') {
+                char* s = va_arg(args, char*);
+                src = s ? s : "(null)";
+            } else if (spec == 'c') {
+                conv_buf[0] = (char)va_arg(args, int);
+                conv_buf[1] = '\0';
+            } else {
+                conv_buf[0] = '%';
+                conv_buf[1] = spec;
+                conv_buf[2] = '\0';
+            }
+
+            while (*src != '\0' && written < max_len) {
+                *ptr++ = *src++;
+                written++;
+            }
+            i++;
+        } else {
+            *ptr++ = format[i++];
+            written++;
+        }
+    }
+    *ptr = '\0';
+    va_end(args);
+
+    // Trimitem textul final formatat către funcția de afișare a sistemului tău
+    nano_print(buffer);
+}

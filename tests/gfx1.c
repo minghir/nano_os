@@ -61,63 +61,81 @@ void int_to_str(int n, char* buf) {
         buf[1] = '\0';
         return;
     }
-    int i = 0, temp = n, len = 0;
-    while (temp > 0) { len++; temp /= 10; }
-    buf[len] = '\0';
+    
+    int i = 0;
+    int is_negative = 0;
+    
+    if (n < 0) {
+        is_negative = 1;
+        n = -n;
+    }
+    
+    char temp[16];
+    int temp_len = 0;
+    
     while (n > 0) {
-        buf[--len] = '0' + (n % 10);
+        temp[temp_len++] = '0' + (n % 10);
         n /= 10;
     }
+    
+    if (is_negative) {
+        buf[i++] = '-';
+    }
+    
+    // Inversăm șirul în bufferul final
+    while (temp_len > 0) {
+        buf[i++] = temp[--temp_len];
+    }
+    buf[i] = '\0';
 }
 
 int main(int argc, char** argv) {
-    nano_print("Pornire diagnostic mouse...\n");
+    nano_print("Pornire mod grafic pur...\n");
     nano_set_desktop_mode(1);
     
     MouseState mouse;
     
     while (1) {
-        // 1. Fundal albastru închis
+        // 1. Citim starea mouse-ului
+        nano_get_mouse_state(&mouse);
+
+        // 2. Umplem tot ecranul (1024x768) cu o culoare solidă. 
+        // Dacă miști mouse-ul și apeși click stânga, schimbăm culoarea ca să vedem că bucla rulează!
+        uint32_t bg_color = 0xFF1A2B3C; // Albastru închis
+        
+        if (mouse.buttons & 1) {
+            bg_color = 0xFFFF0000; // Devine Roșu dacă apeși click stânga!
+        }
+
         for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-            screen_fb[i] = 0xFF1A2B3C; 
+            screen_fb[i] = bg_color;
         }
 
-        // 2. Citim starea mouse-ului prin Syscall
-        if (nano_get_mouse_state(&mouse)) {
-            // Construim textul pentru coordonate: "X=xxx Y=yyy B=b"
-            char buf_x[16], buf_y[16], buf_b[16];
-            int_to_str(mouse.x, buf_x);
-            int_to_str(mouse.y, buf_y);
-            int_to_str(mouse.buttons, buf_b);
-
-            char line[64] = "X=";
-            // Concatenare manuală simplă
-            // (sau afișăm direct prin funcții separate de draw_string)
-            
-            // Afișaj direct sus în stânga (10, 10) cu text alb
-            draw_string(10, 10, "X=", 0xFFFFFFFF);
-            draw_string(28, 10, buf_x, 0xFFFFFFFF);
-
-            draw_string(80, 10, "Y=", 0xFFFFFFFF);
-            draw_string(98, 10, buf_y, 0xFFFFFFFF);
-
-            draw_string(150, 10, "BTN=", 0xFFFFFFFF);
-            draw_string(186, 10, buf_b, 0xFFFFFFFF);
-        } else {
-            draw_string(10, 10, "EROARE CITIRE MOUSE!", 0xFFFF0000);
+        // 3. Desenăm un PĂTRAT ALB MARE direct pe coordonatele mouse-ului (x, y)
+        // Așa nu depindem de fonturi sau conversii de stringuri!
+        int cursor_size = 10;
+        for (int dy = 0; dy < cursor_size; dy++) {
+            for (int dx = 0; dx < cursor_size; dx++) {
+                int px = mouse.x + dx;
+                int py = mouse.y + dy;
+                if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
+                    screen_fb[py * SCREEN_WIDTH + px] = 0xFFFFFFFF; // Pătrat alb (cursor brut)
+                }
+            }
         }
 
-        // 3. Trimitem totul pe ecran
+        // 4. Trimitem totul pe ecran
         nano_gfx_present(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, screen_fb);
         
+        // Ieșire la tasta 'q'
         if (nano_has_char()) {
             if (nano_read_char() == 'q') break;
         }
 
-        nano_sleep(30); 
+        nano_sleep(16); // ~60 FPS
     }
 
     nano_set_desktop_mode(0);
-    nano_print("Diagnostic închis.\n");
+    nano_print("Mod grafic închis.\n");
     return 0;
 }
