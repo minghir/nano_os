@@ -182,7 +182,7 @@ uint32_t sys_fork(Registers* parent_regs) {
             uint64_t new_phys = (uint64_t)alloc_page();
             child->prog_pages[i] = new_phys;
 
-            uint8_t* src = (uint8_t*)(0x800000 + (i * 4096)); 
+            uint8_t* src = (uint8_t*)(uintptr_t)(0x800000 + (i * 4096)); 
             uint8_t* dst = (uint8_t*)new_phys;                
             
             for (int b = 0; b < 4096; b++) dst[b] = src[b];
@@ -320,12 +320,23 @@ uint32_t thread_create(uint64_t entry_point, void* arg) {
 
     // 6. Setăm starea pentru IRETQ
     // (Folosim aceleași segmente ca și procesul curent - ex: Ring 0 sau Ring 3)
+	
     regs->ss = 0x10;          
     regs->rsp = stack_top + sizeof(Registers);  
     regs->rflags = 0x202;     // Întreruperi activate (IF=1)
     regs->cs = 0x08;          
     regs->rip = entry_point;  
-
+	
+	/*
+	// 6. Setăm starea corectă pentru IRETQ în User-Space (Ring 3)
+    regs->cs = 0x1b;          // Selector de cod User (ex: GDT Ring 3 Code)
+    regs->ss = 0x23;          // Selector de stivă User (ex: GDT Ring 3 Data)
+    regs->rflags = 0x202;     // IF = 1 (întreruperi activate)
+    regs->rip = entry_point;
+    regs->rsp = stack_top;
+	*/
+    
+	
     // 7. Putem pasa un argument prin RDI (convenție standard)
     regs->rdi = (uint64_t)arg;
 

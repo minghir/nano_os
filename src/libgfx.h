@@ -59,6 +59,7 @@ int gfx_update_window_mouse(GfxWindow* win, int mouse_x, int mouse_y, uint8_t mo
 typedef struct {
     LinkedList* windows;       // Lista de ferestre (folosește libds)
     GfxWindow* active_window;  // Fereastra în focus (deasupra tuturor)
+	nano_mutex_t lock;
 } GfxWindowManager;
 
 GfxWindowManager* gfx_wm_create(void);

@@ -297,12 +297,17 @@ void gfx_wm_free(GfxWindowManager* wm) {
 
 void gfx_wm_add_window(GfxWindowManager* wm, GfxWindow* win) {
     if (!wm || !win) return;
+    
+    nano_mutex_lock(&wm->lock);  // Blocăm accesul concurrent
     list_push_back(wm->windows, win);
     wm->active_window = win;
+    nano_mutex_unlock(&wm->lock); // Eliberăm lacătul
 }
 
 void gfx_wm_draw_all(GfxWindowManager* wm, GfxCanvas* canvas) {
     if (!wm || !wm->windows) return;
+
+    nano_mutex_lock(&wm->lock);
     Node* current = wm->windows->head;
     while (current) {
         GfxWindow* win = (GfxWindow*)current->data;
@@ -311,6 +316,7 @@ void gfx_wm_draw_all(GfxWindowManager* wm, GfxCanvas* canvas) {
         }
         current = current->next;
     }
+    nano_mutex_unlock(&wm->lock);
 }
 
 void gfx_wm_handle_mouse(GfxWindowManager* wm, int mouse_x, int mouse_y, uint8_t mouse_buttons) {
