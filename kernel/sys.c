@@ -143,7 +143,7 @@ uint32_t sys_fork(Registers* parent_regs) {
     print_number(current_process->pid);
     print("\n");
 
-    // 1. Căutăm slot liber
+    // 1. Căutăm slot liber în tabela de procese
     PCB* child = NULL;
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_table[i].state == PROC_FREE) {
@@ -168,7 +168,7 @@ uint32_t sys_fork(Registers* parent_regs) {
     child->cwd_sector = current_process->cwd_sector;
     for (int i = 0; i < 256; i++) child->current_path[i] = current_process->current_path[i];
 
-    // 3. CLONAREA MEMORIEI DE PROGRAM
+    // 3. CLONAREA MEMORIEi DE PROGRAM (PML4 + Paginile fizice)
     print("[FORK DEBUG] Clonam paginile de program...\n");
     uint64_t* child_pml4 = create_process_pml4();
     if (!child_pml4) {
@@ -182,83 +182,69 @@ uint32_t sys_fork(Registers* parent_regs) {
             uint64_t new_phys = (uint64_t)alloc_page();
             child->prog_pages[i] = new_phys;
 
+            // Copiem conținutul paginii de program din spațiul fizic/virtual
+            // (Presupunând că paginile de program sunt mapate la 0x800000 + i*4096)
             uint8_t* src = (uint8_t*)(uintptr_t)(0x800000 + (i * 4096)); 
-            uint8_t* dst = (uint8_t*)new_phys;                
             
+            // Mapăm temporar noua pagină fizică în kernel la 0x80000000 ca să putem scrie în ea
+            uint64_t* kernel_pml4;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
+            map_page(kernel_pml4, 0x80000000, new_phys, PAGE_PRESENT | PAGE_WRITE);
+            uint8_t* dst = (uint8_t*)0x80000000;              
+
             for (int b = 0; b < 4096; b++) dst[b] = src[b];
 
+            // Mapăm în PML4-ul copilului
             map_page(child_pml4, 0x800000 + (i * 4096), new_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
         } else {
             child->prog_pages[i] = 0;
         }
     }
 
-    // 4. CLONAREA ȘI RELOCAREA STIVEI
-    print("[FORK DEBUG] Clonam stiva (16 KB)...\n");
+    // 4. CLONAREA STIVEI DE USER (Ring 3) - Exemplu pentru stiva de la 0x900000
+    // Dacă ai stiva de user alocată la 0x900000, o clonăm și pe ea:
+    uint64_t user_stack_phys = (uint64_t)alloc_page();
+    uint64_t* kernel_pml4_ref;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4_ref));
+    map_page(kernel_pml4_ref, 0x80000000, user_stack_phys, PAGE_PRESENT | PAGE_WRITE);
     
-    uint64_t parent_stack_start = current_process->stack_base;
-    uint64_t parent_stack_end = parent_stack_start + 16384;
+    uint8_t* user_src = (uint8_t*)0x900000; // Stiva părinte
+    uint8_t* user_dst = (uint8_t*)0x80000000;
+    for (int b = 0; b < 4096; b++) user_dst[b] = user_src[b];
+    
+    map_page(child_pml4, 0x900000, user_stack_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
 
-    // SANITY CHECK CRITIC: Registrele părintelui TREBUIE să fie pe stiva lui!
-    if ((uint64_t)parent_regs < parent_stack_start || (uint64_t)parent_regs >= parent_stack_end) {
-        print("[FORK FATAL] parent_regs NU este pe stiva procesului! Offset invalid.\n");
+    // 5. CREAREA STIVEI DE KERNEL PENTRU COPIL (Ring 0)
+    uint8_t* raw_child_kernel_stack = (uint8_t*)malloc(16384);
+    if (!raw_child_kernel_stack) {
+        print("[FORK ERROR] Esec malloc stiva kernel copil!\n");
         return 0;
     }
+    child->stack_base = (uint64_t)raw_child_kernel_stack; 
 
-    uint8_t* raw_child_stack = (uint8_t*)malloc(16384 + 16);
-    if (!raw_child_stack) {
-        print("[FORK ERROR] Esec malloc stiva copil!\n");
-        return 0;
-    }
-    child->stack_base = (uint64_t)raw_child_stack; 
+    uint64_t child_kernel_rsp = (uint64_t)raw_child_kernel_stack + 16384;
+    Registers* child_regs = (Registers*)(child_kernel_rsp - sizeof(Registers));
 
-    // Aliniem manual stiva copilului ca să aibă exact același rest (modulo 16) ca stiva părintelui
-    uint64_t child_start = (uint64_t)raw_child_stack;
-    while ((child_start & 0xF) != (parent_stack_start & 0xF)) {
-        child_start++;
-    }
-    uint8_t* child_stack_aligned = (uint8_t*)child_start;
-    uint8_t* parent_stack_ptr = (uint8_t*)parent_stack_start;
+    // Copiem direct întregul cadru de registre de la părinte
+    *child_regs = *parent_regs;
 
-    // Copiem octet cu octet
-    for (int i = 0; i < 16384; i++) {
-        child_stack_aligned[i] = parent_stack_ptr[i];
-    }
-    
-    // Relocăm toți pointerii interni (ex: RBP, RSP salvate)
-    print("[FORK DEBUG] Relocam pointerii din stiva...\n");
-    int64_t stack_offset = (int64_t)child_stack_aligned - (int64_t)parent_stack_start;
-    uint64_t* child_stack_qwords = (uint64_t*)child_stack_aligned;
-    
-    for (int i = 0; i < (16384 / 8); i++) {
-        if (child_stack_qwords[i] >= parent_stack_start && child_stack_qwords[i] <= parent_stack_end) {
-            child_stack_qwords[i] += stack_offset;
-        }
-    }
-    
-    // Găsim structura Registers în noua stivă
-    uint64_t regs_offset = (uint64_t)parent_regs - parent_stack_start;
-    Registers* child_regs = (Registers*)(child_start + regs_offset);
-    
-    // 5. MOMENTUL MAGIC: Setăm RAX = 0 pentru copil
+    // Momentul magic: Copilul primește RAX = 0 din fork()
     child_regs->rax = 0;
-    
-    // Setăm RSP-ul final pentru scheduler
-    child->regs = *child_regs; 
+
+    // Setăm starea de pornire a copilului în scheduler
     child->regs.rsp = (uint64_t)child_regs;
-    
     child->state = PROC_READY;
-    
+
     print("[FORK SUCCESS] Copil creat cu PID: ");
     print_number(child->pid);
     print("\n");
-    
+
     return child->pid;
 }
 
 
 uint32_t thread_create(uint64_t entry_point, void* arg) {
-    PCB* p = 0;
+	PCB* p = NULL;
     
     // 1. Căutăm un slot liber în tabela unificată de task-uri
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -269,13 +255,19 @@ uint32_t thread_create(uint64_t entry_point, void* arg) {
         }
     }
     
+    // VERIFICARE CRUCIALĂ: Dacă tabela este plină, ieșim curat (Fără Page Fault la adresa 0!)
     if (!p) {
-        print("[DEBUG] ERROR: Process table full! Cannot create thread.\n");
+        print("[THREAD_CREATE ERROR] Tabela de procese este plina! Nu mai putem crea thread-uri.\n");
         return 0;
     }
 
-    // 2. MOȘTENIREA RESURSELOR (Magia thread-urilor):
-    // Thread-ul folosește EXACT ACEEAȘI memorie virtuală (CR3) și aceleași pagini ca procesul curent!
+    // 2. Verificăm adresa de intrare după ce ne-am asigurat că p este valid
+    if (entry_point < 0x800000 || entry_point >= 0x900000) {
+        print("[THREAD_CREATE ERROR] Adresa de intrare este invalida pentru User-Space!\n");
+        return 0; // p nu mai e afectat greșit
+    }
+
+    // 2. MOȘTENIREA RESURSELOR (Thread-ul împarte același spațiu de memorie CR3)
     p->cr3 = current_process ? current_process->cr3 : kernel_cr3;
     for (int i = 0; i < MAX_PROG_PAGES; i++) {
         p->prog_pages[i] = current_process ? current_process->prog_pages[i] : 0;
@@ -295,22 +287,37 @@ uint32_t thread_create(uint64_t entry_point, void* arg) {
         p->current_path[1] = '\0';
     }
 
-    // 3. Alocăm o stivă privată dedicată acestui thread (ex: 8 KB)
-    uint8_t* stack = (uint8_t*)malloc(8192);
-    if (!stack) {
-        print("[DEBUG] ERROR: malloc failed for thread stack!\n");
+    // 3. STIVA DE KERNEL (Obligatorie pentru întreruperi și comutarea prin TSS)
+    // Fiecare thread din sistem ARE NEVOIE de o stivă de kernel privată!
+    uint8_t* kernel_stack = (uint8_t*)malloc(16384);
+    if (!kernel_stack) {
+        print("[DEBUG] ERROR: malloc failed for kernel stack!\n");
         p->state = PROC_FREE;
         return 0;
     }
-    p->stack_base = (uint64_t)stack;
-    
-    // 4. Aliniem vârful stivei la 16 octeți
-    uint64_t stack_top = (uint64_t)(stack + 8192);
-    stack_top &= ~0xF; 
+    p->stack_base = (uint64_t)kernel_stack;
 
-    // 5. Pregătim structura de registre la vârful stivei
-    stack_top -= sizeof(Registers);
-    Registers* regs = (Registers*)stack_top;
+    // 4. STIVA DE USER-SPACE (Ring 3 Stack)
+    // Alocăm 2 pagini fizice pentru stiva de user a thread-ului (8 KB)
+    uint64_t user_stack_phys1 = (uint64_t)alloc_page();
+    uint64_t user_stack_phys2 = (uint64_t)alloc_page();
+    
+    // Aleagă o adresă virtuală sigură în spațiul de user (de exemplu 0x900000 + PID * 0x10000)
+    uint64_t user_stack_vaddr = 0x900000 + (p->pid * 0x10000); 
+
+    uint64_t* child_pml4 = (uint64_t*)p->cr3;
+    map_page(child_pml4, user_stack_vaddr, user_stack_phys1, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+    map_page(child_pml4, user_stack_vaddr + 4096, user_stack_phys2, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+
+    // Vârful stivei de user (aliniat la 16 octeți)
+    uint64_t user_stack_top = user_stack_vaddr + 16384;
+    user_stack_top &= ~0xF;
+
+    // 5. Pregătim structura de registre la vârful stivei de KERNEL
+    uint64_t kernel_stack_top = (uint64_t)(kernel_stack + 16384);
+    kernel_stack_top &= ~0xF;
+    kernel_stack_top -= sizeof(Registers);
+    Registers* regs = (Registers*)kernel_stack_top;
 
     // Zeroizăm registrele
     uint8_t* byte_ptr = (uint8_t*)regs;
@@ -318,35 +325,23 @@ uint32_t thread_create(uint64_t entry_point, void* arg) {
         byte_ptr[i] = 0;
     }
 
-    // 6. Setăm starea pentru IRETQ
-    // (Folosim aceleași segmente ca și procesul curent - ex: Ring 0 sau Ring 3)
-	
-    regs->ss = 0x10;          
-    regs->rsp = stack_top + sizeof(Registers);  
-    regs->rflags = 0x202;     // Întreruperi activate (IF=1)
-    regs->cs = 0x08;          
-    regs->rip = entry_point;  
-	
-	/*
-	// 6. Setăm starea corectă pentru IRETQ în User-Space (Ring 3)
-    regs->cs = 0x1b;          // Selector de cod User (ex: GDT Ring 3 Code)
-    regs->ss = 0x23;          // Selector de stivă User (ex: GDT Ring 3 Data)
-    regs->rflags = 0x202;     // IF = 1 (întreruperi activate)
-    regs->rip = entry_point;
-    regs->rsp = stack_top;
-	*/
+    // 6. Setăm starea corectă pentru IRETQ în User-Space (Ring 3)
+    regs->cs = 0x1B;              // Selector de cod User (Ring 3)
+    regs->ss = 0x23;              // Selector de stivă User (Ring 3)
+    regs->rflags = 0x202;         // Întreruperi activate (IF=1)
+    regs->rip = entry_point;      // Funcția thread-ului
+    regs->rsp = user_stack_top;   // Stiva privată din User-Space
     
-	
-    // 7. Putem pasa un argument prin RDI (convenție standard)
+    // 7. Pasăm argumentul prin RDI (Convenția System V AMD64)
     regs->rdi = (uint64_t)arg;
 
-    // 8. Salvăm RSP-ul în PCB
-    p->regs.rsp = stack_top;
+    // 8. Salvăm RSP-ul stivei de kernel în PCB pentru scheduler
+    p->regs.rsp = (uint64_t)regs;
     
-    // 9. Îl punem în starea READY, gata de rulare de către scheduler
+    // 9. Îl punem în starea READY
     p->state = PROC_READY;
     
-    print("[THREAD_CREATE] Thread creat cu succes | TID: ");
+    print("[THREAD_CREATE] Thread Ring 3 creat | TID: ");
     print_number(p->pid);
     print("\n");
 

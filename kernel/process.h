@@ -3,7 +3,7 @@
 
 #include "pcb.h"
 
-#define MAX_PROCESSES 64
+#define MAX_PROCESSES 256
 
 // Exportăm variabilele globale ca să le poată folosi și syscall.c
 extern PCB process_table[MAX_PROCESSES];
