@@ -111,7 +111,7 @@
     }
     return str;
 }
-
+/*
  void* memset(void* dest, int val, size_t count) {
     unsigned char* ptr = (unsigned char*)dest;
     while (count-- > 0) {
@@ -128,6 +128,94 @@
     }
     return dest;
 }
+*/
+
+
+void* memset(void* dest, int val, size_t count) {
+    char* d = (char*)dest;
+    uint8_t v = (uint8_t)val;
+
+    if (count < 16) {
+        while (count-- > 0) *d++ = v;
+        return dest;
+    }
+
+    while (((uintptr_t)d & 0xF) != 0 && count > 0) {
+        *d++ = v;
+        count--;
+    }
+
+    uint64_t pattern = v;
+    pattern |= (pattern << 8);
+    pattern |= (pattern << 16);
+    pattern |= (pattern << 32);
+
+    __asm__ volatile(
+        "movd %1, %%xmm0\n\t"
+        "pshufd $0, %%xmm0, %%xmm0\n\t"
+        "1:\n\t"
+        "cmp $64, %2\n\t"
+        "jl 2f\n\t"
+        "movaps %%xmm0, (%0)\n\t"
+        "movaps %%xmm0, 16(%0)\n\t"
+        "movaps %%xmm0, 32(%0)\n\t"
+        "movaps %%xmm0, 48(%0)\n\t"
+        "add $64, %0\n\t"
+        "sub $64, %2\n\t"
+        "jmp 1b\n\t"
+        "2:\n\t"
+        : "+r" (d), "+r" (pattern), "+r" (count)
+        :
+        : "xmm0", "memory"
+    );
+
+    while (count-- > 0) {
+        *d++ = v;
+    }
+
+    return dest;
+}
+
+void* memcpy(void* dest, const void* src, size_t count) {
+    char* d = (char*)dest;
+    const char* s = (const char*)src;
+
+    if (count < 16) {
+        while (count-- > 0) *d++ = *s++;
+        return dest;
+    }
+
+    __asm__ volatile(
+        "1:\n\t"
+        "cmp $64, %2\n\t"
+        "jl 2f\n\t"
+        "movups (%1), %%xmm0\n\t"
+        "movups 16(%1), %%xmm1\n\t"
+        "movups 32(%1), %%xmm2\n\t"
+        "movups 48(%1), %%xmm3\n\t"
+        
+        "movups %%xmm0, (%0)\n\t"
+        "movups %%xmm1, 16(%0)\n\t"
+        "movups %%xmm2, 32(%0)\n\t"
+        "movups %%xmm3, 48(%0)\n\t"
+
+        "add $64, %1\n\t"
+        "add $64, %0\n\t"
+        "sub $64, %2\n\t"
+        "jmp 1b\n\t"
+        "2:\n\t"
+        : "+r" (d), "+r" (s), "+r" (count)
+        :
+        : "xmm0", "xmm1", "xmm2", "xmm3", "memory"
+    );
+
+    while (count-- > 0) {
+        *d++ = *s++;
+    }
+
+    return dest;
+}
+
 
  char* string_copy(char* dest, const char* src) {
     char* original_dest = dest;

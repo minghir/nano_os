@@ -13,6 +13,7 @@
 #include "video.h"
 #include "mouse.h"
 #include "sys.h"
+#include "drivers/cpu.h"
 
 #include "gfx/gfx_term.h"
 #include "drivers/network/network.h"
@@ -79,6 +80,8 @@ extern volatile int mouse_moved;
 extern void gfx_redraw_tty(int tty_id);
 extern int active_tty;
 
+extern void init_tss(void);
+
 void load_kernel_environment() {
     uint8_t* buffer = (uint8_t*)malloc(512);
     if (!buffer) return;
@@ -135,6 +138,20 @@ void page_fault_handler(FaultRegisters* regs) {
     uint64_t faulting_address;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(faulting_address));
 
+    KLOG_ERROR("\n--- PAGE FAULT DEBUG ---\n");
+    KLOG_ERROR("CR2 (Memoria accesata gresit): ");
+    print_number(faulting_address); // Poți folosi print_number temporar
+    KLOG_ERROR("\nRIP (Unde a crapat codul): ");
+    print_number(regs->rip);
+    KLOG_ERROR("\n-------------------------\n");
+
+    if (regs->rip >= 0x800000 && regs->rip < 0x900000) {
+        KLOG_ERROR("-> RIP este in zona programului (0x800000)\n");
+    } else {
+        KLOG_ERROR("-> RIP este in afara zonei programului!\n");
+    }
+	
+
     // Verificăm cine a crăpat cu adevărat analizând Adresa Instrucțiunii (RIP)
     // - Dacă RIP >= 0x800000 (Suntem în zona programelor)
     // - Dacă RIP < 0x100000  (S-a sărit la o adresă invalidă ca NULL / 0x0)
@@ -178,6 +195,7 @@ void page_fault_handler(FaultRegisters* regs) {
 }
 
 void kernel_main(unsigned long magic, unsigned long addr) {
+	init_sse();
     tty_init();
     cursor_init();
     KLOG_INFO("Nano OS booted!\n");
@@ -250,66 +268,100 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     pci_scan_bus();
 	//test_mac();
 	//net_send_test_packet();
-    KLOG_INFO("Loading Init daemons on all TTYs...\n");
+    KLOG_INFO("\nLoading Init daemons on all TTYs...\n");
 
-    uint64_t old_cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+//Apelează init_tss(); o singură dată în kernel_main, după ce ai inițializat GDT-ul, memoria și paging-ul, dar înainte să lansezi init-ul sau să activezi timerul.
+	KLOG_INFO("[DEBUG] Incepem incarcarea INIT...\n");
+    init_tss();
+    KLOG_INFO("[DEBUG] TSS incarcat cu succes.\n");
+
+    uint64_t* kernel_pml4;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
 
     for (int t = 0; t < 4; t++) {
+        KLOG_INFO("[DEBUG] TTY: Creare PML4...\n");
         uint64_t init_pages[MAX_PROG_PAGES];
+        uint64_t* init_pml4 = create_process_pml4();
+        
+        if (init_pml4 == 0) {
+            KLOG_FATAL("FATAL: create_process_pml4 a returnat NULL!\n");
+            while(1) __asm__ volatile("cli; hlt");
+        }
+
+		// ================= FIX: REDĂ VEDEREA KERNEL-ULUI =================
+        // Mapăm memoria video (Framebuffer) și în PML4-ul User-Space-ului!
+        uint32_t fb_size = screen_pitch * screen_height;
+        for (uint32_t offset = 0; offset < fb_size; offset += PAGE_SIZE) {
+            map_page(init_pml4, 
+                     fb_physical_address + offset, 
+                     fb_physical_address + offset, 
+                     PAGE_PRESENT | PAGE_WRITE); // Doar Kernel-ul are voie să scrie (Fără PAGE_USER)
+        }
+        // =================================================================
+
+
+        KLOG_INFO("[DEBUG] TTY: Alocare pagini fizice...\n");
         for (int p = 0; p < MAX_PROG_PAGES; p++) {
             init_pages[p] = (uint64_t)alloc_page();
+            if (init_pages[p] == 0) KLOG_FATAL("alloc_page NULL!\n");
+            map_page(init_pml4, 0x800000 + (p * 4096), init_pages[p], PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
         }
 
-        uint64_t* init_pml4 = create_process_pml4();
-
-        for (int p = 0; p < MAX_PROG_PAGES; p++) {
-            map_page(init_pml4,
-                     0x800000 + (p * 4096),
-                     init_pages[p],
-                     PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        KLOG_INFO("[DEBUG] TTY: Alocare temp_buffer prin malloc...\n");
+        uint8_t* temp_buffer = (uint8_t*)malloc(MAX_PROG_PAGES * 4096);
+        if (temp_buffer == 0) {
+            KLOG_FATAL("FATAL: malloc a returnat NULL! Heap-ul este plin sau neinitializat corect.\n");
+            while(1) __asm__ volatile("cli; hlt");
         }
 
-        __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)init_pml4));
-
-        int bytes = fs_read_file("/hda/sbin/init", (uint8_t*)0x800000, MAX_PROG_PAGES*4096);
+        KLOG_INFO("[DEBUG] TTY: Citire fs_read_file...\n");
+        int bytes = fs_read_file("/hda/sbin/init", temp_buffer, MAX_PROG_PAGES * 4096);
 
         if (bytes > (int)sizeof(NanoHeader)) {
-            NanoHeader* hdr = (NanoHeader*)0x800000;
-            if (hdr->magic[0] == 'N' && hdr->magic[1] == 'A' &&
-                hdr->magic[2] == 'S' && hdr->magic[3] == '1') {
-
-                uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
-
-                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-				
-				
-				
-                uint32_t init_pid = process_create("init", init_entry_point, 0, NULL,
-                                                   (uint64_t)init_pml4, init_pages, t);
-												   
-				PCB* init_pcb = get_process_by_pid(init_pid);
-                if (init_pcb) {
-                    init_pcb->cwd_sector = 0; // Sectorul root-ului tău (sau inodul 0)
-                    // Copiem calea "/" în current_path
-                    int idx = 0;
-                    init_pcb->current_path[idx++] = '/';
-                    init_pcb->current_path[idx] = '\0';
-                }
+            KLOG_INFO("[DEBUG] TTY: Mapare si copiere in spatiul procesului...\n");
+            for (int p = 0; p < MAX_PROG_PAGES; p++) {
+                uint64_t safe_vaddr = 0x80000000 + (p * 4096); // 2 GB
+                map_page(kernel_pml4, safe_vaddr, init_pages[p], PAGE_PRESENT | PAGE_WRITE);
                 
-                ttys[t].foreground_pid = init_pid;
-            } else {
-                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-                KLOG_FATAL("FATAL ERROR: /hda/sbin/init bad signature!\n");
+                uint8_t* src = temp_buffer + (p * 4096);
+                uint8_t* dest = (uint8_t*)safe_vaddr;
+                for (int i = 0; i < 4096; i++) {
+                    dest[i] = src[i];
+                }
             }
-        } else {
-            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
-            KLOG_FATAL("FATAL ERROR: /hda/sbin/init missing!\n");
-        }
-    }
 
+            KLOG_INFO("[DEBUG] TTY: Apel process_create...\n");
+            NanoHeader* hdr = (NanoHeader*)temp_buffer;
+            uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
+            uint32_t init_pid = process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
+            
+            KLOG_INFO("[DEBUG] TTY: Configurare PCB...\n");
+            PCB* init_pcb = get_process_by_pid(init_pid);
+            if (init_pcb == 0) {
+                KLOG_FATAL("FATAL: get_process_by_pid a returnat NULL (nu a gasit PID-ul)!\n");
+                while(1) __asm__ volatile("cli; hlt");
+            }
+            init_pcb->cwd_sector = 0; 
+            init_pcb->current_path[0] = '/';
+            init_pcb->current_path[1] = '\0';
+            
+            ttys[t].foreground_pid = init_pid;
+        } else {
+            KLOG_FATAL("FATAL: /hda/sbin/init invalid sau missing!\n");
+            while(1) __asm__ volatile("cli; hlt");
+        }
+        
+        KLOG_INFO("[DEBUG] TTY: Eliberare temp_buffer...\n");
+        free(temp_buffer);
+    }
+    
+    KLOG_INFO("[DEBUG] Incarcare terminata. Pornim timer-ul!\n");
     // TTY-urile de la indexul 4 în sus rămân libere pentru daemoni de rețea (Telnet/SSH)
 	KLOG_DEBUG("[DEBUG] 4 workspace TTYs created. Network TTYs 4+ reserved.\n");
+	
+	if(check_avx_support()) KLOG_INFO("AVX Support acctive!\n");
+	if(check_sse_support()) KLOG_INFO("SSE Support acctive!\n");
+	
 	
 	// Setăm starea procesului de kernel (PID 0) la SLEEPING sau ZOMBIE 
     // ca schedulerul să nu încerce niciodată să se întoarcă pe stiva de boot.

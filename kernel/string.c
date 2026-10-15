@@ -108,7 +108,7 @@
     }
     return str;
 }
-
+/*
  void* memset(void* dest, int val, int count) {
     unsigned char* ptr = (unsigned char*)dest;
     while (count-- > 0) {
@@ -125,6 +125,100 @@
     }
     return dest;
 }
+*/
+
+void* memset(void* dest, int val, int count) {
+    char* d = (char*)dest;
+    // Setăm valoarea pe un octet
+    uint8_t v = (uint8_t)val;
+
+    // Dacă avem mai puțin de 16 octeți, mergem clasic byte-cu-byte
+    if (count < 16) {
+        while (count-- > 0) *d++ = v;
+        return dest;
+    }
+
+    // Aliniem destinația la 16 octeți pentru performanță maximă (opțional, dar recomandat)
+    while (((uintptr_t)d & 0xF) != 0 && count > 0) {
+        *d++ = v;
+        count--;
+    }
+
+    // Umplem un registru XMM cu 16 octeți egali cu 'v'
+    uint64_t pattern = v;
+    pattern |= (pattern << 8);
+    pattern |= (pattern << 16);
+    pattern |= (pattern << 32);
+
+    __asm__ volatile(
+        "movd %1, %%xmm0\n\t"
+        "pshufd $0, %%xmm0, %%xmm0\n\t" // Duplicăm pattern-ul pe toți cei 16 octeți din xmm0
+        "1:\n\t"
+        "cmp $64, %2\n\t"
+        "jl 2f\n\t"
+        "movaps %%xmm0, (%0)\n\t"       // Mutăm 16 octeți
+        "movaps %%xmm0, 16(%0)\n\t"     // 32 octeți
+        "movaps %%xmm0, 32(%0)\n\t"     // 48 octeți
+        "movaps %%xmm0, 48(%0)\n\t"     // 64 octeți odată!
+        "add $64, %0\n\t"
+        "sub $64, %2\n\t"
+        "jmp 1b\n\t"
+        "2:\n\t"
+        // Gestionăm restul de octeți rămași sub 64
+        : "+r" (d), "+r" (pattern), "+r" (count)
+        :
+        : "xmm0", "memory"
+    );
+
+    // Copiem restul de octeți rămași (sub 16)
+    while (count-- > 0) {
+        *d++ = v;
+    }
+
+    return dest;
+}
+
+void* memcpy(void* dest, const void* src, int count) {
+    char* d = (char*)dest;
+    const char* s = (const char*)src;
+
+    if (count < 16) {
+        while (count-- > 0) *d++ = *s++;
+        return dest;
+    }
+
+    __asm__ volatile(
+        "1:\n\t"
+        "cmp $64, %2\n\t"
+        "jl 2f\n\t"
+        "movups (%1), %%xmm0\n\t"       // Citim 16 octeți nealiniați
+        "movups 16(%1), %%xmm1\n\t"     // 32 octeți
+        "movups 32(%1), %%xmm2\n\t"     // 48 octeți
+        "movups 48(%1), %%xmm3\n\t"     // 64 octeți
+        
+        "movups %%xmm0, (%0)\n\t"       // Scriem 16 octeți
+        "movups %%xmm1, 16(%0)\n\t"     // 32 octeți
+        "movups %%xmm2, 32(%0)\n\t"     // 48 octeți
+        "movups %%xmm3, 48(%0)\n\t"     // 64 octeți odată!
+
+        "add $64, %1\n\t"
+        "add $64, %0\n\t"
+        "sub $64, %2\n\t"
+        "jmp 1b\n\t"
+        "2:\n\t"
+        : "+r" (d), "+r" (s), "+r" (count)
+        :
+        : "xmm0", "xmm1", "xmm2", "xmm3", "memory"
+    );
+
+    // Copiem restul care nu se împarte la 64
+    while (count-- > 0) {
+        *d++ = *s++;
+    }
+
+    return dest;
+}
+
 
  char* string_copy(char* dest, const char* src) {
     char* original_dest = dest;

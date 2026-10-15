@@ -131,12 +131,20 @@ page_table_l3:
 page_table_l2:
     resq 512
 
+global gdt_start
+
 section .data
 align 8
 gdt_start:
-    dq 0                     ; Null Descriptor
-    dq 0x00AF9A000000FFFF    ; 64-bit code descriptor (R/X)
-    dq 0x00CF92000000FFFF    ; 64-bit data descriptor (R/W)
+    ;dq 0                     ; Null Descriptor
+    ;dq 0x00AF9A000000FFFF    ; 64-bit code descriptor (R/X)
+    ;dq 0x00CF92000000FFFF    ; 64-bit data descriptor (R/W)
+	dq 0                       ; 0x00: Null Descriptor
+    dq 0x00AF9A000000FFFF      ; 0x08: Kernel Code (64-bit, Ring 0)
+    dq 0x00CF92000000FFFF      ; 0x10: Kernel Data (32/64-bit, Ring 0)
+    dq 0x00AFFA000000FFFF      ; 0x18: User Code (64-bit, Ring 3)  <-- AICI ERA GREȘEALA (AFFA, nu FFAF!)
+    dq 0x00CFF2000000FFFF      ; 0x20: User Data (32/64-bit, Ring 3)
+    dq 0, 0                    ; 0x28: TSS (16 octeți)
 gdt_end:
 
 gdt_descriptor:

@@ -136,7 +136,8 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 		-vga std \
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
-		-display sdl
+		-display sdl \
+		-cpu qemu64,+sse,+sse2,+avx
 
 # Regula pentru Modul Text (TXT)
 run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
@@ -146,7 +147,8 @@ run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
 		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
-		-display curses
+		-display curses \
+		-cpu qemu64,+sse,+sse2,+avx
 		
 build: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 	./init_hdd.sh

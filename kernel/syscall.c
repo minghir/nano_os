@@ -34,7 +34,15 @@ extern int term_rows;
 extern int desktop_mode;
 
 void syscall_handler(SyscallRegisters* regs) {
+	/*
+	KLOG_INFO("\n[SYSCALL] Am primit INT 0x80 din User-Space! RAX (ID) = ");
 	
+	// Folosim o variabilă temporară pentru a printa ușor numărul
+    char rax_buf[16];
+    simple_itoa(regs->rax, rax_buf); // Sau folosește print_number(regs->rax) dacă o ai
+    KLOG_INFO(rax_buf);
+    KLOG_INFO("\n");
+	*/
 	// 1. Dezactivăm întreruperile pentru a preveni schimbarea lui current_process la mijlocul syscall-ului
     __asm__ volatile("cli");
 	
@@ -201,80 +209,81 @@ void syscall_handler(SyscallRegisters* regs) {
                 break;
             }
 
-            // 3. ÎNCĂRCAREA EFECTIVĂ (Alocăm memorie doar pentru programul valid!)
+            // 3. ÎNCĂRCAREA EFECTIVĂ (Fără să schimbăm CR3 deloc!)
             file_found = 1;
-            
-            // Creăm o HARTĂ VIRTUALĂ nouă (PML4) doar pentru acest proces
             uint64_t* process_pml4 = create_process_pml4();
-
-            // A. Alocăm 8 pagini FIZICE disjuncte (fragmentate)
             uint64_t allocated_pages[MAX_PROG_PAGES];
+
+            // A. Alocăm paginile fizice și le mapăm DOAR în PML4-ul Ring 3
             for(int p = 0; p < MAX_PROG_PAGES; p++) {
                 allocated_pages[p] = (uint64_t)alloc_page();
-                // Mapăm imediat pagina fizică (oriunde ar fi ea) la adresa VIRTUALĂ continuă
                 map_page(process_pml4, 0x800000 + (p * 4096), allocated_pages[p], 
                          PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
             }
 
-            // B. Salvăm CR3-ul kernelului și Trecem TEMPORAR pe noua hartă
-            uint64_t old_cr3;
-            __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
-            __asm__ volatile("mov %0, %%cr3" :: "r"((uint64_t)process_pml4));
+            // B. Citim fișierul de pe disc într-un buffer sigur (CR3-ul kernelului rămâne activ!)
+            uint8_t* temp_buffer = (uint8_t*)malloc(MAX_PROG_PAGES * 4096);
+            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], temp_buffer, MAX_PROG_PAGES * 4096);
 
-            // C. Citim fișierul CONTINUU la adresa VIRTUALĂ!
-            // Acum procesorul (MMU) va sparge automat cei 32KB și îi va pune în paginile corecte!
-            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], (uint8_t*)0x800000,MAX_PROG_PAGES*4096 );
-            
-            NanoHeader* hdr = (NanoHeader*)0x800000; 
+            NanoHeader* hdr = (NanoHeader*)temp_buffer; 
 
-            // Verificăm dacă fișierul e corupt
             if (bytes_read <= (int)sizeof(NanoHeader) || 
                 hdr->magic[0] != 'N' || hdr->magic[1] != 'A' || 
                 hdr->magic[2] != 'S' || hdr->magic[3] != '1') {
                 
-                __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3)); // Revenim la kernel
-                for(int p = 0; p < 8; p++) free_page((void*)allocated_pages[p]);
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
                 free_process_paging((uint64_t)process_pml4);
+                free(temp_buffer);
                 regs->rax = 0;
                 break;
             }
 
-            uint64_t entry_point = 0x800000 + hdr->entry_offset;
+            // C. Copiem din buffer-ul temporar în paginile procesului folosind o adresă de kernel (2 GB)
+            uint64_t* kernel_pml4;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
             
-            // D. Revenim la CR3-ul kernelului ÎNAINTE de a apela alte funcții!
-            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+            for(int p = 0; p < MAX_PROG_PAGES; p++) {
+                uint64_t safe_vaddr = 0x80000000 + (p * 4096);
+                map_page(kernel_pml4, safe_vaddr, allocated_pages[p], PAGE_PRESENT | PAGE_WRITE);
+                
+                uint8_t* src = temp_buffer + (p * 4096);
+                uint8_t* dest = (uint8_t*)safe_vaddr;
+                for (int i = 0; i < 4096; i++) dest[i] = src[i];
+            }
+            free(temp_buffer);
 
-            // E. Plasăm argumentele (rămâne identic)
-            uintptr_t arg_dest_area = 0x980000;
-            uint64_t* user_argv = (uint64_t*)arg_dest_area;
-            char* string_pool = (char*)(user_argv + argc + 1);
-            char* current_pool_ptr = string_pool;
+            // D. ================= FIX PENTRU ARGUMENTE =================
+            // Alocăm o pagină FIZICĂ reală pentru argumente
+            uint64_t arg_page_phys = (uint64_t)alloc_page();
+            
+            // O mapăm în procesul Ring 3 la adresa dorită (0x980000)
+            map_page(process_pml4, 0x980000, arg_page_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+            
+            // O mapăm temporar în kernel la 0x80000000 pentru a putea scrie în ea acum
+            map_page(kernel_pml4, 0x80000000, arg_page_phys, PAGE_PRESENT | PAGE_WRITE);
+
+            uint64_t* kernel_argv = (uint64_t*)0x80000000;
+            char* string_pool = (char*)(kernel_argv + argc + 1);
+            
             for (int a = 0; a < argc; a++) {
                 char* src_arg = argv[a];
-                char* dest_arg = current_pool_ptr;
-                while (*src_arg != '\0') *current_pool_ptr++ = *src_arg++;
-                *current_pool_ptr++ = '\0';
-                user_argv[a] = (uint64_t)dest_arg;
+                char* dest_arg = string_pool;
+                while (*src_arg != '\0') *string_pool++ = *src_arg++;
+                *string_pool++ = '\0';
+                
+                // Salvăm adresa așa cum o va vedea procesul în Ring 3 (0x980000 + offset)
+                kernel_argv[a] = 0x980000 + ((uint64_t)dest_arg - 0x80000000);
             }
-            user_argv[argc] = 0; 
-            
-            // F. Creăm procesul și îi pasăm lista celor 8 pagini!
-			// PRELUĂM TTY-ul părintelui (sau active_tty dacă nu avem părinte)
+            kernel_argv[argc] = 0; 
+            // ==========================================================
+
+            uint64_t entry_point = 0x800000 + hdr->entry_offset;
             int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
-            uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)user_argv, (uint64_t)process_pml4, allocated_pages, target_tty);
-			
-            char debug_buf[32];
-/*			
-print("[DEBUG] Lansare proces '");
-print(prog_name);
-print("' pe TTY index: ");
-simple_itoa(target_tty, debug_buf);
-print(debug_buf);
-print("\n");
-*/
-			
-            ttys[target_tty].foreground_pid = new_pid;
             
+            // Atenție: trimitem procesului adresa VIRTUALĂ a argumentelor (0x980000)
+            uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)0x980000, (uint64_t)process_pml4, allocated_pages, target_tty);
+            
+            ttys[target_tty].foreground_pid = new_pid;
             regs->rax = (uint64_t) new_pid;
             break;
         }

@@ -14,8 +14,12 @@
  char* trim(char* str);
  char* ltrim(char* str);
  char* rtrim(char* str);
- void* memset(void* dest, int val, size_t count);
- void* memcpy(void* dest, const void* src, size_t count);
+ 
+ //void* memset(void* dest, int val, size_t count);
+ //void* memcpy(void* dest, const void* src, size_t count);
+void* memset(void* dest, int val, size_t count);
+void* memcpy(void* dest, const void* src, size_t count);
+ 
  char* string_copy(char* dest, const char* src);
 
  void string_concat(char* dest, const char* src);

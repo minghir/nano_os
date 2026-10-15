@@ -1,8 +1,11 @@
 #include "process.h"
 #include "memory.h"
+#include "paging.h"
 #include "string.h"
 #include "io.h"
 #include "tty.h"
+#include "tss.h"
+#include "syslog.h"
 
 
 PCB process_table[MAX_PROCESSES];
@@ -98,9 +101,29 @@ uint64_t schedule(uint64_t current_rsp) {
         }
     }
 	
-	
+	// ======== ADAUGĂ ASTA AICI ========
+    // Îi spunem procesorului ca la următoarea întrerupere din Ring 3, 
+    // să sară pe stiva privată de KERNEL alocată prin malloc a noului proces!
+    kernel_tss.rsp0 = next_proc->stack_base + 16384; 
+    // ==================================
+	static int first_switch = 1;
+    if (first_switch && current_process && current_process->pid == 1) {
+        KLOG_INFO("\n[SCHEDULER] BINGO! Am comutat pe PID 1 (Init) in Ring 3!\n");
+		char buf[32];
+        
+        KLOG_INFO("RIP (Adresa cod): "); simple_itoa(next_proc->regs.rip, buf); KLOG_INFO(buf); KLOG_INFO("\n");
+        KLOG_INFO("RSP (Stiva): "); simple_itoa(next_proc->regs.rsp, buf); KLOG_INFO(buf); KLOG_INFO("\n");
+        KLOG_INFO("RFLAGS (Status): "); simple_itoa(next_proc->regs.rflags, buf); KLOG_INFO(buf); KLOG_INFO("\n");
+        KLOG_INFO("CS (Selector): "); simple_itoa(next_proc->regs.cs, buf); KLOG_INFO(buf); KLOG_INFO("\n");
+        first_switch = 0;
+    }
 
     return current_process->regs.rsp;
+}
+
+void dummy_ring3_loop() {
+    // O buclă infinită care rulează direct în Ring 3!
+    while(1); 
 }
 
 uint32_t process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
@@ -207,11 +230,43 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
     }
 
 // 6. Setăm starea procesorului pentru IRETQ (User Space - Ring 3)
+/*
     regs->ss = 0x10;          // Selector de date User Mode (Ring 3, ex: 0x20 | 3)
     regs->rsp = stack_top + sizeof(Registers);  
     regs->rflags = 0x202;     // IF=1 (Întreruperi activate)
     regs->cs = 0x08;          // Selector de cod User Mode (Ring 3, ex: 0x18 | 3)
     regs->rip = entry_point;
+*/	
+
+
+
+
+
+// 1. Alocăm fizic pagina pentru stiva de user
+    uint64_t user_stack_phys = (uint64_t)alloc_page();
+    
+    // 2. O mapăm în PML4-ul procesului (de exemplu la adresa virtuală 0x900000)
+    // Asigură-te că pui flag-ul PAGE_USER ca Ring 3 să aibă drept de acces!
+    // 2. O mapăm în PML4-ul procesului
+	map_page((uint64_t*)process_cr3, 0x900000, user_stack_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+
+    // 3. Setăm segmentele pentru Ring 3
+    regs->ss = 0x23;             // Selector de stivă User (Ring 3 Data)
+    
+    // 4. AICI ESTE SCHIMBAREA CRUCIALĂ: 
+    // RSP-ul de user trebuie să indice spre vârful zonei mapate (0x900000 + 4096 = 0x901000)
+    regs->rsp = 0x901000;        
+    
+    regs->rflags = 0x202;        // Întreruperi activate (IF=1)
+    regs->cs = 0x1b;             // Selector de cod User (Ring 3 Code)
+    regs->rip = entry_point;     // Punctul de intrare în binarul tău (.nas)
+	//regs->rip = (uint64_t)dummy_ring3_loop;
+	
+
+
+
+
+
 
     // 7. Parametrii argc / argv
     regs->rdi = (uint64_t)argc;
