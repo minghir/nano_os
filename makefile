@@ -176,6 +176,7 @@ clean:
 	rm -f *.o kernel/*.o boot/*.o asm/*.o kernel.bin kernel.iso *.bin kernel/fs/*.o
 	rm -f kernel/drivers/sound/*.o kernel/drivers/sound/ac97/*.o kernel/gfx/*.o
 	rm -f thirdparty/uip/uip/*.o
+	rm -f games/doom/*.o games/doom/*.bin
 	rm -rf iso/boot/kernel.bin
 	rm -f tools/nan2hdd tools/nan3hdd
 	rm -f hda_v3.img hdb_v3.img

@@ -15,10 +15,13 @@ void DG_DrawFrame() {
     // Trimitem cadrul randat de DOOM direct către syscall-ul nostru!
     // DG_ScreenBuffer este array-ul global în care DOOM tocmai a desenat.
     // Va apărea în colțul ecranului (320x200). Mai târziu îl putem scala!
+    nano_print("DOOM [DEBUG]: Intrat in DG_DrawFrame\n");
     nano_gfx_present(0, 0, DOOMGENERIC_RESX, DOOMGENERIC_RESY, DG_ScreenBuffer);
+    nano_print("DOOM [DEBUG]: Iesit din DG_DrawFrame\n");
 }
 
 void DG_SleepMs(uint32_t ms) {
+	nano_print("DOOM [DEBUG]: DG_SleepMs\n");
     uint32_t start = nano_get_ticks();
     while (nano_get_ticks() - start < ms) {
         nano_yield(); // Nu ardem procesorul

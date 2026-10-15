@@ -141,12 +141,14 @@ int fseek(void* stream, long offset, int whence) {
 int main(int argc, char** argv) {
     nano_print("=== NANO OS: PORNIRE MOTOR DOOM ===\n");
     
-    // Inițializăm DOOM
+    nano_print("[DEBUG] Apelam doomgeneric_Create...\n");
     doomgeneric_Create(argc, argv);
+    nano_print("[DEBUG] SUCCESS: doomgeneric_Create s-a terminat!\n");
     
-    // Bucla infinită a jocului
     while (1) {
+        nano_print("[DEBUG] Inainte de doomgeneric_Tick...\n");
         doomgeneric_Tick();
+        nano_print("[DEBUG] Dupa doomgeneric_Tick...\n");
         nano_yield();
     }
     return 0;
@@ -275,6 +277,7 @@ const int ** __ctype_toupper_loc(void) { static int* d=0; return (const int **)&
 // =========================================================
 // FUNCȚII LIPSĂ PENTRU STRCONV / SSCANF
 // =========================================================
+/*
 long int strtol(const char *nptr, char **endptr, int base) {
     // O implementare simplă sau un stub care apelează ce ai nevoie
     long int val = 0;
@@ -293,3 +296,4 @@ long int strtol(const char *nptr, char **endptr, int base) {
 int __isoc99_sscanf(const char *str, const char *format, ...) {
     return 0; // Stub simplu ca să treacă de linker
 }
+*/
