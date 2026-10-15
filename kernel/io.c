@@ -5,6 +5,7 @@
 #include "process.h"
 #include "sys.h"
 #include "mouse.h"
+#include "keyboard.h"
 #include "gfx/gfx_term.h"
 
 extern void video_swap_buffers();
@@ -170,43 +171,6 @@ void gfx_redraw_tty(int tty_id) {
     cursor_update();
 }
 
-/*
-void gfx_redraw_tty(int tty_id) {
-    if (tty_id != active_tty) return;
-
-    if (is_gfx_mode) {
-        // Redesenăm doar caracterele text din TTY, dar FĂRĂ să suprascriem 
-        // cu pixeli de fundal negru dacă celula este un spațiu gol (' ')
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            int col = i % term_cols;
-            int row = i / term_cols;
-            uint16_t cell = ttys[tty_id].screen_buffer[i];
-            char c = cell & 0xFF;
-            
-            // Dacă celula este un simplu spațiu, O SĂRIM! 
-            // Astfel, nu mai ștergem pixelii dedesubt (cum ar fi fereastra ta GUI)!
-            if (c == 0 || c == ' ') {
-                continue; 
-            }
-
-            uint8_t fg = (cell >> 8) & 0x0F;
-            uint8_t bg = (cell >> 12) & 0x0F; 
-            
-            // Desenăm doar caracterul text, lăsând fundalul transparent
-            gterm_draw_char(col, row, c, vga_to_argb(fg), vga_to_argb(bg));
-        }
-        
-        // Desenăm cursorul mouse-ului
-        gterm_draw_cursor_box(mouse_x, mouse_y, 0x00FFFFFF);
-        video_swap_buffers();
-    } else {
-        for (int i = 0; i < term_cols * term_rows; i++) {
-            physical_vga[i] = ttys[tty_id].screen_buffer[i];
-        }
-    }
-    cursor_update();
-}
-*/
 // În structura ta TTY sau ca array static în fișierul tău de randare TTY:
 // static uint16_t last_screen_buffer[MAX_TERM_HEIGHT][MAX_TERM_WIDTH]; // sau alocat dinamic
 // Cache static separat pentru fiecare TTY (presupunând dimensiunea maximă de 256x128 caractere)
@@ -325,28 +289,6 @@ static void print_to_tty(const char* s, int target_tty) {
     
     if (target_tty == active_tty) cursor_update();
 }
-
-/*
-void print(const char* s) {
-    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
-    print_to_tty(s, target_tty);
-}
-*/
-/*
-void print(const char* s) {
-    int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
-    
-    // 1. Trimitem fluxul RAW, absolut intact (cu tot cu coduri ANSI) către TTY-ul de rețea
-    const char* p = s;
-    while (*p) {
-        tty_output_push(target_tty, *p);
-        p++;
-    }
-    
-    // 2. Trimitem spre afișare locală unde codurile vor fi procesate grafic
-    print_to_tty(s, target_tty);
-}
-*/
 
 void print(const char* s) {
 	if (desktop_mode) return;
@@ -565,7 +507,7 @@ void keyboard_read_line(char* buffer, uint32_t max_length) {
         }
     }
 }
-
+/*
 void keyboard_irq() {
 	uint8_t status = inb(0x64);
     
@@ -680,6 +622,142 @@ void keyboard_irq() {
     }
 
     // Limitarea mapei de caractere
+    if (scancode >= sizeof(keyboard_map)) return;
+    
+    char character = keyboard_map[scancode];
+    if (character == 0) return;
+
+    if (shift_pressed) {
+        if (character >= 'a' && character <= 'z') character -= 'a' - 'A';
+        else if (character == '-') character = '_';
+        else if (character == '1') character = '!';
+        else if (character == '2') character = '@';
+        else if (character == '3') character = '#';
+        else if (character == '4') character = '$';
+        else if (character == '5') character = '%';
+        else if (character == '6') character = '^';
+        else if (character == '7') character = '&';
+        else if (character == '8') character = '*';
+        else if (character == '9') character = '(';
+        else if (character == '0') character = ')';
+        else if (character == '=') character = '+';
+        else if (character == '[') character = '{';
+        else if (character == ']') character = '}';
+        else if (character == '\\') character = '|';
+        else if (character == ';') character = ':';
+        else if (character == '\'') character = '"';
+        else if (character == ',') character = '<';
+        else if (character == '.') character = '>';
+        else if (character == '/') character = '?';
+    }
+    
+    keyboard_queue_push((uint8_t)character);
+}
+*/
+
+void keyboard_irq() {
+    uint8_t status = inb(0x64);
+    
+    // Verificăm dacă există date în buffer (Bit 0)
+    if (!(status & 0x01)) return;
+    
+    // VERIFICARE CRUCIALĂ: Este acest pachet pentru MOUSE (Bit 5)?
+    if (status & 0x20) {
+        // DOAR confirmăm întreruperea la PIC-ul Master în caz de suprapunere
+        outb(0x20, 0x20);
+        return; 
+    }
+    
+    uint8_t scancode = inb(0x60);
+
+    // ==========================================================
+    // 1. LOGICA PENTRU GAMING (DOOM) - RAW EVENTS
+    // Interceptăm totul imediat, înainte de a procesa literele ASCII
+    // ==========================================================
+    if (scancode != 0xE0) { // Sărim peste byte-ul de prefix extins
+        uint8_t pressed = !(scancode & 0x80); // Dacă bitul 7 e 0, tasta e apăsată
+        uint8_t clean_scancode = scancode & 0x7F; // Tăiem bitul 7 pentru a obține codul real
+        kbd_push_event(clean_scancode, pressed);
+    }
+    // ==========================================================
+
+    static uint8_t ctrl_pressed = 0;
+    static uint8_t shift_pressed = 0;
+    static uint8_t alt_pressed = 0;
+    static uint8_t is_extended = 0; 
+
+    if (scancode == 0xE0) {
+        is_extended = 1;
+        return;
+    }
+
+    if (is_extended) {
+        is_extended = 0;
+        
+        // Eliberări taste extinse
+        if (scancode == (0x1D | 0x80)) { ctrl_pressed = 0; return; }
+        if (scancode == (0x38 | 0x80)) { alt_pressed = 0; return; }
+        if (scancode & 0x80) return;
+
+        // Apăsări taste extinse
+        if (scancode == 0x1D) { ctrl_pressed = 1; return; }
+        if (scancode == 0x38) { alt_pressed = 1; return; }
+
+        if (scancode == 0x48) { keyboard_queue_push(128); return; } // Sus
+        if (scancode == 0x50) { keyboard_queue_push(129); return; } // Jos
+        if (scancode == 0x4D) { keyboard_queue_push(130); return; } // Dreapta
+        if (scancode == 0x4B) { keyboard_queue_push(131); return; } // Stânga
+        if (scancode == 0x53) { keyboard_queue_push(132); return; } // Delete
+        if (scancode == 0x47) { keyboard_queue_push(133); return; } // Home
+        if (scancode == 0x49) { keyboard_queue_push(134); return; } // PgUp
+        if (scancode == 0x4F) { keyboard_queue_push(135); return; } // End
+        if (scancode == 0x51) { keyboard_queue_push(136); return; } // PgDn
+        if (scancode == 0x52) { keyboard_queue_push(137); return; } // Insert
+        return;
+    }
+
+    // Eliberarea tastelor normale (Break codes)
+    if (scancode & 0x80) {
+        uint8_t released = scancode & 0x7F;
+        if (released == 0x1D) ctrl_pressed = 0;
+        else if (released == 0x2A || released == 0x36) shift_pressed = 0;
+        else if (released == 0x38) alt_pressed = 0;
+        return;
+    }
+
+    // ==========================================================
+    // 2. SHORTCUT-URI WORKSPACE ȘI MODIFICATOARE
+    // ==========================================================
+    if (scancode == 0x1D) { ctrl_pressed = 1; return; }
+    if (scancode == 0x2A || scancode == 0x36) { shift_pressed = 1; return; }
+    if (scancode == 0x38) { alt_pressed = 1; return; }
+
+    // Taste F1-F4 pentru TTY
+    if (scancode == 0x3B) { switch_tty(0); return; } 
+    if (scancode == 0x3C) { switch_tty(1); return; } 
+    if (scancode == 0x3D) { switch_tty(2); return; } 
+    if (scancode == 0x3E) { switch_tty(3); return; } 
+    
+    // Ctrl+C (Terminare proces)
+    if (ctrl_pressed && scancode == 0x2E) { // 0x2E este tasta 'C'
+        uint32_t fg_pid = ttys[active_tty].foreground_pid;
+        if (fg_pid != 0) {
+            kill_process_by_pid(fg_pid);
+            print("^C\n");
+        }
+        keyboard_queue_push(3); // Trimite caracterul ETX (End of Text)
+        return;
+    }
+
+    // Alt+C (Clear screen)
+    if (alt_pressed && scancode == 0x2E) {
+        clear_screen();
+        return;
+    }
+
+    // ==========================================================
+    // 3. MAPAREA CĂTRE ASCII (Pentru Shell)
+    // ==========================================================
     if (scancode >= sizeof(keyboard_map)) return;
     
     char character = keyboard_map[scancode];

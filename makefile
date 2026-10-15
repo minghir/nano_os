@@ -106,6 +106,9 @@ tests: hdd_tools
 apps: hdd_tools tests
 	$(MAKE) -C src
 	
+games: hdd_tools tests apps 
+	$(MAKE) -C games/doom
+	
 # ============================
 #    ISO cu GRUB
 # ============================
@@ -128,7 +131,7 @@ img_files:
 run: run_txt
 
 # Regula pentru Modul Grafic (GFX)
-run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
+run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests games
 	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
@@ -140,7 +143,7 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 		-cpu qemu64,+sse,+sse2,+avx
 
 # Regula pentru Modul Text (TXT)
-run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests
+run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests games
 	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \

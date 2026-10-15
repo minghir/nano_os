@@ -17,6 +17,11 @@ tools/nan3hdd hda_v3.img mkdir /tests
 tools/nan3hdd hda_v3.img mkdir /asm
 tools/nan3hdd hda_v3.img mkdir /data
 tools/nan3hdd hda_v3.img mkdir /data/mp3
+tools/nan3hdd hda_v3.img mkdir /games
+tools/nan3hdd hda_v3.img mkdir /games/doom
+
+tools/nan3hdd hda_v3.img push games/doom/doom.bin /games/doom/doom
+tools/nan3hdd hda_v3.img push games/doom/DOOM1.WAD /games/doom/DOOM1.WAD
 
 echo "[+] Copiere fișiere de sistem și config..."
 tools/nan3hdd hda_v3.img push env.cfg /cfg/env.cfg

@@ -8,6 +8,7 @@
 #include "../kernel/syscall.h"
 #include "../kernel/video.h"
 #include "../kernel/mouse.h"
+#include "../kernel/keyboard.h"
 #include "nano_string.h"
 
 // Tipul de date pentru mutex (volatile ca să nu îl optimizeze compilatorul)
@@ -857,4 +858,31 @@ static inline int nano_get_mouse_state(MouseState* state) {
     );
     return (int)ret;
 }
+
+static inline int nano_get_key_event(key_event_t* event) {
+    int result;
+    
+    // RAX primește ID-ul syscall-ului (SYSCALL_GET_KEY_EVENT)
+    // RDI primește pointerul către structura 'event'
+    // La întoarcere, RAX va conține rezultatul (1 sau 0)
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (result)
+        : "a" (SYSCALL_GET_KEY_EVENT), "D" ((uint64_t)event)
+        : "memory"
+    );
+    
+    return result;
+}
+
+static inline uint32_t nano_get_ticks(void) {
+    uint32_t ticks;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ticks)
+        : "a"(SYSCALL_GET_TICKS)
+    );
+    return ticks;
+}
+
 #endif

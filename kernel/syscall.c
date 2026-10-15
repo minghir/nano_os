@@ -20,6 +20,7 @@
 #include "video.h"
 #include "auth.h"
 #include "mouse.h"
+#include "keyboard.h"
 
 
 extern void e1000_irq_handler(void* regs);
@@ -1228,6 +1229,26 @@ void syscall_handler(SyscallRegisters* regs) {
 			}
 			break;
 		}
+		case SYSCALL_GET_KEY_EVENT: {
+            // RDI va conține un pointer (din Ring 3) către o structură unde să copiem evenimentul
+            key_event_t* user_event = (key_event_t*)regs->rdi;
+            
+            key_event_t temp_event;
+            if (kbd_pop_event(&temp_event)) {
+                // Copiem datele în User-Space
+                user_event->scancode = temp_event.scancode;
+                user_event->pressed = temp_event.pressed;
+                regs->rax = 1; // Succes, avem un eveniment
+            } else {
+                regs->rax = 0; // Nimic apăsat, buffer gol
+            }
+            break;
+        }
+		case SYSCALL_GET_TICKS: { // Alege un număr liber, ex: 22
+            extern volatile uint32_t timer_ticks;
+            regs->rax = timer_ticks;
+            break;
+        }
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);
