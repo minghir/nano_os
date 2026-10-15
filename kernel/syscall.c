@@ -213,6 +213,10 @@ void syscall_handler(SyscallRegisters* regs) {
             // 3. ÎNCĂRCAREA EFECTIVĂ (Fără să schimbăm CR3 deloc!)
             file_found = 1;
             uint64_t* process_pml4 = create_process_pml4();
+            if (!process_pml4) {
+                regs->rax = 0;
+                break;
+            }
             uint64_t allocated_pages[MAX_PROG_PAGES];
 
             // A. Alocăm paginile fizice și le mapăm DOAR în PML4-ul Ring 3
@@ -223,12 +227,21 @@ void syscall_handler(SyscallRegisters* regs) {
             }
 
             // B. Citim fișierul de pe disc într-un buffer sigur (CR3-ul kernelului rămâne activ!)
-            uint8_t* temp_buffer = (uint8_t*)malloc(MAX_PROG_PAGES * 4096);
-            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], temp_buffer, MAX_PROG_PAGES * 4096);
+            const uint32_t program_capacity = MAX_PROG_PAGES * 4096;
+            uint8_t* temp_buffer = (uint8_t*)malloc(program_capacity + 1);
+            if (!temp_buffer) {
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                regs->rax = 0;
+                break;
+            }
+            for (uint32_t i = 0; i <= program_capacity; i++) temp_buffer[i] = 0;
+            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], temp_buffer, program_capacity + 1);
 
             NanoHeader* hdr = (NanoHeader*)temp_buffer; 
 
-            if (bytes_read <= (int)sizeof(NanoHeader) || 
+            if (bytes_read <= (int)sizeof(NanoHeader) || bytes_read > (int)program_capacity ||
+                hdr->entry_offset < sizeof(NanoHeader) || hdr->entry_offset >= (uint32_t)bytes_read ||
                 hdr->magic[0] != 'N' || hdr->magic[1] != 'A' || 
                 hdr->magic[2] != 'S' || hdr->magic[3] != '1') {
                 
@@ -238,6 +251,7 @@ void syscall_handler(SyscallRegisters* regs) {
                 regs->rax = 0;
                 break;
             }
+            uint32_t entry_offset = hdr->entry_offset;
 
             // C. Copiem din buffer-ul temporar în paginile procesului folosind o adresă de kernel (2 GB)
             uint64_t* kernel_pml4;
@@ -278,11 +292,19 @@ void syscall_handler(SyscallRegisters* regs) {
             kernel_argv[argc] = 0; 
             // ==========================================================
 
-            uint64_t entry_point = 0x800000 + hdr->entry_offset;
+            uint64_t entry_point = 0x800000 + entry_offset;
             int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
             
             // Atenție: trimitem procesului adresa VIRTUALĂ a argumentelor (0x980000)
             uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)0x980000, (uint64_t)process_pml4, allocated_pages, target_tty);
+
+            if (new_pid == 0) {
+                free_page((void*)arg_page_phys);
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                regs->rax = 0;
+                break;
+            }
             
             ttys[target_tty].foreground_pid = new_pid;
             regs->rax = (uint64_t) new_pid;

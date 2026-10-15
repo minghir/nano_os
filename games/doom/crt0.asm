@@ -4,10 +4,10 @@ section .header
     db 'N', 'A', 'S', '1'    ; Semnătura magică
     dd 8                     ; Offset cod
 
-section .text
 global _start
 extern main
 
+; Keep _start in the header section so the linker cannot insert alignment padding.
 _start:
     ; --- PUNEM UN BEEP SAU UN DEBUG DIRECT IN ASM ---
     ; Dacă vrei, putem trimite un caracter direct pe ecran sau un syscall de print (SYSCALL_PRINT = 1)

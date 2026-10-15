@@ -314,6 +314,10 @@ void kernel_main(unsigned long magic, unsigned long addr) {
             while(1) __asm__ volatile("cli; hlt");
         }
 
+        for (uint32_t i = 0; i < MAX_PROG_PAGES * 4096; i++) {
+            temp_buffer[i] = 0;
+        }
+
         KLOG_INFO("[DEBUG] TTY: Citire fs_read_file...\n");
         int bytes = fs_read_file("/hda/sbin/init", temp_buffer, MAX_PROG_PAGES * 4096);
 

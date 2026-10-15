@@ -270,3 +270,26 @@ long int __isoc23_strtol(const char *nptr, char **endptr, int base) { return 0; 
 int __isoc23_sscanf(const char *str, const char *format, ...) { return 0; }
 const unsigned short ** __ctype_b_loc(void) { static unsigned short* d=0; return (const unsigned short **)&d; }
 const int ** __ctype_toupper_loc(void) { static int* d=0; return (const int **)&d; }
+
+
+// =========================================================
+// FUNCȚII LIPSĂ PENTRU STRCONV / SSCANF
+// =========================================================
+long int strtol(const char *nptr, char **endptr, int base) {
+    // O implementare simplă sau un stub care apelează ce ai nevoie
+    long int val = 0;
+    int sign = 1;
+    while (*nptr == ' ' || *nptr == '\t') nptr++;
+    if (*nptr == '-') { sign = -1; nptr++; }
+    else if (*nptr == '+') { nptr++; }
+    while (*nptr >= '0' && *nptr <= '9') {
+        val = val * 10 + (*nptr - '0');
+        nptr++;
+    }
+    if (endptr) *endptr = (char*)nptr;
+    return val * sign;
+}
+
+int __isoc99_sscanf(const char *str, const char *format, ...) {
+    return 0; // Stub simplu ca să treacă de linker
+}
