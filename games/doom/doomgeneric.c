@@ -1,5 +1,6 @@
 #include <stdio.h>
-
+//#include "../../src/nano_libc.h"
+//#include "../../src/nano_string.h"
 #include "m_argv.h"
 
 #include "doomgeneric.h"
@@ -17,11 +18,10 @@ void doomgeneric_Create(int argc, char **argv)
     myargv = argv;
 
 	M_FindResponseFile();
-
 	DG_ScreenBuffer = malloc(DOOMGENERIC_RESX * DOOMGENERIC_RESY * 4);
-
 	DG_Init();
-
+	printf("Doom version:Goaga dadan");
 	D_DoomMain ();
+
 }
 

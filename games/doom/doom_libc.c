@@ -30,7 +30,8 @@ void init_wad_cache() {
         bytes_read = nano_read_file("doom1.wad", cached_wad_data, cached_wad_size);
     }
     if (bytes_read <= 0) {
-        bytes_read = nano_read_file("/hda/games/doom/DOOM1.WAD", cached_wad_data, cached_wad_size);
+        //bytes_read = nano_read_file("/hda/games/doom/DOOM1.WAD", cached_wad_data, cached_wad_size);
+        bytes_read = nano_read_file("/hdb/DOOM1.WAD", cached_wad_data, cached_wad_size);
     }
     if (bytes_read <= 0) {
         bytes_read = nano_read_file("/DOOM1.WAD", cached_wad_data, cached_wad_size);
@@ -224,7 +225,7 @@ void* stdout = (void*)1;
 int puts(const char *s) { nano_printf("%s\n", s); return 0; }
 int putc(int c, void *stream) { return 0; }
 int fflush(void *stream) { return 0; }
-int printf(const char* format, ...) { return 0; }
+int printf(const char* format, ...) { nano_print("din printf");return 0; }
 int fprintf(void* stream, const char* format, ...) { return 0; }
 
 // =========================================================

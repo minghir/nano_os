@@ -18,12 +18,15 @@
 //	parse command line parameters, configure game parameters (turbo),
 //	and call the startup functions.
 //
-
+//#include "../../src/nano_libc.h"
+//#include "../../src/nano_string.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+
 
 #include "config.h"
 #include "deh_main.h"
@@ -1162,6 +1165,9 @@ static void LoadIwadDeh(void)
 //
 void D_DoomMain (void)
 {
+
+        
+
     int p;
     char file[256];
     char demolumpname[9];
@@ -1174,6 +1180,8 @@ void D_DoomMain (void)
     // print banner
 
     I_PrintBanner(PACKAGE_STRING);
+
+
 
     DEH_printf("Z_Init: Init zone memory allocation daemon. \n");
     Z_Init ();
