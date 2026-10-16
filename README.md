@@ -5,4 +5,5 @@ Nano OS is an educational 64-bit microkernel for the x86 architecture that runs 
 git clone https://github.com/minghir/nano_os
 cd nano_os
 ./build.sh
+```
 ![DOOM în QEMU](images/NANO_DOOM.png)
