@@ -6,7 +6,9 @@
 
 void memory_init();
 void* malloc(size_t size);
+void* malloc_for_process(size_t size, uint32_t pid);
 void free(void* ptr);
+void free_process_allocations(uint32_t pid);
 
 size_t get_heap_total();
 size_t get_heap_used();

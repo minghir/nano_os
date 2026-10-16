@@ -38,6 +38,7 @@ int strncmp(const char* s1, const char* s2, size_t n);
 int strcmp(const char* s1, const char* s2);
 
 void nano_printf(const char* format, ...);
+int nano_vprintf(const char* format, va_list args);
+int nano_vsnprintf(char* buffer, size_t size, const char* format, va_list args);
 
 #endif // STRING_H
-

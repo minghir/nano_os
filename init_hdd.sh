@@ -3,13 +3,13 @@ set -e
 
 echo "[+] Creare imagini de disc hda_v3.img și hdb_v3.img..."
 rm -f hda_v3.img 
-#rm -f hdb_v3.img
+rm -f hdb_v3.img
 qemu-img create -f raw hda_v3.img 50M
-#qemu-img create -f raw hdb_v3.img 50M
+qemu-img create -f raw hdb_v3.img 50M
 
 echo "[+] Formatare și creare directoare pe hda_v3.img..."
 tools/nan3hdd hda_v3.img format
-#tools/nan3hdd hdb_v3.img format
+tools/nan3hdd hdb_v3.img format
 
 
 tools/nan3hdd hda_v3.img mkdir /bin
@@ -23,7 +23,7 @@ tools/nan3hdd hda_v3.img mkdir /games
 tools/nan3hdd hda_v3.img mkdir /games/doom
 
 tools/nan3hdd hda_v3.img push games/doom/doom.bin /games/doom/doom
-#tools/nan3hdd hdb_v3.img push games/doom/DOOM1.WAD /DOOM1.WAD
+tools/nan3hdd hdb_v3.img push games/doom/DOOM1.WAD /DOOM1.WAD
 
 echo "[+] Copiere fișiere de sistem și config..."
 tools/nan3hdd hda_v3.img push env.cfg /cfg/env.cfg

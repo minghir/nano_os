@@ -140,7 +140,7 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests games
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
 		-display sdl \
-		-cpu qemu64,+sse,+sse2,+avx
+		-cpu qemu64,+sse,+sse2,+avx 
 
 # Regula pentru Modul Text (TXT)
 run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests games

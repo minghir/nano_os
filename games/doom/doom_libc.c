@@ -6,94 +6,61 @@ typedef struct {
     uint8_t* data;
     unsigned long size;
     unsigned long position;
-    int is_wad;
 } NanoFile;
 
-static uint8_t* cached_wad_data = 0;
-static unsigned long cached_wad_size = 0;
+static int is_doom1_wad_name(const char* path) {
+    const char* name = path;
+    const char* current = path;
 
-void init_wad_cache() {
-    if (cached_wad_data) return;
-
-    nano_print("[DEBUG] Aloc memorie pentru WAD cache (5MB)...\n");
-    cached_wad_size = 5 * 1024 * 1024; // 5 MB
-    cached_wad_data = nano_malloc(cached_wad_size);
-    
-    if (!cached_wad_data) {
-        nano_print("[EROARE] Nu am putut aloca memorie pentru WAD cache!\n");
-        return;
+    while (*current) {
+        if (*current == '/' || *current == '\\') name = current + 1;
+        current++;
     }
 
-    nano_print("[DEBUG] Incerc citirea DOOM1.WAD de pe disc...\n");
-    int bytes_read = nano_read_file("DOOM1.WAD", cached_wad_data, cached_wad_size);
-    if (bytes_read <= 0) {
-        bytes_read = nano_read_file("doom1.wad", cached_wad_data, cached_wad_size);
+    static const char expected[] = "doom1.wad";
+    for (unsigned int i = 0; i < sizeof(expected); i++) {
+        char c = name[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != expected[i]) return 0;
     }
-    if (bytes_read <= 0) {
-        //bytes_read = nano_read_file("/hda/games/doom/DOOM1.WAD", cached_wad_data, cached_wad_size);
-        bytes_read = nano_read_file("/hdb/DOOM1.WAD", cached_wad_data, cached_wad_size);
-    }
-    if (bytes_read <= 0) {
-        bytes_read = nano_read_file("/DOOM1.WAD", cached_wad_data, cached_wad_size);
-    }
-    
-    if (bytes_read <= 0) {
-        nano_print("[EROARE CRITICA] DOOM1.WAD nu a putut fi citit de pe disc! Bytes: 0\n");
-    } else {
-        // Afișăm numărul de bytes citiți folosind nano_print sau un mic format
-        nano_print("[SUCCES] DOOM1.WAD citit in RAM cu succes!\n");
-    }
+    return 1;
+}
+
+static int is_wad_name(const char* path) {
+    unsigned int length = string_length(path);
+    if (length < 4) return 0;
+
+    const char* extension = path + length - 4;
+    return extension[0] == '.' &&
+           (extension[1] == 'w' || extension[1] == 'W') &&
+           (extension[2] == 'a' || extension[2] == 'A') &&
+           (extension[3] == 'd' || extension[3] == 'D');
 }
 
 void* fopen(const char* path, const char* mode) {
-    if (!path) {
-        nano_print("[fopen] EROARE: Path primit este NULL!\n");
-        return 0;
+    if (!path || !mode || mode[0] == 'w' || mode[0] == 'a') return 0;
+
+    unsigned long max_size = is_wad_name(path) ? 5 * 1024 * 1024 : 65536;
+    uint8_t* data = nano_malloc(max_size);
+    if (!data) return 0;
+
+    int bytes = nano_read_file(path, data, (uint32_t)max_size);
+    if (bytes <= 0 && is_doom1_wad_name(path)) {
+        bytes = nano_read_file("/hdb/DOOM1.WAD", data, (uint32_t)max_size);
     }
-
-    nano_print("[fopen] Se incearca deschiderea fisierului: ");
-    nano_print(path);
-    nano_print("\n");
-
-    if (string_contains(path, "WAD") || string_contains(path, "wad") || string_contains(path, "DOOM")) {
-        init_wad_cache();
-        if (!cached_wad_data) {
-            nano_print("[fopen] EROARE: WAD cache este gol!\n");
-            return 0;
-        }
-
-        NanoFile* file = nano_malloc(sizeof(NanoFile));
-        if (!file) return 0;
-        file->data = cached_wad_data;
-        file->size = cached_wad_size;
-        file->position = 0;
-        file->is_wad = 1;
-        return (void*)file;
-    }
-
-    // Pentru alte fișiere
-    unsigned long max_sz = 65536; 
-    uint8_t* temp_buf = nano_malloc(max_sz);
-    if (!temp_buf) return 0;
-
-    int bytes = nano_read_file(path, temp_buf, max_sz);
     if (bytes <= 0) {
-        nano_print("[fopen] Fisierul secundar nu a fost gasit (returnez NULL): ");
-        nano_print(path);
-        nano_print("\n");
-        nano_free(temp_buf);
-        return 0; 
+        nano_free(data);
+        return 0;
     }
 
     NanoFile* file = nano_malloc(sizeof(NanoFile));
     if (!file) {
-        nano_free(temp_buf);
+        nano_free(data);
         return 0;
     }
-    file->data = temp_buf;
+    file->data = data;
     file->size = bytes;
     file->position = 0;
-    file->is_wad = 0;
     return (void*)file;
 }
 
@@ -103,6 +70,7 @@ unsigned long fread(void* ptr, unsigned long size, unsigned long nmemb, void* st
         return 0;
     }
     NanoFile* file = (NanoFile*)stream;
+    if (size == 0) return 0;
     unsigned long total_to_read = size * nmemb;
     
     if (file->position + total_to_read > file->size) {
@@ -147,9 +115,7 @@ int main(int argc, char** argv) {
     nano_print("[DEBUG] SUCCESS: doomgeneric_Create s-a terminat!\n");
     
     while (1) {
-        nano_print("[DEBUG] Inainte de doomgeneric_Tick...\n");
         doomgeneric_Tick();
-        nano_print("[DEBUG] Dupa doomgeneric_Tick...\n");
         nano_yield();
     }
     return 0;
@@ -175,8 +141,26 @@ void* realloc(void* ptr, unsigned long new_size) {
 // =========================================================
 // 3. MAPPING SPRE STRING-URILE TALE
 // =========================================================
-int strcasecmp(const char *s1, const char *s2) { return strcmp(s1, s2); }
-int strncasecmp(const char *s1, const char *s2, uint32_t n) { return strncmp(s1, s2, n); }
+static unsigned char ascii_lower(unsigned char c) {
+    return c >= 'A' && c <= 'Z' ? (unsigned char)(c - 'A' + 'a') : c;
+}
+
+int strcasecmp(const char *s1, const char *s2) {
+    while (*s1 && ascii_lower((unsigned char)*s1) == ascii_lower((unsigned char)*s2)) {
+        s1++;
+        s2++;
+    }
+    return ascii_lower((unsigned char)*s1) - ascii_lower((unsigned char)*s2);
+}
+
+int strncasecmp(const char *s1, const char *s2, uint32_t n) {
+    while (n && *s1 && ascii_lower((unsigned char)*s1) == ascii_lower((unsigned char)*s2)) {
+        s1++;
+        s2++;
+        n--;
+    }
+    return n ? ascii_lower((unsigned char)*s1) - ascii_lower((unsigned char)*s2) : 0;
+}
 
 char* strrchr(const char *s, int c) {
     const char *last = 0;
@@ -212,7 +196,27 @@ int toupper(int c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
 int abs(int j) { return j < 0 ? -j : j; }
 double fabs(double x) { return x < 0.0 ? -x : x; }
 double strtod(const char *nptr, char **endptr) { return 0.0; }
-void exit(int status) { while(1); }
+void exit(int status) {
+    nano_print("\nDOOM: Se inchide...\n");
+
+    // Dacă ai o funcție care readuce sistemul în modul text, apeleaz-o aici!
+    // Dacă nu, măcar curățăm bufferul grafic ca să știm că a ieșit:
+    if (DG_ScreenBuffer) {
+        memset(DG_ScreenBuffer, 0, DOOMGENERIC_RESX * DOOMGENERIC_RESY * 4); // Ecran negru
+        nano_gfx_present(0, 0, DOOMGENERIC_RESX, DOOMGENERIC_RESY, DG_ScreenBuffer);
+    }
+
+    register uint64_t rax_val __asm__("rax") = 20; // SYSCALL_EXIT
+    register uint64_t rdi_val __asm__("rdi") = (uint64_t)status;
+    
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "r"(rax_val), "r"(rdi_val)
+        : "cc", "memory"
+    );
+    while(1);
+}
 int system(const char* command) { return 0; }
 int *__errno_location(void) { static int e = 0; return &e; }
 
@@ -225,8 +229,21 @@ void* stdout = (void*)1;
 int puts(const char *s) { nano_printf("%s\n", s); return 0; }
 int putc(int c, void *stream) { return 0; }
 int fflush(void *stream) { return 0; }
-int printf(const char* format, ...) { nano_print("din printf");return 0; }
-int fprintf(void* stream, const char* format, ...) { return 0; }
+int printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = nano_vprintf(format, args);
+    va_end(args);
+    return result;
+}
+int fprintf(void* stream, const char* format, ...) {
+    (void)stream;
+    va_list args;
+    va_start(args, format);
+    int result = nano_vprintf(format, args);
+    va_end(args);
+    return result;
+}
 
 // =========================================================
 // 6. MINCIUNI PENTRU FIȘIERE (Doar ca să trecem de Linker)
@@ -235,10 +252,8 @@ int fprintf(void* stream, const char* format, ...) { return 0; }
 int fclose(void* stream) {
     if (!stream) return 0;
     NanoFile* file = (NanoFile*)stream;
-    if (!file->is_wad) {
-        if (file->data) nano_free(file->data);
-        nano_free(file);
-    } // Dacă e WAD, nu eliberăm memoria globală cache
+    if (file->data) nano_free(file->data);
+    nano_free(file);
     return 0;
 }
 
@@ -261,11 +276,42 @@ int mkdir(const char *pathname, unsigned int mode) { return -1; }
 // =========================================================
 // 7. HACK-URI PENTRU MIZERIILE COMPILATORULUI LINUX (_CHK)
 // =========================================================
-int __printf_chk(int flag, const char *format, ...) { return 0; }
-int __fprintf_chk(void* stream, int flag, const char *format, ...) { return 0; }
-int __snprintf_chk(char *s, unsigned long maxlen, int flag, unsigned long os, const char *format, ...) { return 0; }
-int __vfprintf_chk(void* stream, int flag, const char *format, void* ap) { return 0; }
-int __vsnprintf_chk(char *s, unsigned long m, int f, unsigned long o, const char *fmt, void* ap) { return 0; }
+int __printf_chk(int flag, const char *format, ...) {
+    (void)flag;
+    va_list args;
+    va_start(args, format);
+    int result = nano_vprintf(format, args);
+    va_end(args);
+    return result;
+}
+int __fprintf_chk(void* stream, int flag, const char *format, ...) {
+    (void)stream;
+    (void)flag;
+    va_list args;
+    va_start(args, format);
+    int result = nano_vprintf(format, args);
+    va_end(args);
+    return result;
+}
+int __snprintf_chk(char *s, unsigned long maxlen, int flag, unsigned long os, const char *format, ...) {
+    (void)flag;
+    (void)os;
+    va_list args;
+    va_start(args, format);
+    int result = nano_vsnprintf(s, maxlen, format, args);
+    va_end(args);
+    return result;
+}
+int __vfprintf_chk(void* stream, int flag, const char *format, va_list args) {
+    (void)stream;
+    (void)flag;
+    return nano_vprintf(format, args);
+}
+int __vsnprintf_chk(char *s, unsigned long size, int flag, unsigned long os, const char *format, va_list args) {
+    (void)flag;
+    (void)os;
+    return nano_vsnprintf(s, size, format, args);
+}
 void *__memset_chk(void *dest, int c, unsigned long len, unsigned long destlen) { return memset(dest, c, len); }
 void *__memcpy_chk(void *dest, const void *src, unsigned long len, unsigned long destlen) { return memcpy(dest, src, len); }
 char *__strncpy_chk(char *dest, const char *src, unsigned long len, unsigned long destlen) { return strncpy(dest, src, len); }

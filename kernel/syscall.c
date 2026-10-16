@@ -78,7 +78,9 @@ void syscall_handler(SyscallRegisters* regs) {
         
         case SYSCALL_MALLOC: {
             size_t size = (size_t)regs->rdi;
-            void* ptr = malloc(size);
+            void* ptr = current_process
+                      ? malloc_for_process(size, current_process->pid)
+                      : malloc(size);
             regs->rax = (uint64_t)ptr; // Returnăm adresa pointerului
             break;
         }
@@ -327,6 +329,7 @@ void syscall_handler(SyscallRegisters* regs) {
 						process_table[i].cr3 == exiting_process->cr3) {
 						
 						// Am găsit un thread! Îi eliberăm doar stiva privată
+						free_process_allocations(process_table[i].pid);
 						if (process_table[i].stack_base) {
 							free((void*)process_table[i].stack_base);
 							process_table[i].stack_base = 0;
@@ -343,6 +346,7 @@ void syscall_handler(SyscallRegisters* regs) {
 				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
 
 				// Acum ESTE SIGUR să distrugem memoria, pentru că niciun thread nu o mai folosește
+				free_process_allocations(exiting_process->pid);
 				for (int p = 0; p < MAX_PROG_PAGES; p++) {
 					if (exiting_process->prog_pages[p] != 0) {
 						free_page((void*)exiting_process->prog_pages[p]);
@@ -387,7 +391,11 @@ void syscall_handler(SyscallRegisters* regs) {
 			int target_pid = (int)regs->rdi;
 			if (target_pid <= 1) { regs->rax = (uint64_t)-1; break; }
 
-			if (current_process && current_process->pid == (uint32_t)target_pid) {
+			PCB* target_process = get_process_by_pid((uint32_t)target_pid);
+			if (current_process && target_process &&
+				(current_process->pid == (uint32_t)target_pid ||
+				 (current_process->cr3 != 0 &&
+				  current_process->cr3 == target_process->cr3))) {
 				regs->rax = (uint64_t)-1;
 				break;
 			}
@@ -402,8 +410,10 @@ void syscall_handler(SyscallRegisters* regs) {
 					for (int t = 0; t < MAX_PROCESSES; t++) {
 						if (process_table[t].state != PROC_FREE &&
 							process_table[t].pid != victim->pid &&
+							victim->cr3 != 0 &&
 							process_table[t].cr3 == victim->cr3) {
 							
+							free_process_allocations(process_table[t].pid);
 							if (process_table[t].stack_base) {
 								free((void*)process_table[t].stack_base);
 								process_table[t].stack_base = 0;
@@ -416,6 +426,7 @@ void syscall_handler(SyscallRegisters* regs) {
 					// --------------------------------------------
 
 					// A. Eliberăm stiva (Heap) principală
+					free_process_allocations(victim->pid);
 					if (victim->stack_base) {
 						free((void*)victim->stack_base);
 						victim->stack_base = 0;
@@ -475,6 +486,10 @@ void syscall_handler(SyscallRegisters* regs) {
 						dead_child_pid = process_table[i].pid;
 						
 						// Eliberăm slotul copilului terminat
+						if (process_table[i].stack_base) {
+							free((void*)process_table[i].stack_base);
+							process_table[i].stack_base = 0;
+						}
 						process_table[i].state = PROC_FREE;
 						process_table[i].pid = 0;
 						process_table[i].ppid = 0;
@@ -509,6 +524,10 @@ void syscall_handler(SyscallRegisters* regs) {
 			for (int i = 0; i < MAX_PROCESSES; i++) {
 				if (process_table[i].state == PROC_ZOMBIE && process_table[i].ppid == current_process->pid) {
 					dead_child_pid = process_table[i].pid;
+					if (process_table[i].stack_base) {
+						free((void*)process_table[i].stack_base);
+						process_table[i].stack_base = 0;
+					}
 					process_table[i].state = PROC_FREE;
 					process_table[i].pid = 0;
 					process_table[i].ppid = 0;
@@ -845,6 +864,7 @@ void syscall_handler(SyscallRegisters* regs) {
 		case SYSCALL_THREAD_EXIT: {
 			__asm__ volatile ("cli");
 			if (current_process) {
+				free_process_allocations(current_process->pid);
 				// 1. În loc de PROC_FREE, îl trecem în PROC_ZOMBIE
 				// Asta permite părinților să găsească thread-ul și să îi citească rezultatul
 				current_process->state = PROC_ZOMBIE;

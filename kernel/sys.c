@@ -56,15 +56,60 @@ void kill_process_by_pid(uint32_t pid) {
             uint32_t ppid = process_table[i].ppid;
             int tty_id = process_table[i].tty_id;
 
+            if (&process_table[i] == current_process ||
+                (current_process && process_table[i].cr3 == current_process->cr3)) {
+                uint64_t shared_cr3 = process_table[i].cr3;
+                process_table[i].exit_code = -1;
+
+                for (int t = 0; t < MAX_PROCESSES; t++) {
+                    if (process_table[t].state != PROC_FREE &&
+                        process_table[t].cr3 == shared_cr3) {
+                        process_table[t].state = PROC_ZOMBIE;
+                    }
+                }
+
+                for (int j = 0; j < MAX_PROCESSES; j++) {
+                    if (process_table[j].pid == ppid &&
+                        process_table[j].state == PROC_SLEEPING) {
+                        process_table[j].state = PROC_READY;
+                        keyboard_flush();
+                        break;
+                    }
+                }
+
+                ttys[tty_id].foreground_pid = ppid;
+                return;
+            }
+
+            uint64_t previous_cr3;
+            __asm__ volatile ("mov %%cr3, %0" : "=r"(previous_cr3));
+            __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+            uint64_t victim_cr3 = process_table[i].cr3;
+            for (int t = 0; t < MAX_PROCESSES; t++) {
+                if (victim_cr3 &&
+                    t != i &&
+                    process_table[t].state != PROC_FREE &&
+                    process_table[t].cr3 == victim_cr3) {
+                    free_process_allocations(process_table[t].pid);
+                    if (process_table[t].stack_base) {
+                        free((void*)process_table[t].stack_base);
+                        process_table[t].stack_base = 0;
+                    }
+                    process_table[t].state = PROC_FREE;
+                    process_table[t].pid = 0;
+                    process_table[t].name[0] = '\0';
+                }
+            }
+
             // 1. Eliberăm stiva alocată cu malloc (Curățăm resursele copilului mai întâi)
             if (process_table[i].stack_base) {
                 free((void*)process_table[i].stack_base);
                 process_table[i].stack_base = 0;
             }
-			
-			 __asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
-			
+
             // 2. Eliberăm paginile fizice și paginarea (PML4)
+            free_process_allocations(process_table[i].pid);
             for (int p = 0; p < MAX_PROG_PAGES; p++) {
                 if (process_table[i].prog_pages[p]) {
                     free_page((void*)process_table[i].prog_pages[p]);
@@ -75,6 +120,7 @@ void kill_process_by_pid(uint32_t pid) {
                 free_process_paging(process_table[i].cr3);
                 process_table[i].cr3 = 0;
             }
+            __asm__ volatile ("mov %0, %%cr3" :: "r"(previous_cr3));
 
             // 3. Eliberăm slotul procesului
             process_table[i].state = PROC_FREE;

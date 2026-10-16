@@ -77,7 +77,12 @@ unsigned int W_LumpNameHash(const char *s)
 
     for (i=0; i < 8 && s[i] != '\0'; ++i)
     {
-        result = ((result << 5) ^ result ) ^ toupper((int)s[i]);
+        unsigned char c = (unsigned char)s[i];
+        if (c >= 'a' && c <= 'z')
+        {
+            c -= 'a' - 'A';
+        }
+        result = ((result << 5) ^ result ) ^ c;
     }
 
     return result;
@@ -276,18 +281,15 @@ int W_CheckNumForName (char* name)
             }
         }
     } 
-    else
-    {
-        // We don't have a hash table generate yet. Linear search :-(
-        // 
-        // scan backwards so patch lump files take precedence
 
-        for (i=numlumps-1; i >= 0; --i)
+    // Fall back to the directory scan if the hash lookup misses.
+    // Lump-name comparison is case-insensitive, so it must not depend on
+    // the hash implementation producing the same bucket for both casings.
+    for (i=numlumps-1; i >= 0; --i)
+    {
+        if (!strncasecmp(lumpinfo[i].name, name, 8))
         {
-            if (!strncasecmp(lumpinfo[i].name, name, 8))
-            {
-                return i;
-            }
+            return i;
         }
     }
 
@@ -609,4 +611,3 @@ void W_CheckCorrectIWAD(GameMission_t mission)
         }
     }
 }
-

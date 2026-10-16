@@ -11,6 +11,7 @@
 typedef struct BlockHeader {
     size_t size;               // Dimensiunea payload-ului (fără antet)
     int is_free;               // 1 = liber, 0 = ocupat
+    uint32_t owner_pid;        // Procesul care a alocat blocul; 0 pentru kernel
     struct BlockHeader* next;  // Pointer către următorul bloc din listă
 } BlockHeader;
 
@@ -26,12 +27,13 @@ void memory_init() {
     free_list = (BlockHeader*)HEAP_START;
     free_list->size = HEAP_SIZE - sizeof(BlockHeader);
     free_list->is_free = 1;
+    free_list->owner_pid = 0;
     free_list->next = 0;
 
     KLOG_INFO("Advanced Heap Manager initialized. Start: 0x01000000, Size: 16MB\n");
 }
 
-void* malloc(size_t size) {
+static void* allocate(size_t size, uint32_t owner_pid) {
     if (size == 0) return 0;
 
     // Aliniem dimensiunea la multipli de 8 octeți
@@ -48,6 +50,7 @@ void* malloc(size_t size) {
                 
                 next_block->size = current->size - size - sizeof(BlockHeader);
                 next_block->is_free = 1;
+                next_block->owner_pid = 0;
                 next_block->next = current->next;
 
                 current->size = size;
@@ -55,6 +58,7 @@ void* malloc(size_t size) {
             }
 
             current->is_free = 0;
+            current->owner_pid = owner_pid;
             // Returnăm adresa de după antet (payload-ul)
             return (void*)(current + 1);
         }
@@ -65,14 +69,15 @@ void* malloc(size_t size) {
     return 0;
 }
 
-void free(void* ptr) {
-    if (!ptr) return;
+void* malloc(size_t size) {
+    return allocate(size, 0);
+}
 
-    // Obținem antetul blocului situat exact cu un struct BlockHeader înaintea datelor
-    BlockHeader* header = (BlockHeader*)ptr - 1;
-    header->is_free = 1;
+void* malloc_for_process(size_t size, uint32_t pid) {
+    return pid ? allocate(size, pid) : malloc(size);
+}
 
-    // Opțional: Coalescing (unirea blocurilor libere adiacente pentru a evita fragmentarea)
+static void coalesce_free_blocks(void) {
     BlockHeader* current = free_list;
     while (current != 0 && current->next != 0) {
         if (current->is_free && current->next->is_free) {
@@ -82,6 +87,29 @@ void free(void* ptr) {
             current = current->next;
         }
     }
+}
+
+void free(void* ptr) {
+    if (!ptr) return;
+
+    // Obținem antetul blocului situat exact cu un struct BlockHeader înaintea datelor
+    BlockHeader* header = (BlockHeader*)ptr - 1;
+    header->is_free = 1;
+    header->owner_pid = 0;
+    coalesce_free_blocks();
+}
+
+void free_process_allocations(uint32_t pid) {
+    if (pid == 0) return;
+
+    for (BlockHeader* current = free_list; current != 0; current = current->next) {
+        if (!current->is_free && current->owner_pid == pid) {
+            current->is_free = 1;
+            current->owner_pid = 0;
+        }
+    }
+
+    coalesce_free_blocks();
 }
 
 // Funcții pentru statistici

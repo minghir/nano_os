@@ -12,6 +12,7 @@ PCB process_table[MAX_PROCESSES];
 PCB* current_process = 0;
 uint32_t next_pid = 1;
 uint64_t kernel_cr3 = 0;
+static void* pending_reap_stack;
 
 void process_init() {
     // Salvăm CR3-ul de bază al Kernelului O SINGURĂ DATĂ la boot
@@ -49,10 +50,16 @@ void process_init() {
 
 // Planificatorul (Scheduler-ul) apelat la fiecare milisecundă
 uint64_t schedule(uint64_t current_rsp) {
+    if (pending_reap_stack) {
+        free(pending_reap_stack);
+        pending_reap_stack = 0;
+    }
+
     // 1. SALVĂM ÎNTOTDEAUNA stiva procesului curent întrerupt de timer,
     // indiferent dacă era RUNNING sau SLEEPING!
-    if (current_process) {
-        current_process->regs.rsp = current_rsp;
+    PCB* outgoing_process = current_process;
+    if (outgoing_process) {
+        outgoing_process->regs.rsp = current_rsp;
     }
 
     // 2. Găsim următorul proces READY
@@ -71,7 +78,7 @@ uint64_t schedule(uint64_t current_rsp) {
 
     // 3. Dacă nu am găsit nimic din USER SPACE...
     if (!next_proc) {
-        if (!current_process) {
+        if (!current_process || current_process->state != PROC_RUNNING) {
             // Plasa de siguranță: forțăm întoarcerea pe Kernel (PID 0)
             next_proc = &process_table[0];
         } else {
@@ -99,6 +106,51 @@ uint64_t schedule(uint64_t current_rsp) {
         if (old_cr3 != next_proc->cr3) {
             __asm__ volatile("mov %0, %%cr3" :: "r"(next_proc->cr3));
         }
+    }
+
+    if (outgoing_process &&
+        outgoing_process != next_proc &&
+        outgoing_process->state == PROC_ZOMBIE &&
+        outgoing_process->cr3 != 0) {
+        uint64_t dead_cr3 = outgoing_process->cr3;
+
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            PCB* member = &process_table[i];
+            if (member->state != PROC_FREE && member->cr3 == dead_cr3) {
+                free_process_allocations(member->pid);
+            }
+        }
+
+        for (int p = 0; p < MAX_PROG_PAGES; p++) {
+            if (outgoing_process->prog_pages[p]) {
+                free_page((void*)outgoing_process->prog_pages[p]);
+                outgoing_process->prog_pages[p] = 0;
+            }
+        }
+        free_process_paging(dead_cr3);
+
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            PCB* member = &process_table[i];
+            if (member->state != PROC_FREE && member->cr3 == dead_cr3) {
+                member->cr3 = 0;
+                for (int p = 0; p < MAX_PROG_PAGES; p++) {
+                    member->prog_pages[p] = 0;
+                }
+
+                if (member != outgoing_process) {
+                    if (member->stack_base) {
+                        free((void*)member->stack_base);
+                        member->stack_base = 0;
+                    }
+                    member->state = PROC_FREE;
+                    member->pid = 0;
+                    member->name[0] = '\0';
+                }
+            }
+        }
+
+        pending_reap_stack = (void*)outgoing_process->stack_base;
+        outgoing_process->stack_base = 0;
     }
 	
 	// ======== ADAUGĂ ASTA AICI ========
@@ -280,4 +332,3 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
     
     return p->pid; 
 }
-

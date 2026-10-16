@@ -465,67 +465,232 @@ int strcmp(const char* s1, const char* s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-// Funcție variadică nano_printf compatibilă cu snprintf-ul tău existent
-void nano_printf(const char* format, ...) {
-    char buffer[256]; // Alocăm un buffer temporar pe stivă pentru mesaj
-    va_list args;
-    va_start(args, format);
-    
-    // Folosim snprintf-ul tău existent pentru a formata string-ul cu argumente variadice
-    // Notă: snprintf-ul tău folosește va_arg intern, dar fiindcă va_list a fost 
-    // deja deschis, putem crea o funcție vsnprintf sau adaptăm direct:
-    va_end(args);
+static void append_formatted_char(char* buffer, uint32_t* written, char c) {
+    if (*written < 1023) buffer[*written] = c;
+    if (*written < 1024) (*written)++;
+}
 
-    // Variantă directă și curată bazată pe logica ta existentă de snprintf:
-    va_start(args, format);
-    char* ptr = buffer;
-    uint32_t max_len = sizeof(buffer) - 1;
+int nano_vsnprintf(char* output, size_t output_size, const char* format, va_list args) {
+    if (!format || (output_size > 0 && !output)) return -1;
+
+    char buffer[1024];
     uint32_t written = 0;
 
-    int i = 0;
-    while (format[i] != '\0' && written < max_len) {
-        if (format[i] == '%' && format[i+1] != '\0') {
-            i++;
-            char spec = format[i];
-            char conv_buf[32];
-            char* src = conv_buf;
-
-            if (spec == 'd' || spec == 'i') {
-                int64_t val = va_arg(args, int);
-                _int_to_dec(val, conv_buf);
-            } 
-			else if (spec == 'f') {
-                double val = va_arg(args, double); // În va_arg float devine double
-                _float_to_str(val, conv_buf, 6);   // 6 zecimale standard, ca în printf
-            }
-			else if (spec == 'x' || spec == 'X') {
-                uint64_t val = va_arg(args, uint64_t);
-                _uint_to_hex(val, conv_buf, (spec == 'X'));
-            } else if (spec == 's') {
-                char* s = va_arg(args, char*);
-                src = s ? s : "(null)";
-            } else if (spec == 'c') {
-                conv_buf[0] = (char)va_arg(args, int);
-                conv_buf[1] = '\0';
-            } else {
-                conv_buf[0] = '%';
-                conv_buf[1] = spec;
-                conv_buf[2] = '\0';
-            }
-
-            while (*src != '\0' && written < max_len) {
-                *ptr++ = *src++;
-                written++;
-            }
-            i++;
-        } else {
-            *ptr++ = format[i++];
-            written++;
+    while (*format) {
+        if (*format != '%') {
+            append_formatted_char(buffer, &written, *format++);
+            continue;
         }
-    }
-    *ptr = '\0';
-    va_end(args);
+        format++;
+        if (*format == '%') {
+            append_formatted_char(buffer, &written, *format++);
+            continue;
+        }
 
-    // Trimitem textul final formatat către funcția de afișare a sistemului tău
-    nano_print(buffer);
+        int left_align = 0;
+        int plus_sign = 0;
+        int space_sign = 0;
+        int alternate = 0;
+        int zero_pad = 0;
+        int parsing_flags = 1;
+        while (parsing_flags) {
+            switch (*format) {
+                case '-': left_align = 1; format++; break;
+                case '+': plus_sign = 1; format++; break;
+                case ' ': space_sign = 1; format++; break;
+                case '#': alternate = 1; format++; break;
+                case '0': zero_pad = 1; format++; break;
+                default: parsing_flags = 0; break;
+            }
+        }
+
+        int width = 0;
+        if (*format == '*') {
+            width = va_arg(args, int);
+            format++;
+            if (width < 0) {
+                left_align = 1;
+                width = -width;
+            }
+        } else {
+            while (*format >= '0' && *format <= '9') {
+                if (width < 1024) width = width * 10 + (*format - '0');
+                format++;
+            }
+        }
+        if (width > 1023) width = 1023;
+
+        int precision = -1;
+        if (*format == '.') {
+            format++;
+            precision = 0;
+            if (*format == '*') {
+                precision = va_arg(args, int);
+                format++;
+                if (precision < 0) precision = -1;
+            } else {
+                while (*format >= '0' && *format <= '9') {
+                    if (precision < 1024) precision = precision * 10 + (*format - '0');
+                    format++;
+                }
+            }
+            if (precision > 1023) precision = 1023;
+        }
+
+        enum { LEN_DEFAULT, LEN_LONG, LEN_LLONG, LEN_SIZE, LEN_SHORT, LEN_CHAR } length = LEN_DEFAULT;
+        if (*format == 'h') {
+            format++;
+            if (*format == 'h') {
+                length = LEN_CHAR;
+                format++;
+            } else {
+                length = LEN_SHORT;
+            }
+        } else if (*format == 'l') {
+            format++;
+            if (*format == 'l') {
+                length = LEN_LLONG;
+                format++;
+            } else {
+                length = LEN_LONG;
+            }
+        } else if (*format == 'z' || *format == 't' || *format == 'j') {
+            length = LEN_SIZE;
+            format++;
+        } else if (*format == 'L') {
+            format++;
+        }
+
+        char spec = *format;
+        if (!spec) {
+            append_formatted_char(buffer, &written, '%');
+            break;
+        }
+        format++;
+
+        if (spec == 's') {
+            const char* text = va_arg(args, const char*);
+            if (!text) text = "(null)";
+            uint32_t text_len = 0;
+            while (text[text_len] && (precision < 0 || text_len < (uint32_t)precision)) text_len++;
+            int padding = width > (int)text_len ? width - (int)text_len : 0;
+            if (!left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            for (uint32_t i = 0; i < text_len; i++) append_formatted_char(buffer, &written, text[i]);
+            if (left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            continue;
+        }
+
+        if (spec == 'c') {
+            char c = (char)va_arg(args, int);
+            int padding = width > 1 ? width - 1 : 0;
+            if (!left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            append_formatted_char(buffer, &written, c);
+            if (left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            continue;
+        }
+
+        if (spec == 'f' || spec == 'F') {
+            char number[64];
+            int float_precision = precision < 0 ? 6 : precision;
+            if (float_precision > 9) float_precision = 9;
+            _float_to_str(va_arg(args, double), number, float_precision);
+            uint32_t number_len = 0;
+            while (number[number_len] && number_len < sizeof(number) - 1) number_len++;
+            int padding = width > (int)number_len ? width - (int)number_len : 0;
+            if (!left_align) while (padding-- > 0) append_formatted_char(buffer, &written, zero_pad ? '0' : ' ');
+            for (uint32_t i = 0; i < number_len; i++) append_formatted_char(buffer, &written, number[i]);
+            if (left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            continue;
+        }
+
+        if (spec == 'd' || spec == 'i' || spec == 'u' || spec == 'o' ||
+            spec == 'x' || spec == 'X' || spec == 'p') {
+            int is_signed = spec == 'd' || spec == 'i';
+            int is_pointer = spec == 'p';
+            int is_negative = 0;
+            uint64_t value;
+            if (is_pointer) {
+                value = (uint64_t)va_arg(args, void*);
+                alternate = 1;
+                spec = 'x';
+            } else if (is_signed) {
+                int64_t signed_value;
+                if (length == LEN_LLONG) signed_value = va_arg(args, long long);
+                else if (length == LEN_LONG) signed_value = va_arg(args, long);
+                else if (length == LEN_SIZE) signed_value = va_arg(args, int64_t);
+                else signed_value = va_arg(args, int);
+                if (length == LEN_CHAR) signed_value = (signed char)signed_value;
+                else if (length == LEN_SHORT) signed_value = (short)signed_value;
+                is_negative = signed_value < 0;
+                value = is_negative ? (uint64_t)(-(signed_value + 1)) + 1 : (uint64_t)signed_value;
+            } else {
+                if (length == LEN_LLONG) value = va_arg(args, unsigned long long);
+                else if (length == LEN_LONG) value = va_arg(args, unsigned long);
+                else if (length == LEN_SIZE) value = va_arg(args, size_t);
+                else value = va_arg(args, unsigned int);
+                if (length == LEN_CHAR) value = (unsigned char)value;
+                else if (length == LEN_SHORT) value = (unsigned short)value;
+            }
+
+            unsigned int base = spec == 'o' ? 8 : ((spec == 'x' || spec == 'X') ? 16 : 10);
+            char digits[32];
+            char reverse[32];
+            const char* alphabet = spec == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+            uint32_t digit_count = 0;
+            if (value || precision != 0) {
+                do {
+                    reverse[digit_count++] = alphabet[value % base];
+                    value /= base;
+                } while (value && digit_count < sizeof(reverse));
+            }
+            while (digit_count < (uint32_t)(precision > 0 ? precision : 0) && digit_count < sizeof(reverse)) {
+                reverse[digit_count++] = '0';
+            }
+            for (uint32_t i = 0; i < digit_count; i++) digits[i] = reverse[digit_count - i - 1];
+
+            char sign = is_negative ? '-' : (is_signed && plus_sign ? '+' : (is_signed && space_sign ? ' ' : 0));
+            char prefix[2];
+            uint32_t prefix_len = 0;
+            if (alternate && spec == 'o' && (!digit_count || digits[0] != '0')) prefix[prefix_len++] = '0';
+            if (alternate && (spec == 'x' || spec == 'X') && digit_count) {
+                prefix[prefix_len++] = '0';
+                prefix[prefix_len++] = spec;
+            }
+            uint32_t content_len = digit_count + prefix_len + (sign != 0);
+            int padding = width > (int)content_len ? width - (int)content_len : 0;
+            int use_zero_padding = zero_pad && !left_align && precision < 0;
+            if (!left_align && !use_zero_padding) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            if (sign) append_formatted_char(buffer, &written, sign);
+            for (uint32_t i = 0; i < prefix_len; i++) append_formatted_char(buffer, &written, prefix[i]);
+            if (use_zero_padding) while (padding-- > 0) append_formatted_char(buffer, &written, '0');
+            for (uint32_t i = 0; i < digit_count; i++) append_formatted_char(buffer, &written, digits[i]);
+            if (left_align) while (padding-- > 0) append_formatted_char(buffer, &written, ' ');
+            continue;
+        }
+
+        append_formatted_char(buffer, &written, '%');
+        append_formatted_char(buffer, &written, spec);
+    }
+
+    buffer[written < 1024 ? written : 1023] = '\0';
+    if (output_size > 0) {
+        size_t copy_length = written < output_size - 1 ? written : output_size - 1;
+        for (size_t i = 0; i < copy_length; i++) output[i] = buffer[i];
+        output[copy_length] = '\0';
+    }
+    return (int)written;
+}
+
+int nano_vprintf(const char* format, va_list args) {
+    char buffer[1024];
+    int result = nano_vsnprintf(buffer, sizeof(buffer), format, args);
+    if (result >= 0) nano_print(buffer);
+    return result;
+}
+
+void nano_printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    nano_vprintf(format, args);
+    va_end(args);
 }

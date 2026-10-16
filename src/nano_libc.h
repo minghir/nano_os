@@ -195,7 +195,7 @@ static inline void nano_pwd(char* buffer, uint32_t max_len) {
     );
 }
 
-
+/*
 static inline void nano_sys_exit(int status) {
     // Trimităm codul 20 (SYSCALL_EXIT) în RAX, iar status-ul în RDI
     __asm__ volatile (
@@ -205,6 +205,20 @@ static inline void nano_sys_exit(int status) {
         : 
         : "r"((uint64_t)status), "r"((uint64_t)SYSCALL_EXIT)
         : "rax", "rdi", "memory"
+    );
+    while(1);
+}
+    */
+
+static inline void nano_sys_exit(int status) {
+    register uint64_t rax_val __asm__("rax") = 20; // SYSCALL_EXIT
+    register uint64_t rdi_val __asm__("rdi") = (uint64_t)status;
+    
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "r"(rax_val), "r"(rdi_val)
+        : "cc", "memory"
     );
     while(1);
 }

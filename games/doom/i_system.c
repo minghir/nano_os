@@ -259,9 +259,8 @@ void I_Quit (void)
 
 #if ORIGCODE
     SDL_Quit();
-
-    exit(0);
 #endif
+    exit(0);
 }
 
 #if !defined(_WIN32) && !defined(__MACOSX__) && !defined(__DJGPP__)
@@ -575,4 +574,3 @@ boolean I_GetMemoryValue(unsigned int offset, void *value, int size)
 
     return false;
 }
-
