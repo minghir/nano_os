@@ -393,5 +393,15 @@ void* memcpy(void* dest, const void* src, int count) {
     return (int)written;
 }
 
-
+// Compară două șiruri de caractere (echivalent strcmp)
+// Returnează 0 dacă sunt egale, < 0 dacă str1 < str2, > 0 dacă str1 > str2
+int string_compare(const char* str1, const char* str2) {
+    if (!str1 || !str2) return -1;
+    
+    while (*str1 && (*str1 == *str2)) {
+        str1++;
+        str2++;
+    }
+    return *(const unsigned char*)str1 - *(const unsigned char*)str2;
+}
 

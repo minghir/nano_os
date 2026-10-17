@@ -33,11 +33,12 @@ extern void print_number(uint32_t n);
 extern void newline();
 
 
+
 uint32_t get_current_dir_inode(void) {
     if (current_process) {
         return current_process->cwd_sector;
     }
-    return 0; // Fallback la Root
+    return 0; // Fallback la Root Inode
 }
 
 void set_current_dir_inode(uint32_t inode) {
@@ -46,9 +47,16 @@ void set_current_dir_inode(uint32_t inode) {
     }
 }
 
+// FIX: Aici gestionăm doar CALEA LOCALĂ a partiției, fără prefixe gen /hda!
 void get_current_v3_path(char* buf, uint32_t max_len) {
+    // Ne bazăm pe faptul că VFS-ul va atașa prefixul /hda. Aici dăm doar sub-calea internă.
+    // Dar stai, pentru simplificare majoră a driverului NanoFS și eliminarea corupției,
+    // o metodă excelentă este să construim calea înapoi, pornind de la inod, dar pentru moment, 
+    // lăsăm citirea din PCB, dar ne asigurăm că dacă e goală e "/".
+    
     if (current_process && current_process->current_path[0] != '\0') {
         int i = 0;
+        // Asigură-te că citim doar calea VFS locală (partea de după /hda)
         while (current_process->current_path[i] && i < (int)max_len - 1) {
             buf[i] = current_process->current_path[i];
             i++;
@@ -63,9 +71,15 @@ void get_current_v3_path(char* buf, uint32_t max_len) {
 void set_current_v3_path(const char* new_path) {
     if (current_process) {
         int i = 0;
-        while (new_path[i] && i < 255) {
-            current_process->current_path[i] = new_path[i];
-            i++;
+        // Asigurăm formatul curat
+        if (new_path[0] != '/') {
+            current_process->current_path[0] = '/';
+            i = 1;
+        }
+        int j = 0;
+        while (new_path[j] && i < 255) {
+            current_process->current_path[i] = new_path[j];
+            i++; j++;
         }
         current_process->current_path[i] = '\0';
     }
@@ -83,84 +97,6 @@ static int nfs3_streq(const char* a, const char* b) {
 
 
 // Normalizează orice cale (relativă sau absolută) bazată pe string-uri (gestionează ., .. și /)
-/*
-static void nfs3_normalize_path(const char* cwd, const char* input, char* output) {
-    char full[256];
-    int i = 0;
-    
-    if (input[0] == '/') {
-        full[0] = '\0';
-    } else {
-        while (cwd[i] && i < 200) { full[i] = cwd[i]; i++; }
-        full[i] = '\0';
-    }
-    
-    while (i > 0 && full[i - 1] != '/') {
-        i--;
-        full[i] = '\0';
-    }
-    
-    // Adăugăm un slash dacă lipsește
-    if (i == 0 || full[i - 1] != '/') {
-        full[i++] = '/';
-        full[i] = '\0';
-    }
-    
-    int j = 0;
-    while (input[j] && i < 250) {
-        full[i++] = input[j++];
-    }
-    full[i] = '\0';
-    
-    // Parsăm componentele într-un stack virtual
-    char comps[32][64];
-    int comp_count = 0;
-    
-    char* token = full;
-    while (*token) {
-        while (*token == '/') token++;
-        if (*token == '\0') break;
-        
-        char folder[64];
-        int f = 0;
-        while (*token != '/' && *token != '\0' && f < 63) {
-            folder[f++] = *token++;
-        }
-        folder[f] = '\0';
-        
-        if (nfs3_streq(folder, ".")) {
-            continue;
-        } else if (nfs3_streq(folder, "..")) {
-            if (comp_count > 0) comp_count--;
-        } else {
-            if (comp_count < 32) {
-                int k = 0;
-                while (folder[k]) { comps[comp_count][k] = folder[k]; k++; }
-                comps[comp_count][k] = '\0';
-                comp_count++;
-            }
-        }
-    }
-    
-    // Reconstruim calea absolută curată
-    output[0] = '/';
-    int out_idx = 1;
-    output[out_idx] = '\0';
-    
-    for (int c = 0; c < comp_count; c++) {
-        int k = 0;
-        while (comps[c][k]) {
-            output[out_idx++] = comps[c][k++];
-        }
-        output[out_idx++] = '/';
-        output[out_idx] = '\0';
-    }
-    
-    if (out_idx > 1) {
-        output[out_idx - 1] = '\0';
-    }
-}
-*/
 
 static void nfs3_normalize_path(const char* cwd, const char* input, char* output) {
     char full[256];
@@ -314,50 +250,7 @@ static uint32_t nfs3_get_target_inode_verbose(const char* path) {
 }
 
 /// Rezolvă calea pentru Creare / Ștergere (separă Părintele de Numele fișierului)
-/*
-static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
-    if (!full_path || !full_path[0]) return 0xFFFFFFFF;
-    
-	char current_v3_path[256];
-	get_current_v3_path(current_v3_path, sizeof(current_v3_path));
-	
-    char abs_path[256];
-    nfs3_normalize_path(current_v3_path, full_path, abs_path);
-    
-    int last_slash = -1;
-    int len = 0;
-    while (abs_path[len]) {
-        if (abs_path[len] == '/') last_slash = len;
-        len++;
-    }
-    
-    if (last_slash <= 0) {
-        int i = 0;
-        while (abs_path[i + 1]) { filename_out[i] = abs_path[i + 1]; i++; }
-        filename_out[i] = '\0';
-        return 0; // Părintele este Root
-    }
-    
-    int i = 0;
-    int fn_start = last_slash + 1;
-    while (abs_path[fn_start + i]) {
-        filename_out[i] = abs_path[fn_start + i];
-        i++;
-    }
-    filename_out[i] = '\0';
-    
-    char dir_path[256];
-    for (int j = 0; j < last_slash; j++) dir_path[j] = abs_path[j];
-    dir_path[last_slash] = '\0';
-    
-    if (dir_path[0] == '\0') {
-        dir_path[0] = '/';
-        dir_path[1] = '\0';
-    }
-    
-    return nfs3_get_target_inode(dir_path);
-}
-*/
+
 
 static uint32_t nfs3_resolve_path(const char* full_path, char* filename_out) {
     if (!full_path || !full_path[0]) return 0xFFFFFFFF;
@@ -428,66 +321,48 @@ void fs_init_v3(void) {
 	set_current_v3_path("/");
 }
 
-/*
-void fs_list_files_v3(const char* path) {
-    uint32_t target_inode = get_current_dir_inode();//current_dir_inode;
 
-    if (path != 0 && path[0] != '\0' && !(path[0] == '.' && path[1] == '\0')) {
-        char dummy[64];
-        target_inode = nfs3_resolve_path(path, dummy);
-        if (target_inode == 0 && !nfs3_streq(path, "/")) {
-            print("Error: Directory does not exist.\n");
-            return;
-        }
-        uint32_t found = nfs3_find_in_dir(target_inode, dummy);
-        if (found != 0) {
-            InodeV3 inv;
-            nfs3_read_inode(found, &inv);
-            if (inv.flags == INODE_FLAG_DIR) target_inode = found;
-        }
-    }
-
-    nfs3_list_dir(target_inode);
-}
-*/
 void fs_list_files_v3(const char* path) {
+    // 1. Plecăm de la presupunerea că vrem să listăm directorul curent din PCB (unde ne aflăm cu cd)
     uint32_t target_inode = get_current_dir_inode();
 
-    if (path != 0 && path[0] != '\0' && !(path[0] == '.' && path[1] == '\0')) {
-        char dummy[64];
-        target_inode = nfs3_resolve_path(path, dummy);
+    // 2. Dacă utilizatorul a tastat ceva după ls (ex: ls subfolder sau ls /alt_folder)
+    if (path && path[0] != '\0' && !nfs3_streq(path, ".") && !nfs3_streq(path, "./")) {
         
-        if (path[0] == '/' && path[1] == '\0') {
-            target_inode = 0; // Root-ul
+        if (nfs3_streq(path, "/")) {
+            target_inode = 0; // Utilizatorul a cerut explicit root-ul partiției (ex: ls /hda/)
         } else {
-            uint32_t found = nfs3_find_in_dir(target_inode, dummy);
-            if (found == 0) {
-                print("Error: Path does not exist.\n");
+            // Căutăm elementul în directorul curent sau relativ la el
+            char dummy[64];
+            uint32_t parent = nfs3_resolve_path(path, dummy);
+            uint32_t found = nfs3_find_in_dir(parent, dummy);
+            
+            if (found == 0xFFFFFFFF) {
+                print("Eroare: Calea sau fisierul nu exista.\n");
                 return;
             }
             
             InodeV3 inv;
             nfs3_read_inode(found, &inv);
             
-            // VERIFICĂM DACĂ ESTE FIȘIER SAU DIRECTOR
             if (inv.flags == INODE_FLAG_DIR) {
-                target_inode = found;
-                nfs3_list_dir(target_inode); // Dacă e director, afișăm conținutul
+                target_inode = found; // Dacă e director, vrem să listăm conținutul LUI
             } else {
-                // Dacă este FIȘIER, afișăm doar informația despre acest fișier!
-                print("[FILE] ");
-                print(dummy);
+                // Dacă este fișier simplu, afișăm doar detaliile lui
+                print("[FILE] "); 
+                print(dummy); 
                 print(" - ");
                 char size_buf[32];
-                simple_itoa(inv.size, size_buf); // sau funcția ta de transformare în string
-                print(size_buf);
+                simple_itoa(inv.size, size_buf);
+                print(size_buf); 
                 print(" bytes\n");
                 return;
             }
         }
-    } else {
-        nfs3_list_dir(target_inode);
     }
+
+    // 3. Afișăm efectiv conținutul inodului țintă (fie CWD-ul curent, fie folderul cerut explicit)
+    nfs3_list_dir(target_inode);
 }
 
 
@@ -672,29 +547,13 @@ int fs_cd_v3(const char* name) {
     set_current_dir_inode(target_inode);
     // Sincronizăm calea exact cu calea absolută normalizată
 	set_current_v3_path(abs_path);
-	/*
-    int i = 0;
-    while (abs_path[i] && i < 255) {
-        current_v3_path[i] = abs_path[i];
-        i++;
-    }
-    current_v3_path[i] = '\0';
-	*/
-    
+	
     return 1;
 }
 
 void fs_get_current_path_v3(char* buffer, uint32_t max_len) {
 	get_current_v3_path(buffer, max_len);
-	/*
-    uint32_t i = 0;
 	
-    while (current_v3_path[i] && i < max_len - 1) {
-        buffer[i] = current_v3_path[i];
-        i++;
-    }
-    buffer[i] = '\0';
-	*/
 }
 
 void fs_fdisk_v3(void) {

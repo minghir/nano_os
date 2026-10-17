@@ -194,6 +194,41 @@ void page_fault_handler(FaultRegisters* regs) {
     }
 }
 
+
+// Funcție pentru extragerea unui parametru (ex: "rootfs=") din linia de comandă a kernelului
+void get_cmdline_param(const char* cmdline, const char* param_name, char* out_val, int max_len) {
+    out_val[0] = '\0';
+    if (!cmdline || !param_name) return;
+
+    int param_len = string_length(param_name);
+    int i = 0;
+
+    while (cmdline[i] != '\0') {
+        // Verificăm dacă șirul curent începe cu "param_name"
+        int match = 1;
+        for (int j = 0; j < param_len; j++) {
+            if (cmdline[i + j] == '\0' || cmdline[i + j] != param_name[j]) {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match) {
+            // Am găsit parametrul, copiem valoarea (până la spațiu sau sfârșit de șir)
+            int k = i + param_len;
+            int out_idx = 0;
+            while (cmdline[k] != '\0' && cmdline[k] != ' ' && out_idx < max_len - 1) {
+                out_val[out_idx++] = cmdline[k++];
+            }
+            out_val[out_idx] = '\0';
+            return;
+        }
+        i++;
+    }
+}
+
+
+
 void kernel_main(unsigned long magic, unsigned long addr) {
 	init_sse();
     tty_init();
@@ -255,10 +290,37 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     }
 
 
-    
+// Extragem linia de comandă a kernelului din structura Multiboot
+    char kernel_cmdline[256] = {0};
+
+    // Extragem cmdline din structura Multiboot
+    if (magic == 0x2BADB002 && addr != 0) {
+        multiboot_info_t* mb_info = (multiboot_info_t*)addr;
+        
+        // Verificăm flag-ul bitului 2 care indică prezența cmdline
+        if (mb_info->flags & (1 << 2)) {
+            const char* cmd = (const char*)(uint64_t)mb_info->cmdline;
+            int i = 0;
+            while (cmd[i] != '\0' && i < 255) {
+                kernel_cmdline[i] = cmd[i];
+                i++;
+            }
+            kernel_cmdline[i] = '\0';
+            
+            KLOG_INFO("KERNEL CMDLINE: ");
+            KLOG_INFO(kernel_cmdline);
+            KLOG_INFO("\n");
+        }
+    }
+
     KLOG_INFO("KERNEL:Try fs_init()\n");
-    fs_init();
+    
+    // Apelăm noua funcție fs_init pasând linia de comandă!
+    fs_init(kernel_cmdline); 
+    
     KLOG_INFO("KERNEL:fs_init() started\n");
+  
+  
     fs_create_file("/kernel.log", KERNEL_LOG_SIZE);
     KLOG_INFO("KERNEL:Log file created\n");
 

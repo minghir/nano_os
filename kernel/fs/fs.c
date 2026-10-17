@@ -1,7 +1,21 @@
 #include "fs.h"
 #include "../syslog.h"
 #include "../string.h"
+#include "../process.h"
 #include "../io.h"
+
+
+// Structura pentru tabela de montare (fstab-ul nostru din memorie)
+typedef struct {
+    char mount_point[16];     // ex: "/hdb"
+    int drive_id;             // ex: 1 (Primary Slave)
+    FileSystemInterface* fs;  // pointer către ext2_driver sau nfs3_driver
+    int in_use;
+} MountEntry;
+
+
+#define MAX_MOUNTS 4
+MountEntry mount_table[MAX_MOUNTS];
 
 
 uint8_t current_drive_id = 0;
@@ -13,6 +27,7 @@ static int streq(const char* a, const char* b) {
 
 // Declarăm driverul NanoFS V3 (acum singurul suportat)
 extern FileSystemInterface nfs3_driver;
+extern FileSystemInterface ext2_driver;
 
 // Pointerul către sistemul de fișiere activ în acest moment
 static FileSystemInterface* active_fs = &nfs3_driver;
@@ -22,52 +37,218 @@ static int starts_with_vfs(const char* str, const char* prefix) {
     while (*prefix) {
         if (*prefix++ != *str++) return 0;
     }
-    return 1;
+    // Trebuie să se termine prefixul, și următorul caracter din path trebuie să fie '/' sau null
+    // ex: prefixul e "/hdb", path-ul poate fi "/hdb" sau "/hdb/folder", dar nu "/hdb_test"
+    if (*str == '\0' || *str == '/') return 1;
+    return 0;
 }
 
+extern void get_cmdline_param(const char* cmdline, const char* param_name, char* out_val, int max_len);
+
+// --- Funcția Principală de Inițializare VFS ---
+// Această funcție primește linia de comandă salvată de la Multiboot
+void fs_init(const char* kernel_cmdline) {
+    char rootfs_type[16] = {0};
+    
+    // Curățăm tabela VFS la pornire
+    for (int i = 0; i < MAX_MOUNTS; i++) {
+        mount_table[i].in_use = 0;
+        mount_table[i].drive_id = 0;
+        mount_table[i].mount_point[0] = '\0';
+        mount_table[i].fs = 0;
+    }
+
+    // 1. Extragem tipul partiției root din cmdline (fallback "nfs3")
+    get_cmdline_param(kernel_cmdline, "rootfs=", rootfs_type, sizeof(rootfs_type));
+    if (rootfs_type[0] == '\0') {
+        string_copy(rootfs_type, "nfs3"); 
+    }
+
+    // 2. Inițializăm temporar driverul pentru a citi hdd.cfg
+    KLOG_INFO("Boot VFS Init: Montare temporara Drive 0 pentru citire config...\n");
+    current_drive_id = 0;
+    if (string_compare(rootfs_type, "nfs3") == 0) {
+        nfs3_driver.init();
+        active_fs = &nfs3_driver;
+    } else if (string_compare(rootfs_type, "ext2") == 0) {
+        ext2_driver.init();
+        active_fs = &ext2_driver;
+    } else {
+        KLOG_ERROR("Eroare fatala: Tip rootfs necunoscut!");
+        return;
+    }
+    is_at_global_root = 1;
+
+    // 3. Citim `hdd.cfg` direct de pe discul abia inițializat
+    uint8_t cfg_buffer[1024];
+    int bytes_read = active_fs->read_file("/cfg/hdd.cfg", cfg_buffer, 1023);
+
+    if (bytes_read > 0) {
+        cfg_buffer[bytes_read] = '\0';
+        KLOG_INFO("Se populeaza tabela VFS din /cfg/hdd.cfg...\n");
+        
+        char* ptr = (char*)cfg_buffer;
+        while (*ptr != '\0') {
+            while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r') ptr++;
+            if (*ptr == '\0') break;
+            
+            if (*ptr == '#') {
+                while (*ptr != '\n' && *ptr != '\0') ptr++;
+                continue;
+            }
+            
+            // Parsăm coloana 1: DriveID
+            char drive_str[16];
+            int idx = 0;
+            while (*ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != '\0' && idx < 15) {
+                drive_str[idx++] = *ptr++;
+            }
+            drive_str[idx] = '\0';
+            
+            while (*ptr == ' ' || *ptr == '\t') ptr++;
+            
+            // Parsăm coloana 2: FSType
+            char fs_str[16];
+            idx = 0;
+            while (*ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != '\0' && idx < 15) {
+                fs_str[idx++] = *ptr++;
+            }
+            fs_str[idx] = '\0';
+            
+            while (*ptr == ' ' || *ptr == '\t') ptr++;
+            
+            // Parsăm coloana 3: MountPoint
+            char mp_str[32];
+            idx = 0;
+            while (*ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != '\r' && *ptr != '\0' && idx < 31) {
+                mp_str[idx++] = *ptr++;
+            }
+            mp_str[idx] = '\0';
+            
+            while (*ptr != '\n' && *ptr != '\0') ptr++;
+            
+            // Înregistrăm discul în tabela de montare
+            if (fs_str[0] != '\0' && mp_str[0] != '\0') {
+                int parsed_drive_id = simple_atoi(drive_str);
+                
+                int free_slot = -1;
+                for (int m = 0; m < MAX_MOUNTS; m++) {
+                    if (!mount_table[m].in_use) {
+                        free_slot = m;
+                        break;
+                    }
+                }
+                
+                if (free_slot != -1) {
+                    mount_table[free_slot].drive_id = parsed_drive_id;
+                    string_copy(mount_table[free_slot].mount_point, mp_str);
+                    
+                    if (string_compare(fs_str, "ext2") == 0) {
+                        mount_table[free_slot].fs = &ext2_driver;
+                        
+                        // Setăm drive-ul pentru inițializare hardware
+                        uint8_t saved_drive = current_drive_id;
+                        current_drive_id = parsed_drive_id;
+                        ext2_driver.init();
+                        current_drive_id = saved_drive;
+                        
+                    } else if (string_compare(fs_str, "nfs3") == 0) {
+                        mount_table[free_slot].fs = &nfs3_driver;
+                        
+                        // DACĂ NU ESTE ROOT-ul, trebuie inițializat separat (dacă motorul tău o cere).
+                        // Root-ul a fost deja inițializat mai sus.
+                        if (parsed_drive_id != 0) {
+                            uint8_t saved_drive = current_drive_id;
+                            current_drive_id = parsed_drive_id;
+                            // nfs3_driver.init(); // Decomentează dacă NanoFS are nevoie de init explicit per drive
+                            current_drive_id = saved_drive;
+                        }
+                    } else {
+                        KLOG_ERROR("Eroare: Tip FS necunoscut!\n");
+                        continue;
+                    }
+
+                    mount_table[free_slot].in_use = 1;
+                    
+                    char log_msg[128];
+                    snprintf(log_msg, sizeof(log_msg), " -> Montat: Drive %d [%s] la %s\n", parsed_drive_id, fs_str, mp_str);
+                    KLOG_INFO(log_msg);
+                    
+                } else {
+                    KLOG_ERROR("Eroare: Tabela VFS este plina.\n");
+                }
+            }
+        }
+    } else {
+        KLOG_INFO("Avertisment: Nu s-a gasit /cfg/hdd.cfg. Sistem partial functional.\n");
+    }
+}
+
+
+
 // Router VFS: Extrage calea reală și returnează driverul V3
+// Memorează ultimul disc accesat hardware pentru a preveni coruperea în RAM
+// Memorează ultimul disc accesat hardware pentru a preveni coruperea în RAM
+static uint8_t active_hardware_drive = 255;
+
 FileSystemInterface* vfs_route(const char* full_path, char* local_path_out) {
     if (!full_path || full_path[0] == '\0') {
         local_path_out[0] = '\0';
-        return active_fs;
+        goto fallback;
     }
 
-    // Ruta explicită către hda (/hda sau /hda/...) -> Folosește tot NanoFS V3
-    if (starts_with_vfs(full_path, "/hda")) {
-		current_drive_id = 0;
-        int i = 4; // Trecem peste "/hda"
-        int j = 0;
-        if (full_path[i] == '\0') {
-            local_path_out[0] = '/';
-            local_path_out[1] = '\0';
-        } else {
-            while (full_path[i]) local_path_out[j++] = full_path[i++];
-            local_path_out[j] = '\0';
+    for (int i = 0; i < MAX_MOUNTS; i++) {
+        if (!mount_table[i].in_use) continue;
+
+        if (starts_with_vfs(full_path, mount_table[i].mount_point)) {
+            current_drive_id = mount_table[i].drive_id; 
+            
+            if (active_hardware_drive != current_drive_id) {
+                if (mount_table[i].fs->init) mount_table[i].fs->init();
+                if (mount_table[i].fs->cd) mount_table[i].fs->cd("/");
+                active_hardware_drive = current_drive_id;
+            }
+
+            int prefix_len = string_length(mount_table[i].mount_point);
+            int k = prefix_len;
+            int j = 0;
+            
+            if (full_path[k] == '\0') {
+                local_path_out[0] = '/';
+                local_path_out[1] = '\0';
+            } else {
+                while (full_path[k]) local_path_out[j++] = full_path[k++];
+                local_path_out[j] = '\0';
+            }
+            
+            return mount_table[i].fs; 
         }
-        return &nfs3_driver;
-    }
-    
-    // Ruta explicită către hdb (/hdb sau /hdb/...) -> Folosește NanoFS V3
-    if (starts_with_vfs(full_path, "/hdb")) {
-		current_drive_id = 1;
-        int i = 4; // Trecem peste "/hdb"
-        int j = 0;
-        if (full_path[i] == '\0') {
-            local_path_out[0] = '/';
-            local_path_out[1] = '\0';
-        } else {
-            while (full_path[i]) local_path_out[j++] = full_path[i++];
-            local_path_out[j] = '\0';
-        }
-        return &nfs3_driver;
     }
 
+    // Dacă path-ul nu e absolut (ex: "DOOM1.WAD" sau "bin"), copiem stringul pur
     int i = 0;
     while (full_path[i]) {
         local_path_out[i] = full_path[i];
         i++;
     }
     local_path_out[i] = '\0';
+
+fallback:
+    // --- FIX CRITIC PENTRU ATA ERRORS ---
+    // Dacă am ajuns aici, VFS-ul trimite comanda către driverul "active_fs" anterior.
+    // Ne asigurăm absolut că driverul fizic (current_drive_id) corespunde cu active_fs,
+    // altfel driverul EXT2 ar putea încerca să citească din greșeală de pe discul NanoFS!
+    for (int m = 0; m < MAX_MOUNTS; m++) {
+        if (mount_table[m].in_use && mount_table[m].fs == active_fs) {
+            current_drive_id = mount_table[m].drive_id;
+            
+            if (active_hardware_drive != current_drive_id) {
+                if (active_fs->init) active_fs->init();
+                active_hardware_drive = current_drive_id;
+            }
+            break;
+        }
+    }
     
     return active_fs;
 }
@@ -83,51 +264,39 @@ void fs_switch_driver(const char* name) {
     KLOG_INFO("Switched to NanoFS V3 driver.\n");
 }
 
-void fs_init(void) {
-    // Inițializăm motorul V3
-    if (nfs3_driver.init) nfs3_driver.init();
-    
-    active_fs = &nfs3_driver; 
-    is_at_global_root = 1;
-}
-/*
 void fs_list_files(const char* path) {
+    // 1. Rădăcina globală VFS
     if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
         print("VFS Root Directory Contents:\n");
-        print("[DIR]  hda  (NanoFS V3 - Disk 1)\n");
-        print("[DIR]  hdb  (NanoFS V3 - Disk 2)\n");
-        return;
-    }
-
-    char local_path[128];
-    FileSystemInterface* target = vfs_route(path, local_path);
-    if (target && target->list_files) {
-        target->list_files(local_path);
-    }
-}
-*/
-
-void fs_list_files(const char* path) {
-    if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
-        print("VFS Root Directory Contents:\n");
-        print("[DIR]  hda  (NanoFS V3 - Disk 1)\n");
-        print("[DIR]  hdb  (NanoFS V3 - Disk 2)\n");
-        return;
-    }
-
-    char local_path[128];
-    FileSystemInterface* target = vfs_route(path, local_path);
-    
-    // DACĂ CALEA ÎNCEPE CU /hda, forțăm explicit interfața lui hda!
-    if (path && path[0] == '/' && path[1] == 'h' && path[2] == 'd' && path[3] == 'a') {
-        // Dacă vfs_route a lăsat local_path gol sau greșit pentru subdirectoare absolute:
-        if (local_path[0] == '\0') {
-            string_copy(local_path, "/");
+        int count = 0;
+        for (int i = 0; i < MAX_MOUNTS; i++) {
+            if (mount_table[i].in_use) {
+                char output[128];
+                const char* fs_name = mount_table[i].fs ? mount_table[i].fs->name : "unknown";
+                
+                // FORMAT CORECTAT: %s simplu (fără cifre care să încurce snprintf-ul)
+                snprintf(output, sizeof(output), "[DIR]  %s (FS: %s | Drive ID: %d)\n", 
+                         mount_table[i].mount_point, fs_name, mount_table[i].drive_id);
+                print(output);
+                count++;
+            }
         }
+        if (count == 0) print(" (Niciun disc montat)\n");
+        return;
     }
 
+    // 2. Parsarea căii și găsirea driverului
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+    
+    // Nu mai forțăm local_path să devină "/" aici!
+    // Dacă e gol "", driverul (ex: fs_v3.c) știe să își folosească directorul curent din PCB.
+
+    // 3. Trimitem comanda către driver
     if (target && target->list_files) {
         target->list_files(local_path);
+    } else {
+        print("Eroare: Driver invalid sau FS nu suporta listarea.\n");
     }
 }
 
@@ -171,77 +340,186 @@ int fs_mkdir(const char* name) {
     return 0;
 }
 
+// VFS CD - Complet Dinamic
+/*
 int fs_cd(const char* name) {
     if (!name || name[0] == '\0') return 0;
 
-    // Suntem direcționați spre root-ul global
+    // Comanda "cd /" ne aduce înapoi în lista globală de partiții
     if (streq(name, "/") || streq(name, "/.")) {
         is_at_global_root = 1;
         return 1;
     }
 
-    if (is_at_global_root) {
-        if (streq(name, "hda") || streq(name, "/hda")) {
-            current_drive_id = 0;
-            active_fs = &nfs3_driver;
-            active_fs->cd("/");
-            is_at_global_root = 0;
-            return 1;
-        }
-        if (streq(name, "hdb") || streq(name, "/hdb")) {
-            current_drive_id = 1;
-            active_fs = &nfs3_driver;
-            active_fs->cd("/");
-            is_at_global_root = 0;
-            return 1;
-        }
-    }
-
+    // Dacă dăm "cd .." și suntem deja la baza unei partiții (ex: suntem în /hda), ieșim în VFS Root
     if (streq(name, "..") && !is_at_global_root) {
         char current_sub_path[64];
-        active_fs->get_current_path(current_sub_path, 64);
-        if (streq(current_sub_path, "/")) {
+        if (active_fs && active_fs->get_current_path) {
+            active_fs->get_current_path(current_sub_path, 64);
+            if (streq(current_sub_path, "/")) {
+                is_at_global_root = 1;
+                return 1;
+            }
+        } else {
             is_at_global_root = 1;
             return 1;
         }
     }
 
+    // Rutăm calea dorită prin VFS pentru a găsi driverul și calea locală
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
     
-    if (target && target->cd) {
-        int success = target->cd(local_path);
-        if (success) {
+    if (target) {
+        // Dacă încercăm să intrăm direct în partiție (ex: "cd /hda"), calea locală devine "/"
+        if (local_path[0] == '\0') {
+            string_copy(local_path, "/");
+        }
+        
+        // --- FIX DE STARE PCB ---
+        // Curățăm calea internă a procesului (PCB) dacă schimbăm efectiv partiția 
+        // Asta previne scurgerea de directoare (gen "/hdb" apărând în căutările lui "/hda")
+        extern PCB* current_process; // Declar-o sus dacă nu o ai
+        if (is_at_global_root) {
+            if (current_process) {
+                current_process->cwd_sector = 0; // Reset inod la Root
+                current_process->current_path[0] = '/';
+                current_process->current_path[1] = '\0';
+            }
+        }
+        // ------------------------
+
+        // Dacă driverul are funcție de cd, o apelăm ca să-și actualizeze inodurile/starea pe noul disc
+        if (target->cd) {
+            int success = target->cd(local_path);
+            if (success) {
+                active_fs = target;
+                is_at_global_root = 0; 
+                return 1;
+            }
+        } else {
+            // Dacă e un driver în lucru (cum e ext2) și n-are funcție CD, forțăm succesul
             active_fs = target;
-            // FIX CRITIC: Dacă am intrat cu succes într-un path din driver, NU mai suntem în global root!
-            is_at_global_root = 0; 
+            is_at_global_root = 0;
             return 1;
         }
     }
     
     return 0;
 }
+*/
+int fs_cd(const char* name) {
+    if (!name || name[0] == '\0') return 0;
 
+    // 1. Comanda "cd /" sau "cd /." ne aduce înapoi în meniul global VFS
+    if (streq(name, "/") || streq(name, "/.")) {
+        is_at_global_root = 1;
+        // Resetează starea procesului curent
+        extern PCB* current_process;
+        if (current_process) {
+            current_process->cwd_sector = 0;
+            current_process->current_path[0] = '/';
+            current_process->current_path[1] = '\0';
+        }
+        return 1;
+    }
+
+    // 2. Dacă suntem în interiorul unei partiții și tastăm "cd .." care duce la rădăcina partiției
+    if (!is_at_global_root && streq(name, "..")) {
+        char current_sub_path[64];
+        if (active_fs && active_fs->get_current_path) {
+            active_fs->get_current_path(current_sub_path, 64);
+            if (streq(current_sub_path, "/")) {
+                is_at_global_root = 1;
+                return 1;
+            }
+        } else {
+            is_at_global_root = 1;
+            return 1;
+        }
+    }
+
+    // 3. Pregătim calea pentru rutare
+    char full_target_path[128];
+    if (is_at_global_root) {
+        // Dacă suntem în root global și utilizatorul tastează un nume fără "/" (ex: "hda" în loc de "/hda")
+        if (name[0] != '/') {
+            full_target_path[0] = '/';
+            string_copy(full_target_path + 1, name);
+        } else {
+            string_copy(full_target_path, name);
+        }
+    } else {
+        // Dacă suntem deja în interiorul unei partiții, păstrăm calea primită
+        string_copy(full_target_path, name);
+    }
+
+    // 4. Folosim vfs_route pentru a găsi driverul corect și calea locală pe disc
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(full_target_path, local_path);
+
+    if (target) {
+        // Dacă calea locală e goală (ex: am tastat exact "/hda"), o forțăm la "/"
+        if (local_path[0] == '\0') {
+            string_copy(local_path, "/");
+        }
+
+        // Dacă driverul are funcție de CD, o apelăm
+        if (target->cd) {
+            int success = target->cd(local_path);
+            if (success) {
+                active_fs = target;
+                is_at_global_root = 0; // Ieșim din global root, am intrat pe disc
+                return 1;
+            } else {
+                return 0; // Directorul nu există pe disc
+            }
+        } else {
+            // Fallback pentru drivere fără CD explicit
+            active_fs = target;
+            is_at_global_root = 0;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+// VFS Get Current Path - Complet Dinamic
 void fs_get_current_path(char* buffer, uint32_t max_len) {
+    // Dacă suntem în meniul principal VFS
     if (is_at_global_root) {
         buffer[0] = '/';
         buffer[1] = '\0';
         return;
     }
 
+    // Aflăm unde suntem în interiorul partiției curente
     char sub_path[64];
-    active_fs->get_current_path(sub_path, 64);
+    sub_path[0] = '/';
+    sub_path[1] = '\0';
 
-    // Verificăm dacă suntem pe hda sau hdb în funcție de starea curentă
-    // (Poți personaliza prefixul dacă ai două instanțe separate de driver)
-    const char* prefix = (current_drive_id == 0) ? "/hda" : "/hdb";
+    if (active_fs && active_fs->get_current_path) {
+        active_fs->get_current_path(sub_path, 64);
+    }
+
+    // Găsim numele partiției (prefixul) căutând drive-ul activ în tabela de montare
+    const char* prefix = "/unknown";
+    for (int i = 0; i < MAX_MOUNTS; i++) {
+        if (mount_table[i].in_use && mount_table[i].drive_id == current_drive_id) {
+            prefix = mount_table[i].mount_point;
+            break;
+        }
+    }
     
+    // Construim calea finală combinând Prefixul (ex: /hda) cu SubCalea (ex: /sbin)
     int i = 0;
     while (prefix[i] && i < (int)max_len - 1) {
         buffer[i] = prefix[i];
         i++;
     }
 
+    // Dacă sub-calea e doar "/", nu o mai adăugăm ca să nu iasă "/hda/"
     if (!streq(sub_path, "/")) {
         int j = 0;
         while (sub_path[j] && i < (int)max_len - 1) {

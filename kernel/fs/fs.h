@@ -34,7 +34,7 @@ void fs_switch_driver(const char* name);
 FileSystemInterface* vfs_route(const char* full_path, char* local_path_out);
 
 int  fs_stats(uint32_t* total_sectors, uint32_t* free_sectors);
-void fs_init(void);
+void fs_init(const char* kernel_cmdline);
 void fs_list_files(const char* path);
 int  fs_create_file(const char* name, uint32_t size);
 int  fs_delete_file(const char* name);

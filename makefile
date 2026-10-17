@@ -135,7 +135,7 @@ run_gfx: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests games
 	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
-		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
+		-drive file=hdb_ext2.img,format=raw,index=1,media=disk \
 		-vga std \
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
@@ -147,12 +147,14 @@ run_txt: boot_txt.o $(OBJS) kernel.iso hdd_tools apps tests games
 	./init_hdd.sh
 	qemu-system-x86_64 -cdrom kernel.iso \
 		-drive file=hda_v3.img,format=raw,index=0,media=disk \
-		-drive file=hdb_v3.img,format=raw,index=1,media=disk \
+		-drive file=hdb_ext2.img,format=raw,index=1,media=disk \
 		-net nic,model=e1000 \
 		-net user,hostfwd=tcp::8080-:8080,hostfwd=tcp::2323-:23 \
 		-display curses \
 		-cpu qemu64,+sse,+sse2,+avx
-		
+
+#-drive file=hdc_ext2.img,format=raw,index=1,media=disk \		
+
 build: boot_gfx.o $(OBJS) kernel.iso hdd_tools apps tests
 	./init_hdd.sh
 	

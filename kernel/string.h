@@ -29,6 +29,7 @@
     
  void _uint_to_hex(uint64_t val, char* buf, int uppercase);
  int snprintf(char* str, uint32_t size, const char* format, ...);
+int string_compare(const char* str1, const char* str2);
 
 #endif // STRING_H
 
