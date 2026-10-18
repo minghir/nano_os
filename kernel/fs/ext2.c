@@ -902,8 +902,7 @@ static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size)
         print("[EXT2] Eroare: Tinta este un director!\n");
         return 0;
     }
-
-    // ... RESTUL FUNCȚIEI DE SCRIERE A BLOCURILOR (cu blocks_needed etc.) RĂMÂNE IDENTIC ...
+    
     uint32_t block_size = 1024 << ext2_superblock.s_log_block_size;
     uint32_t blocks_needed = (size + block_size - 1) / block_size;
 
