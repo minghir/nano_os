@@ -737,6 +737,17 @@ int nfs3_append_file(const char* name, const char* data) {
     return 1;
 }
 
+static int nfs3_stat(const char* path, fs_stat_t* out_stat) {
+    if (!out_stat) return 0;
+
+    // NFS3 nu stochează permisiuni pe disc, deci oferim acces total (rwxrwxrwx)
+    out_stat->size = 0;    // Sau mărimea reală a fișierului dacă ai funcție de citit marimea
+    out_stat->uid  = 0;    // Root
+    out_stat->gid  = 0;    // Root
+    out_stat->mode = 0777; // Permisiuni universale
+    return 1;
+}
+
 // Exportul oficial al driverului V3 compatibil VFS
 FileSystemInterface nfs3_driver = {
     .name = "NFS3",
@@ -754,5 +765,6 @@ FileSystemInterface nfs3_driver = {
     .fdisk = fs_fdisk_v3,
     .format = fs_format_v3,
 	.get_file_at_index = nfs3_get_file_at_index,
-	.append_file = nfs3_append_file
+	.append_file = nfs3_append_file,
+	.stat = nfs3_stat
 };

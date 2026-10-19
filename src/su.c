@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
 
     // 2. Lansăm un nou shell care va moșteni noul UID (ex: 1000)
     // Asigură-te că calea către binarul tău de shell pe disc este corectă (ex: "/sbin/shell")
-    int exec_res = nano_exec("/sbin/shell");
+    int exec_res = nano_exec("/hda/sbin/shell");
     
     // Dacă nano_exec se întoarce, înseamnă că a eșuat
     if (exec_res < 0) {

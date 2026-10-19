@@ -9,6 +9,7 @@
 #define EXT2_FT_REG_FILE 1
 #define EXT2_FT_DIR      2
 
+
 // Structura pentru Block Group Descriptor (necesară pentru a găsi Inodurile)
 typedef struct {
     uint32_t bg_block_bitmap;      // Blocul care ține harta blocurilor libere
@@ -38,6 +39,10 @@ static int streq(const char* a, const char* b) {
     while (*a && *a == *b) { a++; b++; }
     return *a == *b;
 }
+
+
+
+
 
 
 // -------------------------------------------------------------------------
@@ -506,6 +511,7 @@ static uint32_t ext2_resolve_path(const char* path) {
     return current_ino;
 }
 
+/*
 static void ext2_list_files(const char* path) {
     // 1. În EXT2, Inodul Rădăcină (Root) este mereu 2.
     uint32_t target_inode_num = ext2_current_inode; 
@@ -598,7 +604,128 @@ static void ext2_list_files(const char* path) {
 
     free(block_buffer);
 }
+*/
 
+static void mode_to_perm_str(uint16_t mode, char* str) {
+    // Tipul: d = Director, - = Fișier normal
+    str[0] = ((mode & 0xF000) == 0x4000) ? 'd' : '-';
+
+    // Owner (u)
+    str[1] = (mode & 0400) ? 'r' : '-';
+    str[2] = (mode & 0200) ? 'w' : '-';
+    str[3] = (mode & 0100) ? 'x' : '-';
+
+    // Group (g)
+    str[4] = (mode & 0040) ? 'r' : '-';
+    str[5] = (mode & 0020) ? 'w' : '-';
+    str[6] = (mode & 0010) ? 'x' : '-';
+
+    // Others (o)
+    str[7] = (mode & 0004) ? 'r' : '-';
+    str[8] = (mode & 0002) ? 'w' : '-';
+    str[9] = (mode & 0001) ? 'x' : '-';
+
+    str[10] = '\0';
+}
+
+
+static void ext2_list_files(const char* path) {
+    // 1. În EXT2, Inodul Rădăcină (Root) este mereu 2.
+    uint32_t target_inode_num = ext2_current_inode; 
+
+    // Dacă utilizatorul dă "ls folder" (o cale anume)
+    if (path && path[0] != '\0' && !streq(path, ".") && !streq(path, "/")) {
+        target_inode_num = ext2_resolve_path(path);
+        if (target_inode_num == 0) {
+            print("[EXT2] Fisier sau director inexistent.\n");
+            return;
+        }
+    } else if (path && streq(path, "/")) {
+        target_inode_num = 2; // Explicit cere root-ul
+    }
+
+    // 2. Citim inodul de pe disc
+    ext2_inode_t dir_inode;
+    if (!ext2_read_inode(target_inode_num, &dir_inode)) {
+        print("[EXT2 EROARE] Nu s-a putut citi inodul directorului.\n");
+        return;
+    }
+
+    // Verificăm dacă inodul aparține într-adevăr unui director (0x4000 = masca pentru director)
+    if ((dir_inode.i_mode & 0xF000) != 0x4000) {
+        print("[EXT2] Eroare: Tinta nu este un director!\n");
+        return;
+    }
+
+    // Calculăm dimensiunea unui bloc. În EXT2: Block Size = 1024 << s_log_block_size
+    uint32_t block_size = 1024 << ext2_superblock.s_log_block_size; 
+    
+    // Alocăm un buffer pentru a citi un bloc întreg
+    uint8_t* block_buffer = (uint8_t*)malloc(block_size);
+    if (!block_buffer) {
+        print("[EXT2] Eroare alocare memorie.\n");
+        return;
+    }
+
+    uint32_t bytes_read = 0;
+
+    // 3. Parcurgem blocurile directe ale inodului (primele 12 blocuri)
+    for (int i = 0; i < 12 && bytes_read < dir_inode.i_size; i++) {
+        uint32_t block_num = dir_inode.i_block[i];
+        
+        if (block_num == 0) break; // Am ajuns la capătul blocurilor alocate
+
+        // Citim blocul fizic de pe disc în buffer-ul nostru
+        ext2_read_block(block_num, block_buffer);
+
+        uint32_t offset = 0;
+
+        // 4. Parcurgem lista înlănțuită de intrări din interiorul acestui bloc
+        while (offset < block_size && bytes_read < dir_inode.i_size) {
+            ext2_dir_entry_t* entry = (ext2_dir_entry_t*)(block_buffer + offset);
+
+            // Dacă rec_len e 0, înseamnă că sistemul de fișiere e corupt (previne bucla infinită)
+            if (entry->rec_len == 0) break; 
+
+            // Dacă inodul e diferit de 0, intrarea este validă (nu a fost ștearsă)
+            if (entry->inode != 0) {
+                char name[256];
+                int name_l = entry->name_len;
+                if (name_l > 255) name_l = 255;
+                
+                // Copiem numele caracter cu caracter
+                for (int n = 0; n < name_l; n++) {
+                    name[n] = entry->name[n];
+                }
+                name[name_l] = '\0';
+
+                // Ignorăm folderul curent "." și părintele ".." pentru un afișaj mai curat în consolă
+                if (!streq(name, ".") && !streq(name, "..")) {
+                    ext2_inode_t child_ino;
+                    if (ext2_read_inode(entry->inode, &child_ino)) {
+                        char perm_str[11];
+                        mode_to_perm_str(child_ino.i_mode, perm_str);
+
+                        // Identificăm numele proprietarului și al grupului după UID/GID
+                        const char* owner = (child_ino.i_uid == 0) ? "nano" : "user";
+                        const char* group = (child_ino.i_gid == 0) ? "nano" : "user";
+
+                        char output[256];
+                        snprintf(output, sizeof(output), "%s  %s  %s  %u  %s\n", 
+                                 perm_str, owner, group, child_ino.i_size, name);
+                        print(output);
+                    }
+                }
+            }
+
+            // Sărim la următoarea intrare adunând lungimea intrării curente
+            offset += entry->rec_len;
+            bytes_read += entry->rec_len;
+        }
+    }
+
+    free(block_buffer);
+}
 
 // Caută un nume de fișier în directorul Root (Inode 2) și returnează ID-ul inodului
 static uint32_t ext2_find_in_root(const char* target_name) {
@@ -1220,6 +1347,23 @@ static int ext2_append_file(const char* path, const char* data) {
     return (bytes_written == (int)new_total_size) ? 1 : 0;
 }
 
+static int ext2_stat(const char* path, fs_stat_t* out_stat) {
+    if (!path || !out_stat) return 0;
+
+    uint32_t inode_num = ext2_resolve_path(path);
+    if (inode_num == 0) return 0; // Fișierul nu există
+
+    ext2_inode_t inode;
+    if (!ext2_read_inode(inode_num, &inode)) return 0;
+
+    out_stat->size = inode.i_size;
+    out_stat->uid  = inode.i_uid;
+    out_stat->gid  = inode.i_gid;
+    out_stat->mode = inode.i_mode;
+
+    return 1;
+}
+
 // --- EXPORTAREA DRIVERULUI ---
 FileSystemInterface ext2_driver = {
     .name = "ext2",
@@ -1237,5 +1381,6 @@ FileSystemInterface ext2_driver = {
     .fdisk = ext2_fdisk,
     .format = ext2_format,
     .get_file_at_index = ext2_get_file_at_index,
-    .append_file = ext2_append_file
+    .append_file = ext2_append_file,
+	.stat = ext2_stat
 };

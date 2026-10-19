@@ -3,6 +3,7 @@
 #include "../string.h"
 #include "../process.h"
 #include "../io.h"
+#include "../pcb.h"
 
 
 // Structura pentru tabela de montare (fstab-ul nostru din memorie)
@@ -263,7 +264,7 @@ void fs_switch_driver(const char* name) {
     active_fs->init();
     KLOG_INFO("Switched to NanoFS V3 driver.\n");
 }
-
+/*
 void fs_list_files(const char* path) {
     // 1. Rădăcina globală VFS
     if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
@@ -299,115 +300,218 @@ void fs_list_files(const char* path) {
         print("Eroare: Driver invalid sau FS nu suporta listarea.\n");
     }
 }
+*/
 
+void fs_list_files(const char* path) {
+    // 1. Rădăcina globală VFS
+    if (is_at_global_root && (!path || path[0] == '\0' || streq(path, "/") || streq(path, "."))) {
+        print("VFS Root Directory Contents:\n");
+        int count = 0;
+        for (int i = 0; i < MAX_MOUNTS; i++) {
+            if (mount_table[i].in_use) {
+                char output[128];
+                const char* fs_name = mount_table[i].fs ? mount_table[i].fs->name : "unknown";
+                
+                // Format stil UNIX: drwxr-xr-x nano nano <mount_point> (FS: ... | Drive: ...)
+                snprintf(output, sizeof(output), "drwxr-xr-x  nano  nano  %s  (FS: %s | Drive ID: %d)\n", 
+                         mount_table[i].mount_point, fs_name, mount_table[i].drive_id);
+                print(output);
+                count++;
+            }
+        }
+        if (count == 0) print(" (Niciun disc montat)\n");
+        return;
+    }
+
+    // 2. Parsarea căii și găsirea driverului
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+
+    // 3. Trimitem comanda către driver
+    if (target && target->list_files) {
+        target->list_files(local_path);
+    } else {
+        print("Eroare: Driver invalid sau FS nu suporta listarea.\n");
+    }
+}
+
+
+// Extrage calea directorului părinte (ex: "/test/aa" -> "/test", "aa" -> "/")
+static void vfs_get_parent_path(const char* full_path, char* parent_out) {
+    int len = 0;
+    int last_slash = -1;
+    while (full_path[len] && len < 127) {
+        if (full_path[len] == '/') last_slash = len;
+        len++;
+    }
+
+    if (last_slash <= 0) {
+        // Fișierul e în rădăcina partiției curente
+        parent_out[0] = '/';
+        parent_out[1] = '\0';
+    } else {
+        for (int i = 0; i < last_slash; i++) {
+            parent_out[i] = full_path[i];
+        }
+        parent_out[last_slash] = '\0';
+    }
+}
+
+
+// -------------------------------------------------------------------------
+// CITIRE CU VERIFICARE PERMISIUNI (MAY_READ = 4)
+// -------------------------------------------------------------------------
 int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target && target->read_file) return target->read_file(local_path, buffer, max_size);
+
+    if (!target) return 0;
+
+    // Verificăm permisiunile prin VFS
+    if (target->stat) {
+        fs_stat_t st;
+        if (target->stat(local_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 4, current_process)) { // 4 = READ
+                return 0; // Acces refuzat!
+            }
+        }
+    }
+
+    if (target->read_file) return target->read_file(local_path, buffer, max_size);
     return 0;
 }
 
+// -------------------------------------------------------------------------
+// CREARE FIȘIER (Verifică MAY_WRITE pe folderul părinte)
+// -------------------------------------------------------------------------
 int fs_create_file(const char* name, uint32_t size) {
     if (!name || name[0] == '\0') return 0;
     if (is_at_global_root && name[0] != '/') return 0;
 
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target && target->create_file) {
+    if (!target) return 0;
+
+    // Verificăm permisiunile pe folderul unde vrem să creăm fișierul
+    if (target->stat) {
+        char parent_path[128];
+        vfs_get_parent_path(local_path, parent_path);
+
+        fs_stat_t st;
+        if (target->stat(parent_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
+                return 0; // Acces refuzat pe directorul părinte!
+            }
+        }
+    }
+
+    if (target->create_file) {
         return target->create_file(local_path, size);
     }
     return 0;
 }
 
+// -------------------------------------------------------------------------
+// SCRIERE CU VERIFICARE PERMISIUNI (MAY_WRITE = 2)
+// -------------------------------------------------------------------------
 int fs_write_file(const char* name, const uint8_t* data, uint32_t size) {
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target && target->write_file) return target->write_file(local_path, data, size);
+
+    if (!target) return 0;
+
+    if (target->stat) {
+        fs_stat_t st;
+        if (target->stat(local_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 2, current_process)) { // 2 = WRITE
+                return 0; // Acces refuzat!
+            }
+        }
+    }
+
+    if (target->write_file) return target->write_file(local_path, data, size);
     return 0;
 }
 
+// -------------------------------------------------------------------------
+// ȘTERGERE FIȘIER (Verifică MAY_WRITE pe folderul părinte)
+// -------------------------------------------------------------------------
 int fs_delete_file(const char* name) {
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target && target->delete_file) return target->delete_file(local_path);
+    if (!target) return 0;
+
+    if (target->stat) {
+        char parent_path[128];
+        vfs_get_parent_path(local_path, parent_path);
+
+        fs_stat_t st;
+        if (target->stat(parent_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
+                return 0; // Acces refuzat pe directorul părinte!
+            }
+        }
+    }
+
+    if (target->delete_file) return target->delete_file(local_path);
     return 0;
 }
 
+// -------------------------------------------------------------------------
+// CREARE DIRECTOR (Verifică MAY_WRITE pe folderul părinte)
+// -------------------------------------------------------------------------
 int fs_mkdir(const char* name) {
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    if (target && target->mkdir) return target->mkdir(local_path);
-    return 0;
-}
+    if (!target) return 0;
 
-// VFS CD - Complet Dinamic
-/*
-int fs_cd(const char* name) {
-    if (!name || name[0] == '\0') return 0;
+    if (target->stat) {
+        char parent_path[128];
+        vfs_get_parent_path(local_path, parent_path);
 
-    // Comanda "cd /" ne aduce înapoi în lista globală de partiții
-    if (streq(name, "/") || streq(name, "/.")) {
-        is_at_global_root = 1;
-        return 1;
-    }
-
-    // Dacă dăm "cd .." și suntem deja la baza unei partiții (ex: suntem în /hda), ieșim în VFS Root
-    if (streq(name, "..") && !is_at_global_root) {
-        char current_sub_path[64];
-        if (active_fs && active_fs->get_current_path) {
-            active_fs->get_current_path(current_sub_path, 64);
-            if (streq(current_sub_path, "/")) {
-                is_at_global_root = 1;
-                return 1;
+        fs_stat_t st;
+        if (target->stat(parent_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
+                return 0; // Acces refuzat pe directorul părinte!
             }
-        } else {
-            is_at_global_root = 1;
-            return 1;
         }
     }
 
-    // Rutăm calea dorită prin VFS pentru a găsi driverul și calea locală
+    if (target->mkdir) return target->mkdir(local_path);
+    return 0;
+}
+
+// -------------------------------------------------------------------------
+// ȘTERGERE DIRECTOR (Verifică MAY_WRITE pe folderul părinte)
+// -------------------------------------------------------------------------
+int fs_rmdir(const char* name) {
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
-    
-    if (target) {
-        // Dacă încercăm să intrăm direct în partiție (ex: "cd /hda"), calea locală devine "/"
-        if (local_path[0] == '\0') {
-            string_copy(local_path, "/");
-        }
-        
-        // --- FIX DE STARE PCB ---
-        // Curățăm calea internă a procesului (PCB) dacă schimbăm efectiv partiția 
-        // Asta previne scurgerea de directoare (gen "/hdb" apărând în căutările lui "/hda")
-        extern PCB* current_process; // Declar-o sus dacă nu o ai
-        if (is_at_global_root) {
-            if (current_process) {
-                current_process->cwd_sector = 0; // Reset inod la Root
-                current_process->current_path[0] = '/';
-                current_process->current_path[1] = '\0';
-            }
-        }
-        // ------------------------
+    if (!target) return 0;
 
-        // Dacă driverul are funcție de cd, o apelăm ca să-și actualizeze inodurile/starea pe noul disc
-        if (target->cd) {
-            int success = target->cd(local_path);
-            if (success) {
-                active_fs = target;
-                is_at_global_root = 0; 
-                return 1;
+    if (target->stat) {
+        char parent_path[128];
+        vfs_get_parent_path(local_path, parent_path);
+
+        fs_stat_t st;
+        if (target->stat(parent_path, &st)) {
+            extern PCB* current_process;
+            if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
+                return 0; // Acces refuzat pe directorul părinte!
             }
-        } else {
-            // Dacă e un driver în lucru (cum e ext2) și n-are funcție CD, forțăm succesul
-            active_fs = target;
-            is_at_global_root = 0;
-            return 1;
         }
     }
-    
+
+    if (target->rmdir) return target->rmdir(local_path);
     return 0;
 }
-*/
+
+
 int fs_cd(const char* name) {
     if (!name || name[0] == '\0') return 0;
 
@@ -551,4 +655,23 @@ int fs_append_file(const char* path, const char* data) {
     if (target && target->append_file) {
         target->append_file(local_path, data);
     }
+	return 0; // Driver-ul nu suportă append sau calea nu e validă
+}
+
+int fs_check_access(fs_stat_t* stat, int mode, PCB* proc) {
+    if (!stat || !proc) return 0;
+
+    // Root (UID 0) trece de orice verificare
+    if (proc->uid == 0) return 1;
+
+    uint16_t perm = 0;
+    if (proc->uid == stat->uid) {
+        perm = (stat->mode >> 6) & 0x7; // Drepturile proprietarului (User)
+    } else if (proc->gid == stat->gid) {
+        perm = (stat->mode >> 3) & 0x7; // Drepturile grupului (Group)
+    } else {
+        perm = stat->mode & 0x7;        // Drepturile altora (Others)
+    }
+
+    return (perm & mode) == mode;
 }
