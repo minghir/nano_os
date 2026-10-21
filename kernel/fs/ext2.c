@@ -41,8 +41,24 @@ static int streq(const char* a, const char* b) {
 }
 
 
-
-
+// -------------------------------------------------------------------------
+// SALVARE SUPERBLOCK PE DISC
+// -------------------------------------------------------------------------
+void ext2_write_superblock(void) {
+    // Superblock-ul este stocat pe disc începând cu octetul 1024.
+    // LBA 2 (octet 1024-1535) și LBA 3 (octet 1536-2047) acoperă cei 1024 bytes
+    uint8_t buf[1024];
+    
+    // Convertim structura superblock-ului într-un array de bytes
+    char* src = (char*)&ext2_superblock;
+    for (uint32_t i = 0; i < sizeof(ext2_superblock_t); i++) {
+        buf[i] = src[i];
+    }
+    
+    // Scriem cele 2 sectoare înapoi pe disc
+    disk_write_sector_drive(current_drive_id, 2, buf);
+    disk_write_sector_drive(current_drive_id, 3, buf + 512);
+}
 
 
 // -------------------------------------------------------------------------
@@ -179,7 +195,6 @@ int ext2_write_inode(uint32_t inode_num, ext2_inode_t* in_inode) {
 }
 
 
-
 // -------------------------------------------------------------------------
 // GĂSEȘTE ȘI ALOCĂ PRIMUL BLOC DE DATE LIBER
 // -------------------------------------------------------------------------
@@ -209,19 +224,25 @@ uint32_t ext2_alloc_block(void) {
                     bitmap_buf[bit / 8] |= (1 << (bit % 8));
                     ext2_write_block(bgd->bg_block_bitmap, bitmap_buf);
 
-                    // Scădem contorul și salvăm Descriptorul
+                    // Scădem contorul din Block Group Descriptor și îl salvăm
                     bgd->bg_free_blocks_count--;
                     ext2_write_block(bgdt_block + bg_block_offset, buf);
 
-                    ext2_superblock.s_free_blocks_count--; // (Opțional: scriem SB-ul pe disc)
+                    // Scădem contorul global din Superblock și salvăm Superblock-ul pe disc
+                    ext2_superblock.s_free_blocks_count--; 
+                    ext2_write_superblock(); // <--- ADAUGAT AICI
 
-                    free(buf); free(bitmap_buf);
+                    free(buf); 
+                    free(bitmap_buf);
+                    
                     return (g * ext2_superblock.s_blocks_per_group) + ext2_superblock.s_first_data_block + bit;
                 }
             }
         }
     }
-    free(buf); free(bitmap_buf);
+    
+    free(buf); 
+    free(bitmap_buf);
     return 0; // Disk Full
 }
 
@@ -247,24 +268,34 @@ uint32_t ext2_alloc_inode(void) {
             ext2_read_block(bgd->bg_inode_bitmap, bitmap_buf);
             
             for (uint32_t bit = 0; bit < ext2_superblock.s_inodes_per_group; bit++) {
+                // Inodurile rezervate (cum ar fi Root, etc) sunt la început. 
+                // Căutăm primul bit 0.
                 if (!(bitmap_buf[bit / 8] & (1 << (bit % 8)))) {
                     
+                    // Îl marcăm ca OCUPAT (1) și salvăm Bitmap-ul
                     bitmap_buf[bit / 8] |= (1 << (bit % 8));
                     ext2_write_block(bgd->bg_inode_bitmap, bitmap_buf);
 
+                    // Scădem contorul din Block Group Descriptor și îl salvăm
                     bgd->bg_free_inodes_count--;
                     ext2_write_block(bgdt_block + bg_block_offset, buf);
 
+                    // Scădem contorul global din Superblock și salvăm Superblock-ul pe disc
                     ext2_superblock.s_free_inodes_count--;
+                    ext2_write_superblock(); // <--- ADAUGAT AICI
 
-                    free(buf); free(bitmap_buf);
+                    free(buf); 
+                    free(bitmap_buf);
+                    
                     // Inodurile încep de la 1, nu de la 0
                     return (g * ext2_superblock.s_inodes_per_group) + bit + 1;
                 }
             }
         }
     }
-    free(buf); free(bitmap_buf);
+    
+    free(buf); 
+    free(bitmap_buf);
     return 0; // Fără Inoduri libere
 }
 
@@ -1000,6 +1031,7 @@ static int ext2_create_file(const char* name, uint32_t size) {
     inode.i_mode = 0x8000 | 0644; 
     inode.i_size = 0;
     inode.i_blocks = 0;
+    inode.i_links_count = 1; // <--- ADĂUGAT: Linux are nevoie de asta pentru ca fișierul să nu fie orfan!
 
     ext2_write_inode(new_inode, &inode);
 
@@ -1103,14 +1135,16 @@ static int ext2_delete_file(const char* name) {
 }
 
 static int ext2_mkdir(const char* name) {
-    if (!name || name[0] == '\0') 
-        return 0;
+    char pure_name[256];
+    // Acum suportă și căi absolute/relative, nu doar în directorul curent!
+    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
+    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
 
-    // 1. Verificăm dacă există deja în inodul curent
-    if (ext2_find_in_dir(ext2_current_inode, name) != 0)
+    // 1. Verificăm dacă există deja în inodul părinte
+    if (ext2_find_in_dir(parent_ino, pure_name) != 0)
         return 0; 
 
-    // 2. Alocăm inode și block (Necesită implementarea funcțiilor de manipulare a bitmap-urilor)
+    // 2. Alocăm inode și block 
     uint32_t new_inode = ext2_alloc_inode();
     if (new_inode == 0) return 0;
 
@@ -1128,8 +1162,16 @@ static int ext2_mkdir(const char* name) {
     inode.i_size = block_size; 
     inode.i_blocks = block_size / 512; // EXT2 contorizează mereu în sectoare de 512 bytes
     inode.i_block[0] = new_block;
+    inode.i_links_count = 2; // <--- ADĂUGAT: Linux are nevoie de 2 link-uri pentru directoare noi!
 
     ext2_write_inode(new_inode, &inode);
+
+    // <--- ADĂUGAT: Incrementăm i_links_count pentru directorul părinte (datorită intrării '..')
+    ext2_inode_t parent_inode_struct;
+    if (ext2_read_inode(parent_ino, &parent_inode_struct)) {
+        parent_inode_struct.i_links_count++;
+        ext2_write_inode(parent_ino, &parent_inode_struct);
+    }
 
     // 4. Scriem "." și ".." în block-ul nou
     uint8_t* buffer = (uint8_t*)malloc(block_size);
@@ -1146,7 +1188,7 @@ static int ext2_mkdir(const char* name) {
 
     // Construim înregistrarea ".." care ocupă restul blocului liber
     ext2_dir_entry_t* dotdot = (ext2_dir_entry_t*)(buffer + dot->rec_len);
-    dotdot->inode = ext2_current_inode;
+    dotdot->inode = parent_ino; // <--- CORECTAT: Indică direct inodul părintelui găsit mai sus
     dotdot->name_len = 2;
     dotdot->file_type = 2; // EXT2_FT_DIR
     dotdot->rec_len = block_size - dot->rec_len; // Restul blocului
@@ -1157,7 +1199,7 @@ static int ext2_mkdir(const char* name) {
     free(buffer);
 
     // 5. Adăugăm entry în directorul părinte
-    if (!ext2_add_dir_entry(ext2_current_inode, name, new_inode))
+    if (!ext2_add_dir_entry(parent_ino, pure_name, new_inode))
         return 0;
 
     return 1;

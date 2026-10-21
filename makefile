@@ -123,7 +123,8 @@ kernel.iso: iso/boot/kernel.bin hdd_tools
 	
 img_files:
 	qemu-img create -f raw hda_v3.img 50M
-	qemu-img create -f raw hdb_v3.img 50M
+	dd if=/dev/zero of=hdb_ext2.img bs=1M count=32
+	mkfs.ext2 hdb_ext2.img
 # ============================
 #    Rulare în QEMU
 # ============================

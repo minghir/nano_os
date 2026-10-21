@@ -1,5 +1,24 @@
 #include "string.h"
 
+void _uint_to_dec(uint64_t val, char* buf) {
+    if (val == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+    char tmp[32];
+    int idx = 0;
+    while (val > 0) {
+        tmp[idx++] = '0' + (val % 10);
+        val /= 10;
+    }
+    int i = 0;
+    while (idx > 0) {
+        buf[i++] = tmp[--idx];
+    }
+    buf[i] = '\0';
+}
+
 // O funcție simplă de conversie string -> integer
  int simple_atoi(const char* str) {
     if (!str) return 0;
@@ -329,7 +348,7 @@ void* memcpy(void* dest, const void* src, int count) {
     }
     buf[i] = '\0';
 }
-
+/*
  int snprintf(char* str, uint32_t size, const char* format, ...) {
     if (!str || size == 0 || !format) return 0;
 
@@ -353,6 +372,74 @@ void* memcpy(void* dest, const void* src, int count) {
                 int64_t val = va_arg(args, int);
                 _int_to_dec(val, conv_buf);
             } 
+            else if (spec == 'x' || spec == 'X') {
+                uint64_t val = va_arg(args, uint64_t);
+                _uint_to_hex(val, conv_buf, (spec == 'X'));
+            } 
+            else if (spec == 'p') {
+                *ptr++ = '0'; written++;
+                if (written < max_len) { *ptr++ = 'x'; written++; }
+                uint64_t val = (uint64_t)va_arg(args, void*);
+                _uint_to_hex(val, conv_buf, 0);
+            } 
+            else if (spec == 's') {
+                char* s = va_arg(args, char*);
+                src = s ? s : "(null)";
+            } 
+            else if (spec == 'c') {
+                conv_buf[0] = (char)va_arg(args, int);
+                conv_buf[1] = '\0';
+            } 
+            else {
+                conv_buf[0] = '%';
+                conv_buf[1] = spec;
+                conv_buf[2] = '\0';
+            }
+
+            while (*src != '\0' && written < max_len) {
+                *ptr++ = *src++;
+                written++;
+            }
+            i++;
+        } else {
+            *ptr++ = format[i++];
+            written++;
+        }
+    }
+
+    *ptr = '\0';
+    va_end(args);
+    return (int)written;
+}
+*/
+
+int snprintf(char* str, uint32_t size, const char* format, ...) {
+    if (!str || size == 0 || !format) return 0;
+
+    va_list args;
+    va_start(args, format);
+
+    uint32_t written = 0;
+    char* ptr = str;
+    uint32_t max_len = size - 1;
+
+    int i = 0;
+    while (format[i] != '\0' && written < max_len) {
+        if (format[i] == '%' && format[i+1] != '\0') {
+            i++;
+            char spec = format[i];
+
+            char conv_buf[32];
+            char* src = conv_buf;
+
+            if (spec == 'd' || spec == 'i') {
+                int64_t val = va_arg(args, int);
+                _int_to_dec(val, conv_buf);
+            } 
+            else if (spec == 'u') {
+                uint64_t val = va_arg(args, uint32_t);
+                _uint_to_dec(val, conv_buf);
+            }
             else if (spec == 'x' || spec == 'X') {
                 uint64_t val = va_arg(args, uint64_t);
                 _uint_to_hex(val, conv_buf, (spec == 'X'));

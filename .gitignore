@@ -2,3 +2,6 @@
 *.o
 ./tmp/*
 *.bin
+*.o
+*.elf
+*.bin
