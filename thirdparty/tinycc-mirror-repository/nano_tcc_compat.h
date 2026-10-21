@@ -41,6 +41,14 @@ static int nano_errno = 0;
 #define assert(x) ((void)0)
 #define TCC_OUTPUT_BINARY TCC_OUTPUT_EXE
 
+#ifndef CONFIG_TCC_SYSINCLUDEPATHS
+#define CONFIG_TCC_SYSINCLUDEPATHS "/hdb/include:/include"
+#endif
+
+#ifndef CONFIG_TCC_CRT_PREFIX
+#define CONFIG_TCC_CRT_PREFIX "/hdb/lib"
+#endif
+
 // Variable de mediu
 static char *nano_environ[] = { (void*)0 };
 #define environ nano_environ

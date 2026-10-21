@@ -3,7 +3,7 @@ CC = gcc
 AS = nasm
 LD = ld
 
-CFLAGS = -m64 -mno-red-zone -ffreestanding -fno-pie -c -Wall -Wextra -I../src
+CFLAGS = -m64 -mno-red-zone -ffreestanding -fno-pie -c -Wall -Wextra -nostdinc -I../src -I../thirdparty/tinycc-mirror-repository/sys_stubs -I$(shell gcc -print-file-name=include)
 ASFLAGS = -f elf64
 
 TEXT_ADDR = 0x800000

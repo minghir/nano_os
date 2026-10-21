@@ -1039,7 +1039,7 @@ static int ext2_create_file(const char* name, uint32_t size) {
     if (!ext2_add_dir_entry(parent_ino, pure_name, new_inode)) return 0;
     return 1;
 }
-
+/*
 static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size) {
     if (!name || !data) return 0;
 
@@ -1085,6 +1085,73 @@ static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size)
     }
     inode.i_size = bytes_written;
     ext2_write_inode(target_inode, &inode);
+    free(temp_buf);
+    return bytes_written;
+}
+*/
+
+static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size) {
+    if (!name) return 0;
+
+    char pure_name[256];
+    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
+    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
+
+    uint32_t target_inode = ext2_find_in_dir(parent_ino, pure_name);
+    if (target_inode == 0) {
+        if (!ext2_create_file(name, 0)) return 0;
+        target_inode = ext2_find_in_dir(parent_ino, pure_name);
+        if (target_inode == 0) return 0; 
+    }
+
+    ext2_inode_t inode;
+    if (!ext2_read_inode(target_inode, &inode)) return 0;
+
+    if ((inode.i_mode & 0xF000) != 0x8000) {
+        print("[EXT2] Eroare: Tinta este un director!\n");
+        return 0;
+    }
+    
+    uint32_t block_size = 1024 << ext2_superblock.s_log_block_size;
+    uint32_t blocks_needed = (size + block_size - 1) / block_size;
+
+    if (blocks_needed > 12) return 0; // Pentru fișiere mici/medii (TCC .o/.elf se încadrează lejer)
+
+    uint32_t bytes_written = 0;
+    uint8_t* temp_buf = (uint8_t*)malloc(block_size);
+    if (!temp_buf) return 0;
+
+    // Alocăm blocurile necesare dacă lipsesc
+    for (uint32_t i = 0; i < blocks_needed; i++) {
+        if (inode.i_block[i] == 0) {
+            inode.i_block[i] = ext2_alloc_block();
+            if (inode.i_block[i] == 0) {
+                free(temp_buf);
+                return 0; // Disc plin sau eroare de alocare
+            }
+            inode.i_blocks += (block_size / 512);
+        }
+    }
+
+    // Scriem datele bloc cu bloc
+    for (uint32_t i = 0; i < blocks_needed; i++) {
+        uint32_t chunk = (size - bytes_written > block_size) ? block_size : (size - bytes_written);
+        
+        for (uint32_t j = 0; j < chunk; j++) {
+            temp_buf[j] = data[bytes_written + j];
+        }
+        // Umplem restul blocului cu zerouri (padding)
+        for (uint32_t j = chunk; j < block_size; j++) {
+            temp_buf[j] = 0;
+        }
+
+        ext2_write_block(inode.i_block[i], temp_buf);
+        bytes_written += chunk;
+    }
+
+    inode.i_size = size; // Setăm mărimea exactă a fișierului
+    ext2_write_inode(target_inode, &inode);
+    
     free(temp_buf);
     return bytes_written;
 }

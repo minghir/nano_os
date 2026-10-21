@@ -40,6 +40,174 @@ typedef struct {
     char name[32];
 } ProcessInfo;
 
+size_t strlen(const char* str);
+int atoi(const char* str);
+char* itoa(int value, char* str, int base);
+
+static inline char* strcpy(char* dest, const char* src) {
+    char* saved_dest = dest;
+    while ((*dest++ = *src++) != '\0');
+    return saved_dest;
+}
+
+// --- CONVERSII ---
+
+static inline int64_t parse_int64(const char* str) {
+    int64_t res = 0;
+    int sign = 1;
+    int i = 0;
+    
+    if (str[0] == '-') {
+        sign = -1;
+        i = 1;
+    } else if (str[0] == '+') {
+        i = 1;
+    }
+    
+    while (str[i] >= '0' && str[i] <= '9') {
+        res = res * 10 + (str[i] - '0');
+        i++;
+    }
+    
+    return res * sign;
+}
+
+static inline void* memmove(void* dest, const void* src, size_t n) {
+    unsigned char* d = (unsigned char*)dest;
+    const unsigned char* s = (const unsigned char*)src;
+    if (d == s) return dest;
+    if (d < s) {
+        for (size_t i = 0; i < n; i++) {
+            d[i] = s[i];
+        }
+    } else {
+        for (size_t i = n; i > 0; i--) {
+            d[i - 1] = s[i - 1];
+        }
+    }
+    return dest;
+}
+
+
+static inline int nano_kill(int pid) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_KILL), "D" ((uint64_t)pid)
+        : "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_get_meminfo(MemInfo* info) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(24), "D"(info) // 24 este SYSCALL_MEMINFO, RDI = info
+        : "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_getcwd(char* buf, int max_len) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(25), "D"(buf), "S"(max_len) // 25 = SYSCALL_GETCWD, RDI = buf, RSI = max_len
+        : "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_wait() {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)22) // Numărul syscall-ului SYSCALL_WAIT
+        : "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_get_processes(ProcessInfo* buf, int max_entries) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)21), "D" ((uint64_t)buf), "S" ((uint64_t)max_entries)
+        : "memory"
+    );
+    return (int)ret;
+}
+
+
+static inline void get_time(DateTime* dt) {
+    __asm__ volatile (
+        "int $0x80"
+        : 
+        : "a" ((uint64_t)SYSCALL_DATETIME), "D" ((uint64_t)dt) // RAX = 5 (syscall nr 5), RDI = adresa structurii 'dt'
+        : "cc", "memory"
+    );
+}
+
+
+static inline void nano_free(void* ptr) {
+    if (!ptr) return;
+    __asm__ volatile (
+        "mov %0, %%rax\n\t"
+        "mov %1, %%rdi\n\t"
+        "int $0x80\n\t"
+        : 
+        : "r"((uint64_t)SYSCALL_FREE), "r"((uint64_t)ptr)
+        : "%rax", "%rdi", "memory"
+    );
+}
+
+
+static inline void* nano_malloc(size_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "mov %1, %%rax\n\t"
+        "mov %2, %%rdi\n\t"
+        "int $0x80\n\t"        // Sau instrucțiunea ta de syscall (ex: syscall)
+        "mov %%rax, %0\n\t"
+        : "=r"(ret)
+        : "r"((uint64_t)SYSCALL_MALLOC), "r"((uint64_t)size)
+        : "%rax", "%rdi", "memory"
+    );
+    return (void*)ret;
+}
+
+
+static inline void nano_readline(char* buffer, uint32_t max_len) {
+    // GCC știe nativ: "a" = RAX, "D" = RDI, "S" = RSI
+    __asm__ volatile (
+        "int $0x80"
+        : /* Fără variabile de ieșire */
+        : "a" ((uint64_t)SYSCALL_READLINE), "D" ((uint64_t)buffer), "S" ((uint64_t)max_len)
+        : "memory"
+    );
+}
+
+
+
+
+
+static inline void nano_print(const char* str) {
+    // GCC știe nativ: "a" = RAX, "D" = RDI
+    __asm__ volatile (
+        "int $0x80"
+        : /* Fără variabile de ieșire */
+        : "a" ((uint64_t)SYSCALL_PRINT), "D" ((uint64_t)str)
+        : "memory"
+    );
+}
+
+
 static inline int nano_cd(const char* path) {
     int ret;
     __asm__ volatile(
@@ -50,19 +218,6 @@ static inline int nano_cd(const char* path) {
     );
     return ret;
 }
-
-/*
-static inline int nano_exec(const char* filename) {
-    uint64_t ret;
-    __asm__ volatile (
-        "int $0x80"
-        : "=a" (ret)
-        : "a" ((uint64_t)6), "D" ((uint64_t)filename) // 6 este numărul pentru SYSCALL_EXEC
-        : "cc", "memory"
-    );
-    return (int)ret;
-}
-*/
 
 static inline int nano_exec(const char* filename) {
     uint64_t ret;
@@ -146,6 +301,28 @@ static inline int nano_read_file(const char* name, uint8_t* buffer, uint32_t max
     return (int)ret;
 }
 
+static inline uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer) {
+    // Alocăm un buffer generos pentru fișierul MP3 (ex: 2MB, cât maximul heap-ului sau cât permite fișierul)
+    uint32_t max_size = 2 * 1024 * 1024; // 2 MB
+    uint8_t* buf = (uint8_t*)nano_malloc(max_size);
+    if (!buf) {
+        return 0;
+    }
+
+    // Apelăm funcția din nano_libc.h (care folosește SYSCALL_READ_FILE / 14)
+    int bytes_read = nano_read_file(path, buf, max_size);
+    if (bytes_read <= 0) {
+        nano_free(buf);
+        *out_buffer = 0;
+        return 0;
+    }
+
+    *out_buffer = buf;
+    return (uint32_t)bytes_read;
+}
+
+
+
 static inline int nano_mkdir(const char* name) {
     uint64_t ret;
     __asm__ volatile (
@@ -195,21 +372,6 @@ static inline void nano_pwd(char* buffer, uint32_t max_len) {
     );
 }
 
-/*
-static inline void nano_sys_exit(int status) {
-    // Trimităm codul 20 (SYSCALL_EXIT) în RAX, iar status-ul în RDI
-    __asm__ volatile (
-        "mov %1, %%rax\n\t"
-        "mov %0, %%rdi\n\t"
-        "int $0x80"
-        : 
-        : "r"((uint64_t)status), "r"((uint64_t)SYSCALL_EXIT)
-        : "rax", "rdi", "memory"
-    );
-    while(1);
-}
-    */
-
 static inline void nano_sys_exit(int status) {
     register uint64_t rax_val __asm__("rax") = 20; // SYSCALL_EXIT
     register uint64_t rdi_val __asm__("rdi") = (uint64_t)status;
@@ -222,30 +384,6 @@ static inline void nano_sys_exit(int status) {
     );
     while(1);
 }
-
-
-
-void nano_print(const char* str);
-
-void nano_readline(char* buffer, uint32_t max_len);
-
-void* nano_malloc(size_t size);
-void nano_free(void* ptr); // (Chiar dacă e bump allocator, e bine să avem interfața)
-
-//void* memset(void* dest, int val, size_t len);
-//void* memcpy(void* dest, const void* src, size_t len);
-void* memmove(void* dest, const void* src, size_t n);
-
-uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer);
-
-size_t strlen(const char* str);
-//int strcmp(const char* s1, const char* s2);
-char* strcpy(char* dest, const char* src);
-//int starts_with(const char* text, const char* prefix);
-
-// Conversii
-int atoi(const char* str);
-char* itoa(int value, char* str, int base);
 
 static inline void nano_sleep(uint32_t milliseconds) {
     __asm__ volatile (
@@ -260,17 +398,6 @@ static inline void sleep(uint32_t milliseconds) {
 	return nano_sleep(milliseconds);
 }
 
-// 2. Funcția pe care o va apela programul tău
-void get_time(DateTime* dt);
-
-int nano_get_processes(ProcessInfo* buf, int max_entries);
-int nano_wait();
-int nano_kill(int pid);
-
-
-
-
-
 static inline char* nano_strcat(char* dest, const char* src) {
     char* ptr = dest + strlen(dest);
     while (*src != '\0') {
@@ -280,54 +407,6 @@ static inline char* nano_strcat(char* dest, const char* src) {
     return dest;
 }
 
-
-
-/*
-// Helper pentru sprintf (suportă de bază formatul %d și %s folosite în editor)
-static inline int sprintf(char* str, const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    int i = 0;
-    char* ptr = str;
-    
-    while (format[i] != '\0') {
-        if (format[i] == '%' && format[i+1] == 'd') {
-            int val = va_arg(args, int);
-            char buf[16];
-            itoa(val, buf, 10);
-            char* b = buf;
-            while (*b) *ptr++ = *b++;
-            i += 2;
-        } else if (format[i] == '%' && format[i+1] == 's') {
-            char* s = va_arg(args, char*);
-            while (*s) *ptr++ = *s++;
-            i += 2;
-        } else if (format[i] == '%' && format[i+1] == 'c') {
-            char c = (char)va_arg(args, int);
-            *ptr++ = c;
-            i += 2;
-        } else {
-            *ptr++ = format[i++];
-        }
-    }
-    *ptr = '\0';
-    va_end(args);
-    return (int)(ptr - str);
-}
-*/
-int nano_get_meminfo(MemInfo* info);
-
-int nano_getcwd(char* buf, int max_len); //curent dir
-
-//char* string_copy(char* dest, const char* src);
-
-int64_t parse_int64(const char* str);
-//float parse_float(const char* str);
-//float nano_parse_float(const char* str);
-
-// Trimite un mesaj în syslog-ul kernelului
-
-// Și rescrie nano_syslog și nano_getlog curat, fără mov-uri manuale paralele:
 static inline void nano_syslog(const char* msg) {
     __asm__ volatile (
         "int $0x80"

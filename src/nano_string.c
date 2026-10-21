@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>
-#include "string.h"
+#include "nano_string.h"
 #include "nano_libc.h"
 // O funcție simplă de conversie string -> integer
  int simple_atoi(const char* str) {

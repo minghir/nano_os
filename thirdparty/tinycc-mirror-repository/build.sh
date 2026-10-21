@@ -2,7 +2,8 @@ gcc -O2 -m64 -nostdlib -nostdinc -ffreestanding -c tcc.c -o tcc.o \
     -DCONFIG_TCC_TARG_X86_64=1 \
     -DCONFIG_TCC_BACKTRACE=0 \
     -Isys_stubs \
-    -I. -I../../src \
+    -I. \
+    -I../../src \
     -I$(gcc -print-file-name=include)
 
 
