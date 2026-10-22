@@ -35,11 +35,10 @@ static int nano_errno = 0;
 #define O_WRONLY 01
 #define O_RDWR   02
 #define O_CREAT  0100
-#define O_TRUNC  01000
+#define O_TRUNC 01000
 #define O_BINARY 0
 
 #define assert(x) ((void)0)
-#define TCC_OUTPUT_BINARY TCC_OUTPUT_EXE
 
 #ifndef CONFIG_TCC_SYSINCLUDEPATHS
 #define CONFIG_TCC_SYSINCLUDEPATHS "/hdb/include:/include"
@@ -65,35 +64,133 @@ static char *nano_environ[] = { (void*)0 };
 
 // 4. Implementăm funcțiile de memorie ca FUNCȚII REAL (nu macro-uri)
 // Astfel, dacă TCC execută #undef free / #undef realloc, va găsi totuși declarația C
+typedef union {
+    size_t size;
+    long double align_long_double;
+    void *align_pointer;
+} NanoTCCAllocationHeader;
+
 static inline void free(void* ptr) {
-    if (ptr) nano_free(ptr);
+    if (ptr)
+        nano_free((NanoTCCAllocationHeader *)ptr - 1);
 }
 
 static inline void* malloc(size_t size) {
-    return nano_malloc(size);
+    NanoTCCAllocationHeader *header;
+
+    if (size > (size_t)-1 - sizeof(*header))
+        return NULL;
+    header = nano_malloc(sizeof(*header) + size);
+    if (!header)
+        return NULL;
+    header->size = size;
+    return header + 1;
 }
 
 static inline void* realloc(void* ptr, size_t size) {
-    if (!ptr) return nano_malloc(size);
-    void* new_ptr = nano_malloc(size);
-    if (new_ptr) {
-        memcpy(new_ptr, ptr, size);
-        nano_free(ptr);
+    NanoTCCAllocationHeader *old_header, *new_header;
+    size_t copy_size;
+
+    if (!ptr)
+        return malloc(size);
+    if (!size) {
+        free(ptr);
+        return NULL;
     }
-    return new_ptr;
+    if (size > (size_t)-1 - sizeof(*new_header))
+        return NULL;
+
+    old_header = (NanoTCCAllocationHeader *)ptr - 1;
+    new_header = nano_malloc(sizeof(*new_header) + size);
+    if (!new_header)
+        return NULL;
+
+    new_header->size = size;
+    copy_size = old_header->size < size ? old_header->size : size;
+    memcpy(new_header + 1, ptr, copy_size);
+    nano_free(old_header);
+    return new_header + 1;
 }
 
 // 5. Structura FILE și I/O wrapper-e
 typedef struct {
     char filename[64];
+    const char *output_path;
+    uint8_t *output_data;
     uint32_t offset;
     uint32_t size;
+    uint32_t output_capacity;
     uint32_t is_open;
+    uint32_t is_output;
 } FILE;
 
 #define stdout ((FILE*)1)
 #define stderr ((FILE*)2)
 #define stdin  ((FILE*)0)
+
+static const char *nano_tcc_pending_output_path;
+static int nano_tcc_nas1_output;
+static int nano_tcc_io_debug;
+
+#define NANO_TCC_MAX_INPUTS 16
+#define NANO_TCC_MAX_INPUT_SIZE (4u * 1024u * 1024u)
+
+typedef struct {
+    uint8_t *data;
+    uint32_t size;
+    uint32_t offset;
+} NanoTCCInput;
+
+static NanoTCCInput nano_tcc_inputs[NANO_TCC_MAX_INPUTS];
+
+static inline void nano_tcc_set_nas1_output(int enabled) {
+    nano_tcc_nas1_output = enabled;
+}
+
+static inline void nano_tcc_set_io_debug(int enabled) {
+    nano_tcc_io_debug = enabled;
+}
+
+static inline int nano_tcc_output_append(FILE* stream, const void* data, uint32_t size) {
+    uint32_t required, capacity;
+    uint8_t *new_data;
+
+    if (size > (uint32_t)-1 - stream->size)
+        return -1;
+    required = stream->size + size;
+    if (required > stream->output_capacity) {
+        capacity = stream->output_capacity ? stream->output_capacity : 256;
+        while (capacity < required) {
+            if (capacity > (uint32_t)-1 / 2) {
+                capacity = required;
+                break;
+            }
+            capacity *= 2;
+        }
+        new_data = (uint8_t*)nano_malloc(capacity);
+        if (!new_data)
+            return -1;
+        if (stream->size)
+            memcpy(new_data, stream->output_data, stream->size);
+        nano_free(stream->output_data);
+        stream->output_data = new_data;
+        stream->output_capacity = capacity;
+    }
+    if (size)
+        memcpy(stream->output_data + stream->size, data, size);
+    stream->size = required;
+    return 0;
+}
+
+static inline int nano_tcc_set_nas1_entry_offset(FILE* stream, uint32_t offset) {
+    if (!stream || !stream->is_output || stream->size < 8)
+        return -1;
+    stream->output_data[4] = (uint8_t)offset;
+    stream->output_data[5] = (uint8_t)(offset >> 8);
+    stream->output_data[6] = (uint8_t)(offset >> 16);
+    stream->output_data[7] = (uint8_t)(offset >> 24);
+    return 0;
+}
 
 static inline FILE* fopen(const char* path, const char* mode) {
     FILE* f = (FILE*)nano_malloc(sizeof(FILE));
@@ -134,7 +231,10 @@ static inline size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* st
         return nmemb;
     }
     if (!stream || !stream->is_open) return 0;
+    if (size && nmemb > (uint32_t)-1 / size) return 0;
     uint32_t bytes = size * nmemb;
+    if (stream->is_output)
+        return nano_tcc_output_append(stream, ptr, bytes) == 0 ? nmemb : 0;
     nano_write_file(stream->filename, (const uint8_t*)ptr, bytes);
     stream->offset += bytes;
     return nmemb;
@@ -142,8 +242,16 @@ static inline size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* st
 
 static inline int fclose(FILE* stream) {
     if (stream && stream != stdout && stream != stderr) {
+        int result = 0;
+        if (stream->is_output) {
+            if (!nano_create_file(stream->output_path, stream->size) ||
+                !nano_write_file(stream->output_path, stream->output_data, stream->size))
+                result = -1;
+            nano_free(stream->output_data);
+        }
         stream->is_open = 0;
         nano_free(stream);
+        return result;
     }
     return 0;
 }
@@ -173,23 +281,119 @@ static inline long ftell(FILE* stream) {
 }
 
 static inline FILE* fdopen(int fd, const char* mode) {
-    (void)fd; (void)mode;
-    return stdout;
+    const char *output_path;
+    int add_nas1_header;
+    (void)mode;
+    if (fd == 1)
+        return stdout;
+    if (!nano_tcc_pending_output_path)
+        return NULL;
+    output_path = nano_tcc_pending_output_path;
+    nano_tcc_pending_output_path = NULL;
+    add_nas1_header = nano_tcc_nas1_output;
+    nano_tcc_nas1_output = 0;
+    FILE* f = (FILE*)nano_malloc(sizeof(FILE));
+    if (!f)
+        return NULL;
+    memset(f, 0, sizeof(FILE));
+    f->output_path = output_path;
+    f->is_open = 1;
+    f->is_output = 1;
+    if (add_nas1_header) {
+        static const uint8_t nas1_header[8] = {'N', 'A', 'S', '1', 8, 0, 0, 0};
+        if (nano_tcc_output_append(f, nas1_header, sizeof(nas1_header)) < 0) {
+            nano_free(f);
+            return NULL;
+        }
+    }
+    return f;
 }
 
 static inline int open(const char* pathname, int flags, ...) {
-    (void)pathname; (void)flags;
-    return 3;
+    uint32_t capacity = 4096;
+    uint8_t *data;
+    int bytes_read, i;
+
+    if ((flags & O_WRONLY) && pathname) {
+        nano_tcc_pending_output_path = pathname;
+        return 3;
+    }
+    if (!pathname)
+        return -1;
+
+    for (i = 0; i < NANO_TCC_MAX_INPUTS; ++i)
+        if (!nano_tcc_inputs[i].data)
+            break;
+    if (i == NANO_TCC_MAX_INPUTS)
+        return -1;
+
+    data = nano_malloc(capacity);
+    if (!data)
+        return -1;
+
+    for (;;) {
+        bytes_read = nano_read_file(pathname, data, capacity);
+        if (bytes_read < 0) {
+            nano_free(data);
+            return -1;
+        }
+        if ((uint32_t)bytes_read < capacity)
+            break;
+        if (capacity == NANO_TCC_MAX_INPUT_SIZE) {
+            nano_free(data);
+            return -1;
+        }
+
+        {
+            uint32_t new_capacity = capacity * 2;
+            uint8_t *new_data;
+            if (new_capacity > NANO_TCC_MAX_INPUT_SIZE)
+                new_capacity = NANO_TCC_MAX_INPUT_SIZE;
+            new_data = nano_malloc(new_capacity);
+            if (!new_data) {
+                nano_free(data);
+                return -1;
+            }
+            nano_free(data);
+            data = new_data;
+            capacity = new_capacity;
+        }
+    }
+
+    nano_tcc_inputs[i].data = data;
+    nano_tcc_inputs[i].size = (uint32_t)bytes_read;
+    nano_tcc_inputs[i].offset = 0;
+    if (nano_tcc_io_debug)
+        nano_printf("TCC: opened %s, read %d bytes\n", pathname, bytes_read);
+    return i + 4;
 }
 
 static inline int close(int fd) {
-    (void)fd;
+    int i = fd - 4;
+    if (i >= 0 && i < NANO_TCC_MAX_INPUTS && nano_tcc_inputs[i].data) {
+        nano_free(nano_tcc_inputs[i].data);
+        memset(&nano_tcc_inputs[i], 0, sizeof(nano_tcc_inputs[i]));
+    }
     return 0;
 }
 
 static inline ssize_t read(int fd, void* buf, size_t count) {
-    (void)fd; (void)buf; (void)count;
-    return 0;
+    int i = fd - 4;
+    uint32_t available, bytes_to_read;
+
+    if (i < 0 || i >= NANO_TCC_MAX_INPUTS || !nano_tcc_inputs[i].data)
+        return -1;
+    if (!buf || !count)
+        return 0;
+
+    available = nano_tcc_inputs[i].size - nano_tcc_inputs[i].offset;
+    bytes_to_read = count < available ? (uint32_t)count : available;
+    if (bytes_to_read) {
+        memcpy(buf, nano_tcc_inputs[i].data + nano_tcc_inputs[i].offset,
+               bytes_to_read);
+        nano_tcc_inputs[i].offset += bytes_to_read;
+    }
+    return bytes_to_read;
 }
 
 static inline ssize_t write(int fd, const void* buf, size_t count) {
@@ -198,8 +402,31 @@ static inline ssize_t write(int fd, const void* buf, size_t count) {
 }
 
 static inline off_t lseek(int fd, off_t offset, int whence) {
-    (void)fd; (void)whence;
-    return offset;
+    int i = fd - 4;
+    long base, position;
+
+    if (i < 0 || i >= NANO_TCC_MAX_INPUTS || !nano_tcc_inputs[i].data)
+        return -1;
+
+    switch (whence) {
+    case SEEK_SET:
+        base = 0;
+        break;
+    case SEEK_CUR:
+        base = nano_tcc_inputs[i].offset;
+        break;
+    case SEEK_END:
+        base = nano_tcc_inputs[i].size;
+        break;
+    default:
+        return -1;
+    }
+
+    position = base + offset;
+    if (position < 0 || (unsigned long)position > nano_tcc_inputs[i].size)
+        return -1;
+    nano_tcc_inputs[i].offset = (uint32_t)position;
+    return position;
 }
 
 static inline int unlink(const char* pathname) {
@@ -294,22 +521,69 @@ static inline char* strerror(int errnum) {
     return "Unknown error";
 }
 
+static inline unsigned long long nano_strtoull(const char* nptr, char** endptr, int base) {
+    const char *p = nptr;
+    unsigned long long value = 0;
+    int negative = 0;
+    int digits = 0;
+
+    while (*p == ' ' || (*p >= '\t' && *p <= '\r'))
+        p++;
+    if (*p == '+' || *p == '-') {
+        negative = *p == '-';
+        p++;
+    }
+
+    if (base == 0) {
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+            base = 16;
+            p += 2;
+        } else {
+            base = p[0] == '0' ? 8 : 10;
+        }
+    } else if (base == 16 && p[0] == '0' &&
+               (p[1] == 'x' || p[1] == 'X')) {
+        p += 2;
+    }
+
+    if (base < 2 || base > 36) {
+        if (endptr)
+            *endptr = (char*)nptr;
+        return 0;
+    }
+
+    for (;;) {
+        int digit;
+        if (*p >= '0' && *p <= '9')
+            digit = *p - '0';
+        else if (*p >= 'a' && *p <= 'z')
+            digit = *p - 'a' + 10;
+        else if (*p >= 'A' && *p <= 'Z')
+            digit = *p - 'A' + 10;
+        else
+            break;
+        if (digit >= base)
+            break;
+        value = value * (unsigned)base + (unsigned)digit;
+        digits = 1;
+        p++;
+    }
+
+    if (endptr)
+        *endptr = (char*)(digits ? p : nptr);
+    return negative ? 0 - value : value;
+}
+
 static inline long strtol(const char* nptr, char** endptr, int base) {
-    (void)base;
-    if (endptr) *endptr = (char*)nptr;
-    return simple_atoi(nptr);
+    return (long)nano_strtoull(nptr, endptr, base);
 }
 
 static inline unsigned long strtoul(const char* nptr, char** endptr, int base) {
-    (void)base;
-    if (endptr) *endptr = (char*)nptr;
-    return (unsigned long)simple_atoi(nptr);
+    return (unsigned long)nano_strtoull(nptr, endptr, base);
 }
 
 static inline unsigned long long strtoull(const char* nptr, char** endptr, int base) {
-    (void)base;
-    if (endptr) *endptr = (char*)nptr;
-    return (unsigned long long)parse_int64(nptr);
+    return nano_strtoull(nptr, endptr, base);
 }
 
 static inline double strtod(const char* nptr, char** endptr) {
@@ -370,7 +644,10 @@ static inline int fputs(const char* str, FILE* stream) {
 }
 
 static inline int fputc(int c, FILE* stream) {
-    (void)stream;
+    if (stream && stream->is_output) {
+        unsigned char byte = (unsigned char)c;
+        return nano_tcc_output_append(stream, &byte, 1) == 0 ? byte : -1;
+    }
     char b[2] = {(char)c, 0};
     nano_print(b);
     return c;

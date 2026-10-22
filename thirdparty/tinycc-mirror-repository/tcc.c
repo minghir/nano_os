@@ -73,7 +73,7 @@ static char *default_outputfile(TCCState *s, const char *first_file)
     if ((s->just_deps || s->output_type == TCC_OUTPUT_OBJ) && !s->option_r && *ext)
         strcpy(ext, ".o");
     else
-        strcpy(buf, "a.bin"); // În Nano OS output-ul implicit este .bin
+        strcpy(buf, "a.nas1"); // Executabilele Nano OS folosesc formatul NAS1
     return tcc_strdup(buf);
 }
 
@@ -83,42 +83,33 @@ static unsigned getclock_ms(void)
     return 0; // Sau poți folosi un counter/ticks din kernelul Nano OS
 }
 
-// Wrapper peste salvarea fișierului de ieșire pentru a injecta Antetul NAS1
+static int nano_add_startup(TCCState *s)
+{
+    static const char startup[] =
+        "extern int main(void);\n"
+        "void _start(void)\n"
+        "{\n"
+        "    long status = main();\n"
+        "    asm volatile(\"mov %0, %%rdi\\n\"\n"
+        "                 \"mov $20, %%rax\\n\"\n"
+        "                 \"int $0x80\\n\"\n"
+        "                 : : \"r\"(status) : \"rax\", \"rdi\");\n"
+        "    for (;;) {}\n"
+        "}";
+
+    s->filetype = AFF_TYPE_C;
+    return tcc_compile_string(s, startup);
+}
+
+// Executabilele Nano OS sunt imagini binare cu antet NAS1, nu executabile ELF.
 static int nano_output_file(TCCState *s, const char *filename) {
-    // Dacă generăm un executabil binar
-    if (s->output_type == TCC_OUTPUT_EXE || s->output_type == TCC_OUTPUT_BINARY) {
-        
-        // Deschidem fișierul de ieșire prin driverul tău EXT2
-        FILE *f = fopen(filename, "wb");
-        if (!f) {
-            nano_printf("Eroare: Nu s-a putut crea fisierul %s\n", filename);
-            return -1;
-        }
-
-        // 1. Construim Header-ul NAS1 (8 octeți)
-        uint8_t nas1_header[8];
-        nas1_header[0] = 'N';
-        nas1_header[1] = 'A';
-        nas1_header[2] = 'S';
-        nas1_header[3] = '1';
-
-        // Offset-ul de start al codului este 8 (imediat după antet)
-        uint32_t entry_offset = 8;
-        nas1_header[4] = (uint8_t)(entry_offset & 0xFF);
-        nas1_header[5] = (uint8_t)((entry_offset >> 8) & 0xFF);
-        nas1_header[6] = (uint8_t)((entry_offset >> 16) & 0xFF);
-        nas1_header[7] = (uint8_t)((entry_offset >> 24) & 0xFF);
-
-        // Scriem antetul NAS1
-        fwrite(nas1_header, 1, 8, f);
-
-        // 2. Apelăm TCC să scrie codul mașină generat direct după antet
-        int res = tcc_output_file(s, filename);
-        fclose(f);
-        return res;
+    if (s->output_type == TCC_OUTPUT_EXE) {
+        s->output_format = TCC_OUTPUT_FORMAT_BINARY;
+        s->has_text_addr = 1;
+        s->text_addr = 0x800008;
+        nano_tcc_set_nas1_output(1);
     }
 
-    // Pentru alte fișiere (.o, etc.)
     return tcc_output_file(s, filename);
 }
 
@@ -158,11 +149,22 @@ redo:
             goto err;
     }
 
+    nano_tcc_set_io_debug(s->verbose != 0);
     set_environment(s);
     if (s->output_type == 0)
         s->output_type = TCC_OUTPUT_EXE;
 
+    if (s->output_type == TCC_OUTPUT_EXE) {
+        s->nostdlib = 1;
+        s->nostdlib_paths = 1;
+        s->static_link = 1;
+    }
+
     ret = tcc_set_output_type(s, s->output_type);
+
+    if (ret == 0 && s->output_type == TCC_OUTPUT_EXE) {
+        ret = nano_add_startup(s);
+    }
 
     /* Compilează fiecare fișier sursă */
     first_file = NULL;

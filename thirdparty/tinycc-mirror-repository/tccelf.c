@@ -197,6 +197,7 @@ ST_FUNC void tccelf_end_file(TCCState *s1)
 
     for (i = 0; i < nb_syms; ++i) {
         ElfSym *sym = (ElfSym*)s->data + first_sym + i;
+        const char *name = (char*)s->link->data + sym->st_name;
         if (sym->st_shndx == SHN_UNDEF) {
             int sym_bind = ELFW(ST_BIND)(sym->st_info);
             int sym_type = ELFW(ST_TYPE)(sym->st_info);
@@ -214,7 +215,7 @@ ST_FUNC void tccelf_end_file(TCCState *s1)
             sym->st_info = ELFW(ST_INFO)(sym_bind, sym_type);
         }
         tr[i] = set_elf_sym(s, sym->st_value, sym->st_size, sym->st_info,
-            sym->st_other, sym->st_shndx, (char*)s->link->data + sym->st_name);
+            sym->st_other, sym->st_shndx, name);
     }
     /* now update relocations */
     update_relocs(s1, s, tr, first_sym);
@@ -2796,17 +2797,28 @@ static int tcc_output_binary(TCCState *s1, FILE *f)
     Section *s;
     int i, offset, size;
 
+#ifdef CONFIG_TCC_NANO
+    if (s1->output_type == TCC_OUTPUT_EXE &&
+        s1->output_format == TCC_OUTPUT_FORMAT_BINARY &&
+        (!text_section ||
+         text_section->sh_offset > (uint32_t)-1 - 8 ||
+         nano_tcc_set_nas1_entry_offset(f, text_section->sh_offset + 8) < 0))
+        return tcc_error_noabort("cannot set NAS1 entry offset");
+#endif
+
     offset = 0;
     for(i=1;i<s1->nb_sections;i++) {
         s = s1->sections[i];
         if (s->sh_type != SHT_NOBITS &&
             (s->sh_flags & SHF_ALLOC)) {
             while (offset < s->sh_offset) {
-                fputc(0, f);
+                if (fputc(0, f) < 0)
+                    return -1;
                 offset++;
             }
             size = s->sh_size;
-            fwrite(s->data, 1, size, f);
+            if (fwrite(s->data, 1, size, f) != size)
+                return -1;
             offset += size;
         }
     }
@@ -2817,7 +2829,7 @@ static int tcc_output_binary(TCCState *s1, FILE *f)
 static int tcc_write_elf_file(TCCState *s1, const char *filename, int phnum,
                               ElfW(Phdr) *phdr)
 {
-    int fd, mode, file_type, ret;
+    int fd, mode, file_type, ret = 0;
     FILE *f;
 
     file_type = s1->output_type;
@@ -2833,14 +2845,15 @@ static int tcc_write_elf_file(TCCState *s1, const char *filename, int phnum,
         printf("<- %s\n", filename);
 #ifdef TCC_TARGET_COFF
     if (s1->output_format == TCC_OUTPUT_FORMAT_COFF)
-        tcc_output_coff(s1, f);
+        ret = tcc_output_coff(s1, f);
     else
 #endif
     if (s1->output_format == TCC_OUTPUT_FORMAT_ELF)
         ret = tcc_output_elf(s1, f, phnum, phdr);
     else
         ret = tcc_output_binary(s1, f);
-    fclose(f);
+    if (fclose(f) && ret == 0)
+        ret = -1;
 
     return ret;
 }

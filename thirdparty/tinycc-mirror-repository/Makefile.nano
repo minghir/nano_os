@@ -1,0 +1,48 @@
+CC = gcc
+AS = nasm
+LD = ld
+
+TARGET ?= tcc.bin
+NANO_ROOT ?= nano-rootfs
+
+CFLAGS ?= -O2 -m64 -mno-red-zone -ffreestanding -fno-pie -fno-stack-protector
+ASFLAGS ?= -f elf64
+LDFLAGS ?= -m elf_x86_64 -T app.ld
+
+GCC_INCLUDE := $(shell $(CC) -print-file-name=include)
+INCLUDES = -Isys_stubs -I. -I../../src -I$(GCC_INCLUDE)
+DEPFLAGS = -MMD -MP
+TCC_DEFINES = -DCONFIG_TCC_TARG_X86_64=1 -DCONFIG_TCC_BACKTRACE=0 -DCONFIG_TCC_NANO=1
+
+OBJECTS = crt0.o tcc.o nano_libc.o nano_string.o
+DEPS = tcc.d nano_libc.d nano_string.d
+
+.PHONY: all clean install-nano-headers
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS) app.ld
+	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
+
+crt0.o: crt0.asm
+	$(AS) $(ASFLAGS) $< -o $@
+
+tcc.o: tcc.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(TCC_DEFINES) $(INCLUDES) -c $< -o $@
+
+nano_libc.o: ../../src/nano_libc.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+nano_string.o: ../../src/nano_string.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+install-nano-headers:
+	mkdir -p "$(NANO_ROOT)/include" "$(NANO_ROOT)/kernel"
+	cp include/tccdefs.h include/stdarg.h sys_stubs/stddef.h sys_stubs/stdint.h "$(NANO_ROOT)/include/"
+	cp ../../src/nano_libc.h ../../src/nano_string.h "$(NANO_ROOT)/include/"
+	cp ../../kernel/syscall.h ../../kernel/video.h ../../kernel/mouse.h ../../kernel/keyboard.h "$(NANO_ROOT)/kernel/"
+
+-include $(DEPS)
+
+clean:
+	rm -f $(OBJECTS) $(DEPS) $(TARGET)

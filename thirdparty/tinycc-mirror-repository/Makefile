@@ -5,6 +5,14 @@
 
 ifndef TOP
  TOP = .
+endif
+
+ifeq ($(wildcard $(TOP)/config.mak),)
+include $(TOP)/Makefile.nano
+else
+
+ifndef TOP
+ TOP = .
  INCLUDED = no
 endif
 
@@ -535,3 +543,4 @@ help:
 
 # --------------------------------------------------------------------------
 endif # ($(INCLUDED),no)
+endif # config.mak present
