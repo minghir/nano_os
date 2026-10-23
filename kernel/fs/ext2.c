@@ -435,7 +435,7 @@ void ext2_init(void) {
     }
 
     if (ext2_superblock.s_magic == EXT2_SUPER_MAGIC) {
-        KLOG_INFO("[EXT2] Superblock valid! Sistem de fisiere gata.\n");
+        //KLOG_INFO("[EXT2] Superblock valid! Sistem de fisiere gata.\n");
     } else {
         KLOG_ERROR("[EXT2] EROARE: Magic number invalid! Acest disc nu este formatat EXT2.\n");
     }

@@ -298,7 +298,7 @@ void syscall_handler(SyscallRegisters* regs) {
             int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
             
             // Atenție: trimitem procesului adresa VIRTUALĂ a argumentelor (0x980000)
-            uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)0x980000, (uint64_t)process_pml4, allocated_pages, target_tty);
+            uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)0x980000, (uint64_t)process_pml4, allocated_pages, arg_page_phys, target_tty);
 
             if (new_pid == 0) {
                 free_page((void*)arg_page_phys);
@@ -322,19 +322,16 @@ void syscall_handler(SyscallRegisters* regs) {
 				exiting_process->exit_code = (int)regs->rdi;
 
 				// --- PROTECȚIE MULTITHREADING (Thread Teardown) ---
-				// Oprim forțat și eliberăm stivele tuturor thread-urilor acestui proces (care împart același CR3)
 				for (int i = 0; i < MAX_PROCESSES; i++) {
 					if (process_table[i].state != PROC_FREE && 
 						process_table[i].pid != exiting_process->pid && 
 						process_table[i].cr3 == exiting_process->cr3) {
 						
-						// Am găsit un thread! Îi eliberăm doar stiva privată
 						free_process_allocations(process_table[i].pid);
 						if (process_table[i].stack_base) {
 							free((void*)process_table[i].stack_base);
 							process_table[i].stack_base = 0;
 						}
-						// Îl scoatem din scheduler
 						process_table[i].state = PROC_FREE;
 						process_table[i].pid = 0;
 						process_table[i].name[0] = '\0';
@@ -342,29 +339,38 @@ void syscall_handler(SyscallRegisters* regs) {
 				}
 				// --------------------------------------------------
 
-				// Folosim harta kernelului înainte de eliberarea paginilor procesului
 				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
 
-				// Acum ESTE SIGUR să distrugem memoria, pentru că niciun thread nu o mai folosește
+				// 1. Eliberăm Heap-ul
 				free_process_allocations(exiting_process->pid);
+                
+				// === FIX: Eliberăm stiva procesului principal! ===
+				if (exiting_process->stack_base) {
+					free((void*)exiting_process->stack_base);
+					exiting_process->stack_base = 0;
+				}
+
+				// 2. Eliberăm Paginile Binarului
 				for (int p = 0; p < MAX_PROG_PAGES; p++) {
 					if (exiting_process->prog_pages[p] != 0) {
 						free_page((void*)exiting_process->prog_pages[p]);
 						exiting_process->prog_pages[p] = 0;
 					}
 				}
+				process_release_owned_pages(exiting_process);
 
+				// 3. Eliberăm Tabela de Paginare
 				if (exiting_process->cr3) {
 					free_process_paging(exiting_process->cr3);
 					exiting_process->cr3 = 0;
 				}
 
-				// 1. Îl facem ZOMBIE (păstrăm PID-ul și ppid-ul ca părintele să-l poată culege prin wait)
+				// Trecem în ZOMBIE (Slotul PCB se păstrează pentru SYSCALL_WAIT)
 				exiting_process->state = PROC_ZOMBIE;
 				
 				int target_tty = exiting_process->tty_id;
 
-				// 2. Căutăm părintele și îl trezim din somn dacă aștepta
+				// Căutăm părintele și îl trezim
 				for (int i = 0; i < MAX_PROCESSES; i++) {
 					if (process_table[i].pid == parent_pid &&
 						process_table[i].state == PROC_SLEEPING) {
@@ -377,12 +383,9 @@ void syscall_handler(SyscallRegisters* regs) {
 				ttys[target_tty].foreground_pid = parent_pid;
 			}
 
-			// 3. Predăm controlul: scoatem procesul curent și forțăm oprirea
 			current_process = NULL;
 			__asm__ volatile ("sti");
 
-			// Forțăm un hlt până la următorul tic de ceas; 
-			// schedulerul va prelua automat un alt proces READY din tabelă.
 			while (1) { __asm__ volatile ("hlt"); }
 			break;
 		}
@@ -405,8 +408,7 @@ void syscall_handler(SyscallRegisters* regs) {
 				PCB* victim = &process_table[i];
 				if (victim->state != PROC_FREE && victim->pid == (uint32_t)target_pid) {
 					
-					// --- PROTECȚIE MULTITHREADING PENTRU KILL ---
-					// Omorâm și toate thread-urile victimei înainte să-i ștergem memoria
+					// --- PROTECȚIE MULTITHREADING ---
 					for (int t = 0; t < MAX_PROCESSES; t++) {
 						if (process_table[t].state != PROC_FREE &&
 							process_table[t].pid != victim->pid &&
@@ -423,36 +425,41 @@ void syscall_handler(SyscallRegisters* regs) {
 							process_table[t].name[0] = '\0';
 						}
 					}
-					// --------------------------------------------
 
-					// A. Eliberăm stiva (Heap) principală
+					// Eliberăm memoria victimei (Heap + Stivă)
 					free_process_allocations(victim->pid);
 					if (victim->stack_base) {
 						free((void*)victim->stack_base);
 						victim->stack_base = 0;
 					}
 
-					// B. Eliberăm cele 8 pagini FIZICE disjuncte ale binarului
+					// Eliberăm paginile executabilului
 					for (int p = 0; p < MAX_PROG_PAGES; p++) {
 						if (victim->prog_pages[p] != 0) {
 							free_page((void*)victim->prog_pages[p]);
 							victim->prog_pages[p] = 0;
 						}
 					}
+					process_release_owned_pages(victim);
 
-					// C. Eliberăm toate paginile Ierarhiei Paging
+					// Eliberăm tabela de paginare
 					if (victim->cr3) {
 						free_process_paging(victim->cr3);
 						victim->cr3 = 0;
 					}
 
 					uint32_t parent_pid = victim->ppid;
-					victim->state = PROC_FREE;
-					victim->pid = 0;
-					victim->name[0] = '\0';
+                    
+					// === FIX CRITIC: Procesul TREBUIE să devină ZOMBIE ===
+					// Îi dăm un exit_code negativ pentru a indica o oprire forțată
+					victim->exit_code = -9; 
+					victim->state = PROC_ZOMBIE; 
+					// AM ELIMINAT: victim->pid = 0; și victim->name[0] = '\0';
+					// Lăsăm SYSCALL_WAIT să facă eliberarea finală a slotului PCB!
 					
 					int target_tty = victim->tty_id;
 					
+					// Trezim părintele
 					for (int parent_idx = 0; parent_idx < MAX_PROCESSES; parent_idx++) {
 						PCB* parent = &process_table[parent_idx];
 						if (parent->pid == parent_pid && parent->state == PROC_SLEEPING) {
@@ -481,15 +488,29 @@ void syscall_handler(SyscallRegisters* regs) {
 				if (process_table[i].state != PROC_FREE && process_table[i].ppid == current_process->pid) {
 					has_children = 1;
 					
-					// Folosim PROC_ZOMBIE (starea corectă din pcb.h)
+					// Dacă am găsit un zombie, îl curățăm
 					if (process_table[i].state == PROC_ZOMBIE) {
 						dead_child_pid = process_table[i].pid;
 						
-						// Eliberăm slotul copilului terminat
+						// --- ELIBERARE RAM COMPLETĂ (Prevenim Memory Leak-ul!) ---
 						if (process_table[i].stack_base) {
 							free((void*)process_table[i].stack_base);
 							process_table[i].stack_base = 0;
 						}
+						// Eliberăm paginile executabilului
+						for (int p = 0; p < MAX_PROG_PAGES; p++) {
+							if (process_table[i].prog_pages[p] != 0) {
+								free_page((void*)process_table[i].prog_pages[p]);
+								process_table[i].prog_pages[p] = 0;
+							}
+						}
+						process_release_owned_pages(&process_table[i]);
+						// Eliberăm tabela de paginare (PML4)
+						if (process_table[i].cr3) {
+							free_process_paging(process_table[i].cr3);
+							process_table[i].cr3 = 0;
+						}
+
 						process_table[i].state = PROC_FREE;
 						process_table[i].pid = 0;
 						process_table[i].ppid = 0;
@@ -506,38 +527,57 @@ void syscall_handler(SyscallRegisters* regs) {
 				break;
 			}
 
-			// Dacă am găsit un copil deja terminat (zombie), îi returnăm PID-ul imediat!
+			// Dacă am găsit un copil deja terminat, îi returnăm PID-ul imediat
 			if (dead_child_found) {
-				regs->rax = dead_child_pid;
+				regs->rax = (uint64_t)dead_child_pid;
 				break;
 			}
 
-			// 2. Dacă are copii, dar TOȚI rulează încă, punem Shell-ul la somn
+			// 2. Dacă are copii, dar TOȚI rulează încă, punem părintele (init) la somn
 			current_process->state = PROC_SLEEPING;
 			
 			while (current_process->state == PROC_SLEEPING) {
-                __asm__ volatile ("sti; hlt" ::: "memory");
+				__asm__ volatile ("sti; hlt" ::: "memory");
 			}
 
-			// Când s-a trezit (pentru că un copil a murit), culegem copilul zombie
+			// 3. Când s-a trezit, culegem copilul zombie
 			int found_after_sleep = 0;
 			for (int i = 0; i < MAX_PROCESSES; i++) {
 				if (process_table[i].state == PROC_ZOMBIE && process_table[i].ppid == current_process->pid) {
 					dead_child_pid = process_table[i].pid;
+					
+					// --- ELIBERARE RAM COMPLETĂ ---
 					if (process_table[i].stack_base) {
 						free((void*)process_table[i].stack_base);
 						process_table[i].stack_base = 0;
 					}
+					for (int p = 0; p < MAX_PROG_PAGES; p++) {
+						if (process_table[i].prog_pages[p] != 0) {
+							free_page((void*)process_table[i].prog_pages[p]);
+							process_table[i].prog_pages[p] = 0;
+						}
+					}
+					process_release_owned_pages(&process_table[i]);
+					if (process_table[i].cr3) {
+						free_process_paging(process_table[i].cr3);
+						process_table[i].cr3 = 0;
+					}
+					
 					process_table[i].state = PROC_FREE;
 					process_table[i].pid = 0;
 					process_table[i].ppid = 0;
-					regs->rax = dead_child_pid;
+					
+					regs->rax = (uint64_t)dead_child_pid;
+					found_after_sleep = 1;
 					break;
 				}
-				if (!found_after_sleep) { //fallback
-					regs->rax = (uint64_t)-1; // Eroare sau 0
-				}
 			}
+			
+			// FIX BUG: Verificarea trebuie să fie în afara buclei FOR!
+			if (!found_after_sleep) { 
+				regs->rax = (uint64_t)-1; // Eroare, nu am găsit cine ne-a trezit
+			}
+			
 			break;
 		}
 		
@@ -1291,6 +1331,73 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = timer_ticks;
             break;
         }
+		case SYSCALL_GET_USERNAME: {
+            uint32_t uid = (uint32_t)regs->rdi;
+            char* user_buf = (char*)regs->rsi;
+            size_t buf_size = (size_t)regs->rdx;
+
+            if (!user_buf || buf_size == 0) {
+                regs->rax = (uint64_t)-1; // Pointer invalid
+                break;
+            }
+
+            int found = 0;
+            // Căutăm UID-ul în user_database încărcat la boot în Ring 0
+            for (int i = 0; i < user_count; i++) {
+                if (user_database[i].uid == uid) {
+                    size_t len = 0;
+                    while (user_database[i].username[len] != '\0' && len < buf_size - 1) {
+                        user_buf[len] = user_database[i].username[len];
+                        len++;
+                    }
+                    user_buf[len] = '\0';
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (found) {
+                regs->rax = 0; // Succes
+            } else {
+                // Dacă UID-ul nu este găsit în config, punem "unknown"
+                const char* fallback = "unknown";
+                size_t len = 0;
+                while (fallback[len] != '\0' && len < buf_size - 1) {
+                    user_buf[len] = fallback[len];
+                    len++;
+                }
+                user_buf[len] = '\0';
+                regs->rax = (uint64_t)-1; // Indicăm că nu a fost găsit
+            }
+            break;
+        }
+		case SYSCALL_GET_USER_INFO: {
+			const char* uname_input = (const char*)regs->rdi;
+			uint32_t* out_uid = (uint32_t*)regs->rsi;
+			char* out_home = (char*)regs->rdx;
+
+			if (!uname_input || !out_uid) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			int found = 0;
+			// Căutăm direct în tabela din Ring 0 încărcată la boot
+			for (int i = 0; i < user_count; i++) {
+				if (string_compare(user_database[i].username, uname_input) == 0) {
+					*out_uid = user_database[i].uid;
+					
+					if (out_home) {
+						string_copy(out_home, user_database[i].home_dir);
+					}
+					found = 1;
+					break;
+				}
+			}
+
+			regs->rax = found ? 0 : (uint64_t)-1;
+			break;
+		}
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

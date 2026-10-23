@@ -28,6 +28,8 @@ tools/nan3hdd hda_v3.img push games/doom/doom.bin /games/doom/doom
 echo "[+] Copiere fișiere de sistem și config..."
 tools/nan3hdd hda_v3.img push cfg/env.cfg /cfg/env.cfg
 tools/nan3hdd hda_v3.img push cfg/hdd.cfg /cfg/hdd.cfg
+tools/nan3hdd hda_v3.img push cfg/usr.cfg /cfg/usr.cfg
+
 tools/nan3hdd hda_v3.img push data/mp3/laser.wav /data/mp3/1.wav
 
 echo "[+] Copiere fișiere assembly pentru nanoasm..."

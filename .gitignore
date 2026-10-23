@@ -3,5 +3,6 @@
 ./tmp/*
 *.bin
 *.o
+*.d
 *.elf
 *.bin

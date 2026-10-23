@@ -14,6 +14,7 @@
 #include "mouse.h"
 #include "sys.h"
 #include "drivers/cpu.h"
+#include "auth.h"
 
 #include "gfx/gfx_term.h"
 #include "drivers/network/network.h"
@@ -326,10 +327,13 @@ void kernel_main(unsigned long magic, unsigned long addr) {
 
     load_kernel_environment();
     KLOG_INFO("KERNEL:Enviroment loaded.\n");
-
+	
+	KLOG_INFO("\nScanning PCI BUS...\n");
     pci_scan_bus();
-	//test_mac();
-	//net_send_test_packet();
+
+	KLOG_INFO("\nLoading user table...\n");
+	auth_init();
+
     KLOG_INFO("\nLoading Init daemons on all TTYs...\n");
 
 //Apelează init_tss(); o singură dată în kernel_main, după ce ai inițializat GDT-ul, memoria și paging-ul, dar înainte să lansezi init-ul sau să activezi timerul.
@@ -399,12 +403,17 @@ void kernel_main(unsigned long magic, unsigned long addr) {
             KLOG_INFO("[DEBUG] TTY: Apel process_create...\n");
             NanoHeader* hdr = (NanoHeader*)temp_buffer;
             uint64_t init_entry_point = 0x800000 + hdr->entry_offset;
-            uint32_t init_pid = process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, t);
+            uint32_t init_pid = process_create("init", init_entry_point, 0, NULL, (uint64_t)init_pml4, init_pages, 0, t);
+
+            if (init_pid == 0) {
+                KLOG_FATAL("FATAL: process_create failed for init (process table or memory allocation failure)!\n");
+                while(1) __asm__ volatile("cli; hlt");
+            }
             
             KLOG_INFO("[DEBUG] TTY: Configurare PCB...\n");
             PCB* init_pcb = get_process_by_pid(init_pid);
             if (init_pcb == 0) {
-                KLOG_FATAL("FATAL: get_process_by_pid a returnat NULL (nu a gasit PID-ul)!\n");
+                KLOG_FATAL("FATAL: process_create returned an unfindable init PID; check PCB layout consistency!\n");
                 while(1) __asm__ volatile("cli; hlt");
             }
             init_pcb->cwd_sector = 0; 

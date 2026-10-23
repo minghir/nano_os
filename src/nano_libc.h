@@ -122,12 +122,12 @@ static inline int nano_getcwd(char* buf, int max_len) {
     return (int)ret;
 }
 
-static inline int nano_wait() {
+static inline int nano_wait(void) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)22) // Numărul syscall-ului SYSCALL_WAIT
+        : "a" ((uint64_t)SYSCALL_WAIT) // Folosim constanta din syscall.h!
         : "memory"
     );
     return (int)ret;
@@ -717,10 +717,15 @@ static inline int nano_thread_join(uint32_t tid) {
 
 
 
-static inline uint32_t nano_getuid() {
-    register long rax_val __asm__("rax") = 48; // sau următorul număr liber de syscall
-    __asm__ volatile ("int $0x80\n\t" : "+r" (rax_val) : : "memory");
-    return (uint32_t)rax_val;
+static inline uint32_t nano_getuid(void) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GETUID) // Folosește macro-ul din syscall.h
+        : "memory"
+    );
+    return (uint32_t)ret;
 }
 
 static inline int nano_setuid(uint32_t uid) {
@@ -976,6 +981,28 @@ static inline uint32_t nano_get_ticks(void) {
         : "a"(SYSCALL_GET_TICKS)
     );
     return ticks;
+}
+
+static inline int nano_get_username(uint32_t uid, char* buf, size_t max_len) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GET_USERNAME), "D" ((uint64_t)uid), "S" ((uint64_t)buf), "d" ((uint64_t)max_len)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int nano_get_user_info(const char* username, uint32_t* out_uid, char* out_home) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GET_USER_INFO), "D" ((uint64_t)username), "S" ((uint64_t)out_uid), "d" ((uint64_t)out_home)
+        : "memory"
+    );
+    return ret;
 }
 
 #endif

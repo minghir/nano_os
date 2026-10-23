@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 //PCB (Process Control Block)
+#define MAX_GROUPS 8
 #define MAX_PROG_PAGES 256
 // Stările posibile ale unui proces
 typedef enum {
@@ -46,16 +47,21 @@ typedef struct {
 	char current_path[256];     // Calea text privată a procesului (ex: "/hda/data")
     
 	// --- User si Group
-	
 	uint32_t uid;       // User ID-ul proprietarului (ex: 0 = root, 1000 = user normal)
     uint32_t gid;       // Group ID-ul principal
     uint32_t euid;      // Effective UID (opțional, util pentru setuid binaries pe viitor)
+	
+	// --- Grupuri Secundare / Suplimentare ---
+    uint32_t groups[MAX_GROUPS]; // Lista de GID-uri suplimentare
+    uint8_t  group_count;        // Numărul de grupuri active
 	
     // --- Memorie și Execuție ---
     Registers regs;           // Starea registrelor când e pus pe pauză
     uint64_t cr3;             // Paging (dacă folosești memorie virtuală)
     uint64_t mem_base;        // De unde începe în memorie (ex: 0x900000)
     uint64_t stack_base;      // Baza stivei procesului
+    uint64_t user_stack_page; // Pagina fizică a stivei user
+    uint64_t args_page;       // Pagina fizică a argumentelor procesului
     uint64_t prog_pages[MAX_PROG_PAGES];	  // Adresa fizică a fiecărei pagini din zona de program de 1 MiB
 	
     // --- Timp și Statistici ---

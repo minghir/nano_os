@@ -48,6 +48,19 @@ void process_init() {
     print("[DEBUG] process_init: Kernel process (PID 0) initialized as RUNNING.\n");
 }
 
+void process_release_owned_pages(PCB* process) {
+    if (!process) return;
+
+    if (process->user_stack_page) {
+        free_page((void*)process->user_stack_page);
+        process->user_stack_page = 0;
+    }
+    if (process->args_page) {
+        free_page((void*)process->args_page);
+        process->args_page = 0;
+    }
+}
+
 // Planificatorul (Scheduler-ul) apelat la fiecare milisecundă
 uint64_t schedule(uint64_t current_rsp) {
     if (pending_reap_stack) {
@@ -127,6 +140,7 @@ uint64_t schedule(uint64_t current_rsp) {
                 outgoing_process->prog_pages[p] = 0;
             }
         }
+        process_release_owned_pages(outgoing_process);
         free_process_paging(dead_cr3);
 
         for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -178,7 +192,7 @@ void dummy_ring3_loop() {
     while(1); 
 }
 
-uint32_t process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, int tty_id)  {
+uint32_t process_create(const char* name, uint64_t entry_point, int argc, char** argv, uint64_t process_cr3, uint64_t* prog_pages, uint64_t args_page, int tty_id)  {
     
     PCB* p = 0;
     
@@ -195,6 +209,10 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
         print("[DEBUG] ERROR: Process table full! Cannot create process.\n");
         return 0;
     }
+
+    process_release_owned_pages(p);
+    p->user_stack_page = 0;
+    p->args_page = 0;
 
     // An exited process keeps its stack until the scheduler has switched away.
     if (p->stack_base) {
@@ -296,6 +314,13 @@ uint32_t process_create(const char* name, uint64_t entry_point, int argc, char**
 
 // 1. Alocăm fizic pagina pentru stiva de user
     uint64_t user_stack_phys = (uint64_t)alloc_page();
+    if (!user_stack_phys) {
+        free(stack);
+        p->stack_base = 0;
+        return 0;
+    }
+    p->user_stack_page = user_stack_phys;
+    p->args_page = args_page;
     
     // 2. O mapăm în PML4-ul procesului (de exemplu la adresa virtuală 0x900000)
     // Asigură-te că pui flag-ul PAGE_USER ca Ring 3 să aibă drept de acces!

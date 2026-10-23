@@ -75,6 +75,8 @@ typedef enum {
 	SYSCALL_GET_MOUSE_STATE,
 	SYSCALL_GET_KEY_EVENT,
 	SYSCALL_GET_TICKS,
+	SYSCALL_GET_USERNAME,
+	SYSCALL_GET_USER_INFO,
 } SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly

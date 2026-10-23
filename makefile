@@ -6,7 +6,7 @@ CC = clang
 LD = ld.lld
 AS = nasm
 
-CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra
+CFLAGS = -target x86_64-elf -ffreestanding -mno-red-zone -O2 -Wall -Wextra -MMD -MP
 LDFLAGS = -m elf_x86_64 -nostdlib -T linker.ld
 
 # 1. Găsește automat toate fișierele .c (în root și în folderul kernel/)
@@ -23,6 +23,9 @@ C_SOURCES = $(wildcard kernel/*.c)  \
             thirdparty/uip/uip/timer.c
 			
 C_OBJS = $(C_SOURCES:.c=.o)
+DEPFILES = $(C_OBJS:.o=.d)
+
+-include $(DEPFILES)
 
 # 2. Găsește automat toate fișierele .asm (în root și în foldere precum boot/)
 ASM_SOURCES = $(wildcard asm/*.asm) $(wildcard boot/*.asm)
