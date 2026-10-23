@@ -77,6 +77,8 @@ typedef enum {
 	SYSCALL_GET_TICKS,
 	SYSCALL_GET_USERNAME,
 	SYSCALL_GET_USER_INFO,
+    SYSCALL_CHMOD,
+    SYSCALL_CHOWN
 } SyscallNumber;
 
 // Structura care se potrivește exact cu ordinea push-urilor din Assembly

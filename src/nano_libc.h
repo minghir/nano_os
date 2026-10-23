@@ -1005,5 +1005,36 @@ static inline int nano_get_user_info(const char* username, uint32_t* out_uid, ch
     return ret;
 }
 
+static inline int nano_chmod(const char* path, uint16_t mode) {
+    uint64_t res;
+    __asm__ volatile (
+        "mov $25, %%rax\n"     // IMPORTANT: Înlocuiește 25 cu numărul tău real pentru SYSCALL_CHMOD
+        "mov %1, %%rdi\n"
+        "mov %2, %%rsi\n"
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r" (res)
+        : "r" ((uint64_t)path), "r" ((uint64_t)mode)
+        : "rax", "rdi", "rsi"
+    );
+    return (int)res;
+}
+
+static inline int nano_chown(const char* path, uint32_t uid, uint32_t gid) {
+    uint64_t res;
+    __asm__ volatile (
+        "mov $26, %%rax\n"     // IMPORTANT: Înlocuiește 26 cu numărul tău real pentru SYSCALL_CHOWN
+        "mov %1, %%rdi\n"
+        "mov %2, %%rsi\n"
+        "mov %3, %%rdx\n"      // GID-ul se duce în rdx
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r" (res)
+        : "r" ((uint64_t)path), "r" ((uint64_t)uid), "r" ((uint64_t)gid)
+        : "rax", "rdi", "rsi", "rdx"
+    );
+    return (int)res;
+}
+
 #endif
 

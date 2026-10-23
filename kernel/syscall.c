@@ -639,7 +639,13 @@ void syscall_handler(SyscallRegisters* regs) {
         case SYSCALL_CREATE_FILE: {
             const char* name = (const char*)regs->rdi;
             uint32_t size = (uint32_t)regs->rsi;
-            regs->rax = fs_create_file(name, size); // Returnează 1 la succes, 0 la eșec
+            uint16_t mode = (uint16_t)regs->rdx; // Extragem mode din rdx (al 3-lea argument)
+            
+            if (mode == 0) {
+                mode = 0644; // Fallback implicit: rw-r--r--
+            }
+            
+            regs->rax = fs_create_file(name, size, mode); 
             break;
         }
 
@@ -670,7 +676,13 @@ void syscall_handler(SyscallRegisters* regs) {
         }
         case SYSCALL_MKDIR: {
             const char* name = (const char*)regs->rdi;
-            regs->rax = fs_mkdir(name); // Returnează 1 la succes, 0 la eșec
+            uint16_t mode = (uint16_t)regs->rsi; // Extragem mode din rsi (al 2-lea argument)
+            
+            if (mode == 0) {
+                mode = 0755; // Fallback implicit: rwxr-xr-x
+            }
+            
+            regs->rax = fs_mkdir(name, mode); 
             break;
         }
         case SYSCALL_PRINT_INT: {
@@ -1398,6 +1410,20 @@ void syscall_handler(SyscallRegisters* regs) {
 			regs->rax = found ? 0 : (uint64_t)-1;
 			break;
 		}
+		case SYSCALL_CHMOD: {
+            const char* path = (const char*)regs->rdi;
+            uint16_t mode = (uint16_t)regs->rsi;
+            regs->rax = fs_chmod(path, mode);
+            break;
+        }
+
+        case SYSCALL_CHOWN: {
+            const char* path = (const char*)regs->rdi;
+            uint32_t uid = (uint32_t)regs->rsi;
+            uint32_t gid = (uint32_t)regs->rdx;
+            regs->rax = fs_chown(path, uid, gid);
+            break;
+        }
 		default: {
 			char log_msg[128];
 			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);

@@ -381,38 +381,52 @@ int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
     if (target->read_file) return target->read_file(local_path, buffer, max_size);
     return 0;
 }
-
 // -------------------------------------------------------------------------
-// CREARE FIȘIER (Verifică MAY_WRITE pe folderul părinte)
+// CREARE FIȘIER (Verifică MAY_WRITE pe folderul părinte și aplică UID/GID)
 // -------------------------------------------------------------------------
-int fs_create_file(const char* name, uint32_t size) {
+int fs_create_file(const char* name, uint32_t size, uint16_t mode) { // <-- Am adăugat 'mode'
     if (!name || name[0] == '\0') return 0;
+    
+    // Presupunând că ai 'is_at_global_root' global
+    extern int is_at_global_root; 
     if (is_at_global_root && name[0] != '/') return 0;
 
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
     if (!target) return 0;
 
-    // Verificăm permisiunile pe folderul unde vrem să creăm fișierul
+    // Aducem referința la procesul curent aici, sus
+    extern PCB* current_process;
+
+    // 1. Verificăm permisiunile pe folderul unde vrem să creăm fișierul
     if (target->stat) {
         char parent_path[128];
         vfs_get_parent_path(local_path, parent_path);
 
         fs_stat_t st;
         if (target->stat(parent_path, &st)) {
-            extern PCB* current_process;
             if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
                 return 0; // Acces refuzat pe directorul părinte!
             }
         }
     }
 
-    if (target->create_file) {
-        return target->create_file(local_path, size);
+    // 2. Extragem proprietarul (UID) și grupul (GID) din procesul curent
+    uint32_t current_uid = current_process ? current_process->uid : 0;
+    uint32_t current_gid = current_process ? current_process->gid : 0;
+
+    // 3. Mod implicit pentru fișiere dacă nu e specificat (ex: 0644 = rw-r--r--)
+    if (mode == 0) {
+        mode = 0644;
     }
+
+    // 4. Creăm fișierul transmițând toate datele către driver (ex: NAN2)
+    if (target->create_file) {
+        return target->create_file(local_path, size, current_uid, current_gid, mode);
+    }
+    
     return 0;
 }
-
 // -------------------------------------------------------------------------
 // SCRIERE CU VERIFICARE PERMISIUNI (MAY_WRITE = 2)
 // -------------------------------------------------------------------------
@@ -462,27 +476,43 @@ int fs_delete_file(const char* name) {
 }
 
 // -------------------------------------------------------------------------
-// CREARE DIRECTOR (Verifică MAY_WRITE pe folderul părinte)
+// CREARE DIRECTOR (Verifică MAY_WRITE pe folderul părinte și aplică UID/GID)
 // -------------------------------------------------------------------------
-int fs_mkdir(const char* name) {
+int fs_mkdir(const char* name, uint16_t mode) { // <-- Am adăugat 'mode' (ex: 0755)
     char local_path[128];
     FileSystemInterface* target = vfs_route(name, local_path);
     if (!target) return 0;
 
+    // Aducem referința la procesul curent mai sus, pentru a o folosi în ambele locuri
+    extern PCB* current_process;
+
+    // 1. Verificare permisiuni (MAY_WRITE) pe directorul părinte
     if (target->stat) {
         char parent_path[128];
         vfs_get_parent_path(local_path, parent_path);
 
         fs_stat_t st;
         if (target->stat(parent_path, &st)) {
-            extern PCB* current_process;
             if (!fs_check_access(&st, 2, current_process)) { // 2 = MAY_WRITE
                 return 0; // Acces refuzat pe directorul părinte!
             }
         }
     }
 
-    if (target->mkdir) return target->mkdir(local_path);
+    // 2. Extragem UID și GID de la procesul care apelează funcția
+    uint32_t current_uid = current_process ? current_process->uid : 0;
+    uint32_t current_gid = current_process ? current_process->gid : 0;
+
+    // Dacă nu e specificat un mod, punem unul implicit pentru directoare (rwxr-xr-x)
+    if (mode == 0) {
+        mode = 0755; 
+    }
+
+    // 3. Creăm efectiv directorul trimițând UID-ul și GID-ul driverului fizic (ex: NAN2)
+    if (target->mkdir) {
+        return target->mkdir(local_path, current_uid, current_gid, mode);
+    }
+    
     return 0;
 }
 
@@ -674,4 +704,29 @@ int fs_check_access(fs_stat_t* stat, int mode, PCB* proc) {
     }
 
     return (perm & mode) == mode;
+}
+
+int fs_chmod(const char* path, uint16_t mode) {
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+    if (!target || !target->chmod) return 0;
+
+    // TODO (Securitate): Aici poți chema target->stat() pentru a verifica 
+    // dacă current_process->uid == 0 sau current_process->uid == stat.uid
+    
+    return target->chmod(local_path, mode);
+}
+
+int fs_chown(const char* path, uint32_t uid, uint32_t gid) {
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(path, local_path);
+    if (!target || !target->chown) return 0;
+    
+    // Doar root (UID 0) ar trebui să poată schimba proprietarul oricărui fișier
+    extern PCB* current_process;
+    if (current_process && current_process->uid != 0) {
+        return 0; // Operation not permitted
+    }
+
+    return target->chown(local_path, uid, gid);
 }

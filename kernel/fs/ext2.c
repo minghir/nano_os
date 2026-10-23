@@ -1011,7 +1011,8 @@ static uint32_t ext2_get_parent_and_name(const char* full_path, char* out_filena
     }
 }
 
-static int ext2_create_file(const char* name, uint32_t size) {
+// <--- ADĂUGAT: noii parametri uid, gid, mode
+static int ext2_create_file(const char* name, uint32_t size, uint32_t uid, uint32_t gid, uint16_t mode) {
     char pure_name[256];
     uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
     if (parent_ino == 0 || pure_name[0] == '\0') return 0;
@@ -1028,8 +1029,19 @@ static int ext2_create_file(const char* name, uint32_t size) {
     uint8_t* ptr = (uint8_t*)&inode;
     for (uint32_t i = 0; i < sizeof(ext2_inode_t); i++) ptr[i] = 0;
 
-    inode.i_mode = 0x8000 | 0644; 
-    inode.i_size = 0;
+    // =========================================================================
+    // APLICAREA NOILOR PARAMETRI VFS
+    // =========================================================================
+    // Masca 0x8000 (EXT2_S_IFREG) indică un fișier obișnuit
+    // Aplicăm SAU pe biți cu permisiunile primite (ex: 0644)
+    inode.i_mode = 0x8000 | (mode & 0x0FFF); 
+    
+    // Salvăm UID și GID pe 16 biți (limitarea structurii clasice EXT2)
+    inode.i_uid = (uint16_t)(uid & 0xFFFF);
+    inode.i_gid = (uint16_t)(gid & 0xFFFF);
+    // =========================================================================
+
+    inode.i_size = 0; // Mărimea e inițial 0, se actualizează când scrii date (write)
     inode.i_blocks = 0;
     inode.i_links_count = 1; // <--- ADĂUGAT: Linux are nevoie de asta pentru ca fișierul să nu fie orfan!
 
@@ -1039,56 +1051,10 @@ static int ext2_create_file(const char* name, uint32_t size) {
     if (!ext2_add_dir_entry(parent_ino, pure_name, new_inode)) return 0;
     return 1;
 }
-/*
-static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size) {
-    if (!name || !data) return 0;
 
-    char pure_name[256];
-    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
-    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
 
-    uint32_t target_inode = ext2_find_in_dir(parent_ino, pure_name);
-    if (target_inode == 0) {
-        if (!ext2_create_file(name, 0)) return 0;
-        target_inode = ext2_find_in_dir(parent_ino, pure_name);
-        if (target_inode == 0) return 0; 
-    }
-
-    ext2_inode_t inode;
-    if (!ext2_read_inode(target_inode, &inode)) return 0;
-
-    if ((inode.i_mode & 0xF000) != 0x8000) {
-        print("[EXT2] Eroare: Tinta este un director!\n");
-        return 0;
-    }
-    
-    uint32_t block_size = 1024 << ext2_superblock.s_log_block_size;
-    uint32_t blocks_needed = (size + block_size - 1) / block_size;
-
-    if (blocks_needed > 12) return 0;
-
-    uint32_t bytes_written = 0;
-    uint8_t* temp_buf = (uint8_t*)malloc(block_size);
-    if (!temp_buf) return 0;
-
-    for (uint32_t i = 0; i < blocks_needed; i++) {
-        if (inode.i_block[i] == 0) {
-            inode.i_block[i] = ext2_alloc_block();
-            if (inode.i_block[i] == 0) break;
-            inode.i_blocks += (block_size / 512);
-        }
-        uint32_t chunk = (size - bytes_written > block_size) ? block_size : (size - bytes_written);
-        for (uint32_t j = 0; j < chunk; j++) temp_buf[j] = data[bytes_written + j];
-        for (uint32_t j = chunk; j < block_size; j++) temp_buf[j] = 0;
-        ext2_write_block(inode.i_block[i], temp_buf);
-        bytes_written += chunk;
-    }
-    inode.i_size = bytes_written;
-    ext2_write_inode(target_inode, &inode);
-    free(temp_buf);
-    return bytes_written;
-}
-*/
+// Declarăm procesul curent pentru a putea citi UID/GID
+extern PCB* current_process;
 
 static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size) {
     if (!name) return 0;
@@ -1099,7 +1065,16 @@ static int ext2_write_file(const char* name, const uint8_t* data, uint32_t size)
 
     uint32_t target_inode = ext2_find_in_dir(parent_ino, pure_name);
     if (target_inode == 0) {
-        if (!ext2_create_file(name, 0)) return 0;
+        // --- MODIFICARE AICI ---
+        uint32_t current_uid = current_process ? current_process->uid : 0;
+        uint32_t current_gid = current_process ? current_process->gid : 0;
+
+        // Apelăm cu toți parametrii noi: size=0, uid, gid, mode=0644
+        if (!ext2_create_file(name, 0, current_uid, current_gid, 0644)) {
+            return 0;
+        }
+        // -----------------------
+
         target_inode = ext2_find_in_dir(parent_ino, pure_name);
         if (target_inode == 0) return 0; 
     }
@@ -1201,7 +1176,8 @@ static int ext2_delete_file(const char* name) {
     return 0; 
 }
 
-static int ext2_mkdir(const char* name) {
+// <--- ADĂUGAT: noii parametri uid, gid, mode
+static int ext2_mkdir(const char* name, uint32_t uid, uint32_t gid, uint16_t mode) {
     char pure_name[256];
     // Acum suportă și căi absolute/relative, nu doar în directorul curent!
     uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
@@ -1218,22 +1194,33 @@ static int ext2_mkdir(const char* name) {
     uint32_t new_block = ext2_alloc_block();
     if (new_block == 0) return 0;
 
-    // 3. Inițializăm inode-ul nou ca director (0x4000 este masca pentru Director)
+    // 3. Inițializăm inode-ul nou ca director
     ext2_inode_t inode;
     uint8_t* ptr = (uint8_t*)&inode;
     for (uint32_t i = 0; i < sizeof(ext2_inode_t); i++) ptr[i] = 0;
 
     uint32_t block_size = 1024 << ext2_superblock.s_log_block_size;
 
-    inode.i_mode = 0x4000 | 0755; 
+    // =========================================================================
+    // APLICAREA NOILOR PARAMETRI VFS
+    // =========================================================================
+    // Păstrăm masca 0x4000 (EXT2_S_IFDIR - care indică faptul că este un director) 
+    // și facem un SAU pe biți doar cu porțiunea de permisiuni din mode (ex: 0755)
+    inode.i_mode = 0x4000 | (mode & 0x0FFF); 
+    
+    // EXT2 folosește UID și GID pe 16 biți în structura de bază
+    inode.i_uid = (uint16_t)(uid & 0xFFFF);
+    inode.i_gid = (uint16_t)(gid & 0xFFFF);
+    // =========================================================================
+
     inode.i_size = block_size; 
     inode.i_blocks = block_size / 512; // EXT2 contorizează mereu în sectoare de 512 bytes
     inode.i_block[0] = new_block;
-    inode.i_links_count = 2; // <--- ADĂUGAT: Linux are nevoie de 2 link-uri pentru directoare noi!
+    inode.i_links_count = 2; // Linux are nevoie de 2 link-uri pentru directoare noi!
 
     ext2_write_inode(new_inode, &inode);
 
-    // <--- ADĂUGAT: Incrementăm i_links_count pentru directorul părinte (datorită intrării '..')
+    // Incrementăm i_links_count pentru directorul părinte (datorită intrării '..')
     ext2_inode_t parent_inode_struct;
     if (ext2_read_inode(parent_ino, &parent_inode_struct)) {
         parent_inode_struct.i_links_count++;
@@ -1255,7 +1242,7 @@ static int ext2_mkdir(const char* name) {
 
     // Construim înregistrarea ".." care ocupă restul blocului liber
     ext2_dir_entry_t* dotdot = (ext2_dir_entry_t*)(buffer + dot->rec_len);
-    dotdot->inode = parent_ino; // <--- CORECTAT: Indică direct inodul părintelui găsit mai sus
+    dotdot->inode = parent_ino; // Indică direct inodul părintelui găsit mai sus
     dotdot->name_len = 2;
     dotdot->file_type = 2; // EXT2_FT_DIR
     dotdot->rec_len = block_size - dot->rec_len; // Restul blocului
@@ -1473,6 +1460,43 @@ static int ext2_stat(const char* path, fs_stat_t* out_stat) {
     return 1;
 }
 
+static int ext2_chmod(const char* name, uint16_t mode) {
+    char pure_name[256];
+    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
+    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
+
+    uint32_t target_ino = ext2_find_in_dir(parent_ino, pure_name);
+    if (target_ino == 0) return 0;
+
+    ext2_inode_t inode;
+    if (!ext2_read_inode(target_ino, &inode)) return 0;
+
+    // Păstrăm tipul (fișier/director) din primii 4 biți și aplicăm noile permisiuni
+    inode.i_mode = (inode.i_mode & 0xF000) | (mode & 0x0FFF);
+    
+    ext2_write_inode(target_ino, &inode);
+    return 1;
+}
+
+static int ext2_chown(const char* name, uint32_t uid, uint32_t gid) {
+    char pure_name[256];
+    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
+    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
+
+    uint32_t target_ino = ext2_find_in_dir(parent_ino, pure_name);
+    if (target_ino == 0) return 0;
+
+    ext2_inode_t inode;
+    if (!ext2_read_inode(target_ino, &inode)) return 0;
+
+    // Aplicăm noile UID și GID (EXT2 clasic le ține pe 16 biți)
+    inode.i_uid = (uint16_t)(uid & 0xFFFF);
+    inode.i_gid = (uint16_t)(gid & 0xFFFF);
+    
+    ext2_write_inode(target_ino, &inode);
+    return 1;
+}
+
 // --- EXPORTAREA DRIVERULUI ---
 FileSystemInterface ext2_driver = {
     .name = "ext2",
@@ -1491,5 +1515,7 @@ FileSystemInterface ext2_driver = {
     .format = ext2_format,
     .get_file_at_index = ext2_get_file_at_index,
     .append_file = ext2_append_file,
-	.stat = ext2_stat
+	.stat = ext2_stat,
+	.chmod = ext2_chmod,
+	.chown = ext2_chown
 };

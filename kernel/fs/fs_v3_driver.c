@@ -312,7 +312,7 @@ void fs_init_v3(void) {
 
     if (sb->magic[0] == NFS3_MAGIC[0] && sb->magic[1] == NFS3_MAGIC[1] &&
         sb->magic[2] == NFS3_MAGIC[2] && sb->magic[3] == NFS3_MAGIC[3]) {
-        KLOG_INFO("[NFS3] Driver montat cu succes pe hdb.");
+        //KLOG_INFO("[NFS3] Driver montat cu succes pe hdb.");
     } else {
         KLOG_WARNING("[NFS3] Disc hdb neformatat. Se rulează formatarea V3...");
         nfs3_format();
@@ -366,7 +366,11 @@ void fs_list_files_v3(const char* path) {
 }
 
 
-int fs_create_file_v3(const char* name, uint32_t size) {
+static int fs_create_file_v3(const char* name, uint32_t size, uint32_t uid, uint32_t gid, uint16_t mode) {
+    (void)uid;
+    (void)gid;
+    (void)mode;
+
     char target_filename[64];
     if (!name || name[0] == '\0') return 0;
 
@@ -504,7 +508,11 @@ int fs_read_file_v3(const char* name, uint8_t* buffer, uint32_t max_size) {
     return bytes_read; // Returnăm câți bytes am reușit să citim
 }
 
-int fs_mkdir_v3(const char* name) {
+static int fs_mkdir_v3(const char* name, uint32_t uid, uint32_t gid, uint16_t mode) {
+    (void)uid;
+    (void)gid;
+    (void)mode;
+
     char target_filename[64];
     if (!name || name[0] == '\0') return 0;
 
@@ -738,6 +746,7 @@ int nfs3_append_file(const char* name, const char* data) {
 }
 
 static int nfs3_stat(const char* path, fs_stat_t* out_stat) {
+    (void)path;
     if (!out_stat) return 0;
 
     // NFS3 nu stochează permisiuni pe disc, deci oferim acces total (rwxrwxrwx)
