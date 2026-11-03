@@ -31,7 +31,8 @@ extern FileSystemInterface nfs3_driver;
 extern FileSystemInterface ext2_driver;
 
 // Pointerul către sistemul de fișiere activ în acest moment
-static FileSystemInterface* active_fs = &nfs3_driver;
+//static FileSystemInterface* active_fs = &nfs3_driver;
+static FileSystemInterface* active_fs = &ext2_driver;
 static int is_at_global_root = 1;
 
 static int starts_with_vfs(const char* str, const char* prefix) {
@@ -62,7 +63,7 @@ void fs_init(const char* kernel_cmdline) {
     // 1. Extragem tipul partiției root din cmdline (fallback "nfs3")
     get_cmdline_param(kernel_cmdline, "rootfs=", rootfs_type, sizeof(rootfs_type));
     if (rootfs_type[0] == '\0') {
-        string_copy(rootfs_type, "nfs3"); 
+        string_copy(rootfs_type, "ext2"); 
     }
 
     // 2. Inițializăm temporar driverul pentru a citi hdd.cfg

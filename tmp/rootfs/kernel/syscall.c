@@ -1,0 +1,1437 @@
+#include <stdint.h>
+#include <stddef.h>  // Pentru size_t
+
+#include "memory.h"  // Pentru funcția malloc()
+#include "syscall.h"
+#include "io.h"
+#include "timer.h"
+#include "fs/fs.h"
+#include "string.h"
+#include "process.h"
+#include "paging.h"
+#include "syslog.h"
+#include "tty.h"
+#include "sys.h"
+#include "string.h"
+#include "speaker.h"
+#include "drivers/sound/audio.h"
+#include "drivers/network/network.h"
+#include "drivers/network/socket.h"
+#include "video.h"
+#include "auth.h"
+#include "mouse.h"
+#include "keyboard.h"
+
+
+extern void e1000_irq_handler(void* regs);
+
+
+extern char env_path[];
+extern char kernel_log_buffer[KERNEL_LOG_SIZE];
+
+extern int term_cols;
+extern int term_rows;
+
+extern int desktop_mode;
+
+void syscall_handler(SyscallRegisters* regs) {
+	/*
+	KLOG_INFO("\n[SYSCALL] Am primit INT 0x80 din User-Space! RAX (ID) = ");
+	
+	// Folosim o variabilă temporară pentru a printa ușor numărul
+    char rax_buf[16];
+    simple_itoa(regs->rax, rax_buf); // Sau folosește print_number(regs->rax) dacă o ai
+    KLOG_INFO(rax_buf);
+    KLOG_INFO("\n");
+	*/
+	// 1. Dezactivăm întreruperile pentru a preveni schimbarea lui current_process la mijlocul syscall-ului
+    __asm__ volatile("cli");
+	
+    // 1. Salvăm numărul syscall-ului local IMEDIAT, înainte ca orice întrerupere să-l poată atinge!
+    uint32_t syscall_num = (uint32_t)regs->rax;
+
+    // 2. Rutăm apelul tăind "gunoiul" din partea superioară a lui RAX
+    //switch ((uint32_t)regs->rax) {
+    switch (syscall_num) {
+		case 0: { // SYSCALL 0 (Probabil sys_read, sys_yield sau getch)
+            // Punem procesorul pe pauză până apare o întrerupere hardware (ex: timer sau tastatură)
+            // Astfel tăiem spam-ul infinit și lăsăm CPU-ul să respire.
+            __asm__ volatile ("sti; hlt");
+            
+            // Alternativ, dacă 0 e sys_read pentru tastatură, aici ai returna caracterul.
+            regs->rax = 0; 
+            break;
+        }
+        case SYSCALL_PRINT: {
+			
+            char* str = (char*)regs->rdi;
+            print(str);
+            break;
+        }
+        
+        case SYSCALL_READLINE: {
+            char* buffer = (char*)regs->rdi;
+            uint32_t max_length = regs->rsi;
+            keyboard_read_line(buffer, max_length); 
+            break;
+        }
+        
+        case SYSCALL_MALLOC: {
+            size_t size = (size_t)regs->rdi;
+            void* ptr = current_process
+                      ? malloc_for_process(size, current_process->pid)
+                      : malloc(size);
+            regs->rax = (uint64_t)ptr; // Returnăm adresa pointerului
+            break;
+        }
+		case SYSCALL_FREE: {
+            void* ptr = (void*)regs->rdi;
+            free(ptr); // Apelează funcția ta de eliberare din memory.h
+            break;
+        }
+        
+        case SYSCALL_SLEEP: {
+            uint32_t milliseconds = (uint32_t)regs->rdi;
+            //print("Sleep cerut pt ms: "); 
+            //print_number(milliseconds);
+            //print("\n");
+            __asm__ volatile ("sti");
+            sleep_ms(milliseconds); 
+            break;
+        }
+        
+        case SYSCALL_DATETIME: {
+            DateTime* user_dt = (DateTime*)regs->rdi;
+            DateTime kernel_dt = get_current_time();
+            *user_dt = kernel_dt; // Copiem direct rezultatul
+            break;
+        }
+		
+		case SYSCALL_EXEC: {
+            char* command = (char*)regs->rdi;
+            int file_found = 0;
+
+            // 1. Curățare și Tokenizare comandă
+            char cmd_copy[128];
+            int c_idx = 0;
+            while (command[c_idx] != '\0' && command[c_idx] != '\n' && command[c_idx] != '\r' && c_idx < 127) {
+                cmd_copy[c_idx] = command[c_idx];
+                c_idx++;
+            }
+            cmd_copy[c_idx] = '\0';
+
+            char* argv[16];
+            int argc = 0;
+            int p = 0;
+
+            while (cmd_copy[p] != '\0' && argc < 15) {
+                while (cmd_copy[p] == ' ' || cmd_copy[p] == '\t') p++;
+                if (cmd_copy[p] == '\0') break;
+                argv[argc++] = &cmd_copy[p];
+                while (cmd_copy[p] != '\0' && cmd_copy[p] != ' ' && cmd_copy[p] != '\t') p++;
+                if (cmd_copy[p] != '\0') {
+                    cmd_copy[p] = '\0';
+                    p++;
+                }
+            }
+            argv[argc] = NULL;
+
+            if (argc == 0) {
+                regs->rax = 0;
+                break;
+            }
+
+            char* prog_name = argv[0];
+            char paths_to_try[6][64];
+            int try_count = 0;
+
+            for (int i = 0; i < 6; i++) {
+                for (int j = 0; j < 64; j++) paths_to_try[i][j] = '\0';
+            }
+
+            if (prog_name[0] == '/' || prog_name[0] == '.') {
+                string_copy(paths_to_try[try_count++], prog_name);
+            } else {
+				
+				// 1. Încercăm MAI ÎNTÂI în directorul curent al procesului care a cerut execuția!
+                if (current_process && current_process->current_path[0] != '\0') {
+                    string_copy(paths_to_try[try_count], current_process->current_path);
+                    int dlen = string_length(paths_to_try[try_count]);
+                    if (dlen > 0 && paths_to_try[try_count][dlen-1] != '/') {
+                        string_concat(paths_to_try[try_count], "/");
+                    }
+                    string_concat(paths_to_try[try_count], prog_name);
+                    try_count++;
+                }
+				
+				// 2. Apoi parcurgem PATH-ul clasic din env_path
+                char path_copy[128];
+                string_copy(path_copy, env_path); 
+                int start_idx = 0;
+                int len = string_length(path_copy);
+                
+                for (int i = 0; i <= len; i++) {
+                    if (path_copy[i] == ';' || path_copy[i] == '\0') {
+                        path_copy[i] = '\0'; 
+                        char* current_dir = &path_copy[start_idx];
+                        start_idx = i + 1;
+                        if (string_length(current_dir) == 0) continue;
+						
+                        string_copy(paths_to_try[try_count], current_dir);
+                        int dirlen = string_length(paths_to_try[try_count]);
+                        if (dirlen > 0 && paths_to_try[try_count][dirlen-1] != '/') {
+                            string_concat(paths_to_try[try_count], "/");
+                        }
+                        string_concat(paths_to_try[try_count], prog_name);
+                        try_count++;
+                        if (try_count >= 5) break;
+                    }
+                }
+            }
+
+            // 2. VERIFICARE PREALABILĂ (Fără alocare de memorie fizică masivă)
+            int valid_path_idx = -1;
+            uint8_t temp_header_buf[512]; // Folosim doar 512 bytes temporari pe stivă
+            
+            for (int i = 0; i < try_count; i++) {
+                int bytes_read = fs_read_file(paths_to_try[i], temp_header_buf, 512);
+                
+                if (bytes_read >= (int)sizeof(NanoHeader)) {
+                    NanoHeader* temp_hdr = (NanoHeader*)temp_header_buf;
+                    // Verificăm imediat dacă este un executabil valid Nano OS
+                    if (temp_hdr->magic[0] == 'N' && temp_hdr->magic[1] == 'A' && 
+                        temp_hdr->magic[2] == 'S' && temp_hdr->magic[3] == '1') {
+                        valid_path_idx = i;
+                        break; // Am găsit calea corectă!
+                    }
+                }
+            }
+
+            if (valid_path_idx == -1) {
+                regs->rax = 0; // Fișierul nu există sau nu e executabil valid
+                break;
+            }
+
+            // 3. ÎNCĂRCAREA EFECTIVĂ (Fără să schimbăm CR3 deloc!)
+            file_found = 1;
+            uint64_t* process_pml4 = create_process_pml4();
+            if (!process_pml4) {
+                regs->rax = 0;
+                break;
+            }
+            uint64_t allocated_pages[MAX_PROG_PAGES];
+
+            // A. Alocăm paginile fizice și le mapăm DOAR în PML4-ul Ring 3
+            for(int p = 0; p < MAX_PROG_PAGES; p++) {
+                allocated_pages[p] = (uint64_t)alloc_page();
+                map_page(process_pml4, 0x800000 + (p * 4096), allocated_pages[p], 
+                         PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+            }
+
+            // B. Citim fișierul de pe disc într-un buffer sigur (CR3-ul kernelului rămâne activ!)
+            const uint32_t program_capacity = MAX_PROG_PAGES * 4096;
+            uint8_t* temp_buffer = (uint8_t*)malloc(program_capacity + 1);
+            if (!temp_buffer) {
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                regs->rax = 0;
+                break;
+            }
+            for (uint32_t i = 0; i <= program_capacity; i++) temp_buffer[i] = 0;
+            int bytes_read = fs_read_file(paths_to_try[valid_path_idx], temp_buffer, program_capacity + 1);
+
+            NanoHeader* hdr = (NanoHeader*)temp_buffer; 
+
+            if (bytes_read <= (int)sizeof(NanoHeader) || bytes_read > (int)program_capacity ||
+                hdr->entry_offset < sizeof(NanoHeader) || hdr->entry_offset >= (uint32_t)bytes_read ||
+                hdr->magic[0] != 'N' || hdr->magic[1] != 'A' || 
+                hdr->magic[2] != 'S' || hdr->magic[3] != '1') {
+                
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                free(temp_buffer);
+                regs->rax = 0;
+                break;
+            }
+            uint32_t entry_offset = hdr->entry_offset;
+
+            // C. Copiem din buffer-ul temporar în paginile procesului folosind o adresă de kernel (2 GB)
+            uint64_t* kernel_pml4;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_pml4));
+            
+            for(int p = 0; p < MAX_PROG_PAGES; p++) {
+                uint64_t safe_vaddr = 0x80000000 + (p * 4096);
+                map_page(kernel_pml4, safe_vaddr, allocated_pages[p], PAGE_PRESENT | PAGE_WRITE);
+                
+                uint8_t* src = temp_buffer + (p * 4096);
+                uint8_t* dest = (uint8_t*)safe_vaddr;
+                for (int i = 0; i < 4096; i++) dest[i] = src[i];
+            }
+            free(temp_buffer);
+
+            // D. ================= FIX PENTRU ARGUMENTE =================
+            // Alocăm o pagină FIZICĂ reală pentru argumente
+            uint64_t arg_page_phys = (uint64_t)alloc_page();
+            
+            // O mapăm în procesul Ring 3 la adresa dorită (0x980000)
+            map_page(process_pml4, 0x980000, arg_page_phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+            
+            // O mapăm temporar în kernel la 0x80000000 pentru a putea scrie în ea acum
+            map_page(kernel_pml4, 0x80000000, arg_page_phys, PAGE_PRESENT | PAGE_WRITE);
+
+            uint64_t* kernel_argv = (uint64_t*)0x80000000;
+            char* string_pool = (char*)(kernel_argv + argc + 1);
+            
+            for (int a = 0; a < argc; a++) {
+                char* src_arg = argv[a];
+                char* dest_arg = string_pool;
+                while (*src_arg != '\0') *string_pool++ = *src_arg++;
+                *string_pool++ = '\0';
+                
+                // Salvăm adresa așa cum o va vedea procesul în Ring 3 (0x980000 + offset)
+                kernel_argv[a] = 0x980000 + ((uint64_t)dest_arg - 0x80000000);
+            }
+            kernel_argv[argc] = 0; 
+            // ==========================================================
+
+            uint64_t entry_point = 0x800000 + entry_offset;
+            int target_tty = (current_process != 0) ? current_process->tty_id : active_tty;
+            
+            // Atenție: trimitem procesului adresa VIRTUALĂ a argumentelor (0x980000)
+            uint32_t new_pid = process_create(prog_name, entry_point, argc, (char**)0x980000, (uint64_t)process_pml4, allocated_pages, arg_page_phys, target_tty);
+
+            if (new_pid == 0) {
+                free_page((void*)arg_page_phys);
+                for(int p = 0; p < MAX_PROG_PAGES; p++) free_page((void*)allocated_pages[p]);
+                free_process_paging((uint64_t)process_pml4);
+                regs->rax = 0;
+                break;
+            }
+            
+            ttys[target_tty].foreground_pid = new_pid;
+            regs->rax = (uint64_t) new_pid;
+            break;
+        }
+		
+
+		case SYSCALL_EXIT: {
+			__asm__ volatile ("cli");
+			PCB* exiting_process = current_process;
+			if (exiting_process) {
+				uint32_t parent_pid = exiting_process->ppid;
+				exiting_process->exit_code = (int)regs->rdi;
+
+				// --- PROTECȚIE MULTITHREADING (Thread Teardown) ---
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].state != PROC_FREE && 
+						process_table[i].pid != exiting_process->pid && 
+						process_table[i].cr3 == exiting_process->cr3) {
+						
+						free_process_allocations(process_table[i].pid);
+						if (process_table[i].stack_base) {
+							free((void*)process_table[i].stack_base);
+							process_table[i].stack_base = 0;
+						}
+						process_table[i].state = PROC_FREE;
+						process_table[i].pid = 0;
+						process_table[i].name[0] = '\0';
+					}
+				}
+				// --------------------------------------------------
+
+				__asm__ volatile ("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+				// 1. Eliberăm Heap-ul
+				free_process_allocations(exiting_process->pid);
+                
+				// === FIX: Eliberăm stiva procesului principal! ===
+				if (exiting_process->stack_base) {
+					free((void*)exiting_process->stack_base);
+					exiting_process->stack_base = 0;
+				}
+
+				// 2. Eliberăm Paginile Binarului
+				for (int p = 0; p < MAX_PROG_PAGES; p++) {
+					if (exiting_process->prog_pages[p] != 0) {
+						free_page((void*)exiting_process->prog_pages[p]);
+						exiting_process->prog_pages[p] = 0;
+					}
+				}
+				process_release_owned_pages(exiting_process);
+
+				// 3. Eliberăm Tabela de Paginare
+				if (exiting_process->cr3) {
+					free_process_paging(exiting_process->cr3);
+					exiting_process->cr3 = 0;
+				}
+
+				// Trecem în ZOMBIE (Slotul PCB se păstrează pentru SYSCALL_WAIT)
+				exiting_process->state = PROC_ZOMBIE;
+				
+				int target_tty = exiting_process->tty_id;
+
+				// Căutăm părintele și îl trezim
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].pid == parent_pid &&
+						process_table[i].state == PROC_SLEEPING) {
+						process_table[i].state = PROC_READY;
+						keyboard_flush();
+						break;
+					}
+				}
+				
+				ttys[target_tty].foreground_pid = parent_pid;
+			}
+
+			current_process = NULL;
+			__asm__ volatile ("sti");
+
+			while (1) { __asm__ volatile ("hlt"); }
+			break;
+		}
+		
+		case SYSCALL_KILL: {
+			int target_pid = (int)regs->rdi;
+			if (target_pid <= 1) { regs->rax = (uint64_t)-1; break; }
+
+			PCB* target_process = get_process_by_pid((uint32_t)target_pid);
+			if (current_process && target_process &&
+				(current_process->pid == (uint32_t)target_pid ||
+				 (current_process->cr3 != 0 &&
+				  current_process->cr3 == target_process->cr3))) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+			
+			int killed = 0;
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				PCB* victim = &process_table[i];
+				if (victim->state != PROC_FREE && victim->pid == (uint32_t)target_pid) {
+					
+					// --- PROTECȚIE MULTITHREADING ---
+					for (int t = 0; t < MAX_PROCESSES; t++) {
+						if (process_table[t].state != PROC_FREE &&
+							process_table[t].pid != victim->pid &&
+							victim->cr3 != 0 &&
+							process_table[t].cr3 == victim->cr3) {
+							
+							free_process_allocations(process_table[t].pid);
+							if (process_table[t].stack_base) {
+								free((void*)process_table[t].stack_base);
+								process_table[t].stack_base = 0;
+							}
+							process_table[t].state = PROC_FREE;
+							process_table[t].pid = 0;
+							process_table[t].name[0] = '\0';
+						}
+					}
+
+					// Eliberăm memoria victimei (Heap + Stivă)
+					free_process_allocations(victim->pid);
+					if (victim->stack_base) {
+						free((void*)victim->stack_base);
+						victim->stack_base = 0;
+					}
+
+					// Eliberăm paginile executabilului
+					for (int p = 0; p < MAX_PROG_PAGES; p++) {
+						if (victim->prog_pages[p] != 0) {
+							free_page((void*)victim->prog_pages[p]);
+							victim->prog_pages[p] = 0;
+						}
+					}
+					process_release_owned_pages(victim);
+
+					// Eliberăm tabela de paginare
+					if (victim->cr3) {
+						free_process_paging(victim->cr3);
+						victim->cr3 = 0;
+					}
+
+					uint32_t parent_pid = victim->ppid;
+                    
+					// === FIX CRITIC: Procesul TREBUIE să devină ZOMBIE ===
+					// Îi dăm un exit_code negativ pentru a indica o oprire forțată
+					victim->exit_code = -9; 
+					victim->state = PROC_ZOMBIE; 
+					// AM ELIMINAT: victim->pid = 0; și victim->name[0] = '\0';
+					// Lăsăm SYSCALL_WAIT să facă eliberarea finală a slotului PCB!
+					
+					int target_tty = victim->tty_id;
+					
+					// Trezim părintele
+					for (int parent_idx = 0; parent_idx < MAX_PROCESSES; parent_idx++) {
+						PCB* parent = &process_table[parent_idx];
+						if (parent->pid == parent_pid && parent->state == PROC_SLEEPING) {
+							parent->state = PROC_READY;
+							keyboard_flush();
+							break;
+						}
+					}
+					ttys[target_tty].foreground_pid = parent_pid;
+					
+					killed = 1;
+					break;
+				}
+			}
+			regs->rax = killed ? 1 : 0;
+			break;
+		}
+		
+		case SYSCALL_WAIT: {
+			int has_children = 0;
+			int dead_child_found = 0;
+			int dead_child_pid = 0;
+
+			// 1. Scanăm tabela de procese pentru copiii acestui proces
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].state != PROC_FREE && process_table[i].ppid == current_process->pid) {
+					has_children = 1;
+					
+					// Dacă am găsit un zombie, îl curățăm
+					if (process_table[i].state == PROC_ZOMBIE) {
+						dead_child_pid = process_table[i].pid;
+						
+						// --- ELIBERARE RAM COMPLETĂ (Prevenim Memory Leak-ul!) ---
+						if (process_table[i].stack_base) {
+							free((void*)process_table[i].stack_base);
+							process_table[i].stack_base = 0;
+						}
+						// Eliberăm paginile executabilului
+						for (int p = 0; p < MAX_PROG_PAGES; p++) {
+							if (process_table[i].prog_pages[p] != 0) {
+								free_page((void*)process_table[i].prog_pages[p]);
+								process_table[i].prog_pages[p] = 0;
+							}
+						}
+						process_release_owned_pages(&process_table[i]);
+						// Eliberăm tabela de paginare (PML4)
+						if (process_table[i].cr3) {
+							free_process_paging(process_table[i].cr3);
+							process_table[i].cr3 = 0;
+						}
+
+						process_table[i].state = PROC_FREE;
+						process_table[i].pid = 0;
+						process_table[i].ppid = 0;
+						
+						dead_child_found = 1;
+						break;
+					}
+				}
+			}
+
+			// Dacă nu are deloc copii, returnăm 0
+			if (!has_children) {
+				regs->rax = 0;
+				break;
+			}
+
+			// Dacă am găsit un copil deja terminat, îi returnăm PID-ul imediat
+			if (dead_child_found) {
+				regs->rax = (uint64_t)dead_child_pid;
+				break;
+			}
+
+			// 2. Dacă are copii, dar TOȚI rulează încă, punem părintele (init) la somn
+			current_process->state = PROC_SLEEPING;
+			
+			while (current_process->state == PROC_SLEEPING) {
+				__asm__ volatile ("sti; hlt" ::: "memory");
+			}
+
+			// 3. Când s-a trezit, culegem copilul zombie
+			int found_after_sleep = 0;
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].state == PROC_ZOMBIE && process_table[i].ppid == current_process->pid) {
+					dead_child_pid = process_table[i].pid;
+					
+					// --- ELIBERARE RAM COMPLETĂ ---
+					if (process_table[i].stack_base) {
+						free((void*)process_table[i].stack_base);
+						process_table[i].stack_base = 0;
+					}
+					for (int p = 0; p < MAX_PROG_PAGES; p++) {
+						if (process_table[i].prog_pages[p] != 0) {
+							free_page((void*)process_table[i].prog_pages[p]);
+							process_table[i].prog_pages[p] = 0;
+						}
+					}
+					process_release_owned_pages(&process_table[i]);
+					if (process_table[i].cr3) {
+						free_process_paging(process_table[i].cr3);
+						process_table[i].cr3 = 0;
+					}
+					
+					process_table[i].state = PROC_FREE;
+					process_table[i].pid = 0;
+					process_table[i].ppid = 0;
+					
+					regs->rax = (uint64_t)dead_child_pid;
+					found_after_sleep = 1;
+					break;
+				}
+			}
+			
+			// FIX BUG: Verificarea trebuie să fie în afara buclei FOR!
+			if (!found_after_sleep) { 
+				regs->rax = (uint64_t)-1; // Eroare, nu am găsit cine ne-a trezit
+			}
+			
+			break;
+		}
+		
+		case SYSCALL_PS: { // SYSCALL_PS
+            // Definim o structură simplificată pe care o vom trimite user-space-ului
+            typedef struct {
+                uint32_t pid;
+                uint32_t ppid;
+                uint32_t state;
+				uint32_t uid;
+                char name[32];
+            } ProcessInfo;
+
+            ProcessInfo* user_buf = (ProcessInfo*)regs->rdi;
+            uint32_t max_entries = (uint32_t)regs->rsi;
+            uint32_t count = 0;
+
+            // Parcurgem tabela de procese și o copiem în bufferul user-ului
+            for (int i = 0; i < MAX_PROCESSES && count < max_entries; i++) {
+                if (process_table[i].state != PROC_FREE) {
+                    user_buf[count].pid = process_table[i].pid;
+                    user_buf[count].ppid = process_table[i].ppid;
+                    user_buf[count].state = process_table[i].state;
+					user_buf[count].uid   = process_table[i].uid;
+                    
+                    // Copiem numele
+                    int j = 0;
+                    while (process_table[i].name[j] && j < 31) {
+                        user_buf[count].name[j] = process_table[i].name[j];
+                        j++;
+                    }
+                    user_buf[count].name[j] = '\0';
+                    
+                    count++;
+                }
+            }
+            
+            regs->rax = count; // Returnăm câte procese am găsit
+            break;
+        }
+        case SYSCALL_SHUTDOWN: {
+            KLOG_INFO("Kernel: Shutdown cerut din User Space...\n");
+            // Trimitem semnalul de oprire ACPI prin porturile standard QEMU/Bochs
+            __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+            __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x0160), "Nd"((uint16_t)0xB004));
+            break;
+        }
+        case SYSCALL_LIST_FILES: {
+            const char* target_path = (const char*)regs->rdi; 
+            fs_list_files(target_path);
+            break;
+        }
+        case SYSCALL_CD: {
+            const char* path = (const char*)regs->rdi;
+            int ok = fs_cd(path);
+            regs->rax = ok;   // 1 = succes, 0 = eroare
+            break;
+        }
+        case SYSCALL_CREATE_FILE: {
+            const char* name = (const char*)regs->rdi;
+            uint32_t size = (uint32_t)regs->rsi;
+            uint16_t mode = (uint16_t)regs->rdx; // Extragem mode din rdx (al 3-lea argument)
+            
+            if (mode == 0) {
+                mode = 0644; // Fallback implicit: rw-r--r--
+            }
+            
+            regs->rax = fs_create_file(name, size, mode); 
+            break;
+        }
+
+        case SYSCALL_WRITE_FILE: {
+            // Presupunem că transmitem: RDI = nume, RSI = pointer date, RDX = dimensiune
+            const char* name = (const char*)regs->rdi;
+            const uint8_t* data = (const uint8_t*)regs->rsi;
+            uint32_t size = (uint32_t)regs->rdx;
+            regs->rax = fs_write_file(name, data, size); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+        case SYSCALL_FORMAT: {
+            fs_format();
+            break;
+        }
+
+        case SYSCALL_DELETE_FILE: {
+            const char* name = (const char*)regs->rdi;
+            regs->rax = fs_delete_file(name); // Returnează 1 la succes, 0 la eșec
+            break;
+        }
+        case SYSCALL_READ_FILE: {
+            const char* name = (const char*)regs->rdi;
+            uint8_t* buffer = (uint8_t*)regs->rsi;
+            uint32_t max_size = (uint32_t)regs->rdx;
+            regs->rax = fs_read_file(name, buffer, max_size); // Returnează numărul de octeți citiți
+            break;
+        }
+        case SYSCALL_MKDIR: {
+            const char* name = (const char*)regs->rdi;
+            uint16_t mode = (uint16_t)regs->rsi; // Extragem mode din rsi (al 2-lea argument)
+            
+            if (mode == 0) {
+                mode = 0755; // Fallback implicit: rwxr-xr-x
+            }
+            
+            regs->rax = fs_mkdir(name, mode); 
+            break;
+        }
+        case SYSCALL_PRINT_INT: {
+            uint64_t val = regs->rdi;
+            print_number(val);
+            //newline();
+            break;
+        }
+
+		case SYSCALL_READ_CHAR: {
+			int c = keyboard_read_char(); // Returnează între 0 și 255
+			regs->rax = (uint64_t)(uint8_t)c; // Forțăm cast-ul ca unsigned pe 8 biți
+			break;
+		}
+		case SYSCALL_HAS_CHAR: {
+			regs->rax = (uint64_t)keyboard_has_data();
+			break;
+		}
+        case SYSCALL_CLEAR_SCREEN: {
+            clear_screen(); // Funcția ta existentă care curăță ecranul VGA în kernel
+            break;
+        }
+		case SYSCALL_PWD: {
+            char* user_buffer = (char*)regs->rdi;
+            uint32_t max_len = (uint32_t)regs->rsi;
+            fs_get_current_path(user_buffer, max_len);
+            break;
+        }
+		case SYSCALL_MEMINFO: {
+			MemInfo* info = (MemInfo*)regs->rdi; // Primul argument e pointerul unde scriem datele
+			if (info) {
+				info->heap_total = get_heap_total();
+				info->heap_used  = get_heap_used();
+				info->heap_free  = get_heap_free();
+				// Poți completa și date despre paginile fizice dacă ai funcțiile create în memory.c
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0; // Eroare pointer
+			}
+			break;
+		}
+		case SYSCALL_GETCWD: {
+			char* user_buf = (char*)regs->rdi;
+			uint32_t max_len = (uint32_t)regs->rsi;
+			
+			if (user_buf && max_len > 0) {
+				fs_get_current_path(user_buf, max_len);
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0;
+			}
+			break;
+		}
+		case SYSCALL_NEWLINE: {
+			newline();
+			//regs->rax = 1;
+			break;
+		}
+		case SYSCALL_SYSLOG: { // 
+			char* user_msg = (char*)regs->rdi;
+			if (user_msg != NULL) {
+				KLOG_INFO(user_msg);
+				
+			}
+			break;
+		}
+		case SYSCALL_GETLOG: { // SYSCALL_GETLOG
+			char* user_dest = (char*)regs->rdi;
+			// Copiezi kernel_log_buffer în adresa cerută de user-space
+			string_copy(user_dest, kernel_log_buffer);
+			break;
+		}
+		case SYSCALL_PRINT_FLOAT: {
+            uint64_t raw_bits = regs->rdi;
+            float val = *(float*)&raw_bits;
+
+            int int_part = (int)val;
+            int frac_part = (int)((val - int_part) * 100);
+            if (frac_part < 0) frac_part = -frac_part;
+
+            print_number(int_part);
+            print(".");
+            if (frac_part < 10) print("0");
+            print_number(frac_part);
+            break;
+        }
+		case SYSCALL_REBOOT:
+			kernel_reboot();
+			break;
+		case SYSCALL_GETPID:
+			// Returnează PID-ul procesului care rulează chiar acum pe CPU
+			regs->rax = current_process ? (uint64_t)current_process->pid : 0;
+			break;
+		case SYSCALL_BEEP: {
+			uint32_t frequency = (uint32_t)regs->rdi;
+			uint32_t duration_ms = (uint32_t)regs->rsi;
+			
+			beep(frequency, duration_ms); // Funcția ta de speaker din kernel
+			
+			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_SET_CURSOR_SHAPE: {
+			int style = (int)regs->rdi;
+			set_cursor_shape(style);
+			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_PLAY_AUDIO: {
+			const uint8_t* user_data = (const uint8_t*)regs->rdi;
+			uint32_t length = (uint32_t)regs->rsi;
+			
+			// Apelează funcția generală din audio.h / ac97
+			play_pcm(user_data, length);
+			
+			regs->rax = 0; // Succes
+			break;
+		}
+		case SYSCALL_MOUNT:
+			// regs->rdi conține primul argument: pointerul către string-ul trimis din user-space (ex: "v3" sau "nan2")
+			fs_switch_driver((const char*)regs->rdi);
+			regs->rax = 1; // Returnează succes
+			break;
+		case SYSCALL_FDISK:
+			fs_fdisk();
+			break;
+		// În funcția de rutare a syscall-urilor din kernel:
+		case SYSCALL_DISK_STATS: {
+			const char* path = (const char*)regs->rdi;
+			DiskStats* stats = (DiskStats*)regs->rsi;
+			
+			if (!path || !stats) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			char local_path[128];
+			FileSystemInterface* target = vfs_route(path, local_path);
+			
+			if (!target || !target->get_stats) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			uint32_t total = 0, free = 0;
+			if (target->get_stats(&total, &free)) {
+				stats->total_sectors = total;
+				stats->free_sectors = free;
+				stats->sector_size = 512;
+				regs->rax = 0; // Succes
+			} else {
+				regs->rax = (uint64_t)-1;
+			}
+			break;
+		}
+		case SYSCALL_VIDEO_INFO: {
+            VideoModeInfo* user_info = (VideoModeInfo*)regs->rdi;
+            if (user_info) {
+                // Preluăm starea curentă din kernel prin funcția ta din video.h
+                VideoModeInfo* kernel_info = video_get_info();
+                if (kernel_info) {
+                    *user_info = *kernel_info; // Copiem structura direct în bufferul trimis de user-space
+                    regs->rax = 1;            // Succes
+                } else {
+                    regs->rax = 0;
+                }
+            } else {
+                regs->rax = 0;
+            }
+            break;
+        }
+		case SYSCALL_SWAP_VIDEO_BUFFERS: {
+			video_swap_buffers();
+			regs->rax = 1;
+			break;
+		}
+		// Iar în interiorul switch-ului de syscall-uri (cazul 42):
+		case SYSCALL_DRAW_FRAME: {
+			uint16_t* user_buffer = (uint16_t*)regs->rdx;
+			
+			if (user_buffer != 0) {
+				int total_cells = term_cols * term_rows;
+				for (int i = 0; i < total_cells; i++) {
+					ttys[active_tty].screen_buffer[i] = user_buffer[i];
+				}
+				gfx_redraw_tty(active_tty);
+			}
+			
+			regs->rax = 1;
+			break;
+		}
+		case SYSCALL_GET_DIR_ENTRIES: {
+			int index = (int)regs->rdi;
+			char* user_buf = (char*)regs->rsi;
+			
+			// Poți folosi KLOG_INFO sau funcția ta de print din kernel
+			//KLOG_INFO("[DEBUG KERNEL] Syscall 43 apelat pentru indexul: %d\n", index);
+
+			int found = fs_get_file_at_index(index, user_buf, 64);
+			
+			if (found) {
+				//KLOG_INFO("[DEBUG KERNEL] -> Gasit fisier: %s\n", user_buf);
+				regs->rax = 1;
+			} else {
+				//KLOG_INFO("[DEBUG KERNEL] -> Nu mai sunt fisiere la indexul \n", index);
+				regs->rax = 0;
+			}
+			break;
+		}
+		case SYSCALL_FORK: {
+			//print("Incer fork!");
+			//sleep_ms(2000);
+			uint32_t child_pid = sys_fork(regs);
+			
+			// În x86-64, valoarea returnată de syscall se pune în rax pentru părinte.
+			// Pentru copil, sys_fork a setat deja explicit rax = 0 în stiva lui privată!
+			regs->rax = (uint64_t)child_pid;
+			break;
+		}
+		case SYSCALL_CREATE_THREAD: {
+            uint64_t entry_point = regs->rdi; // Argumentul 1: adresa funcției
+            void* arg = (void*)regs->rsi;     // Argumentul 2: argumentul transmis funcției
+
+            // Apelăm funcția internă de kernel pe care ai creat-o
+            uint32_t tid = thread_create(entry_point, arg);
+
+            // Returnăm ID-ul thread-ului (TID) în RAX
+            regs->rax = (uint64_t)tid;
+            break;
+        }
+		case SYSCALL_THREAD_EXIT: {
+			__asm__ volatile ("cli");
+			if (current_process) {
+				free_process_allocations(current_process->pid);
+				// 1. În loc de PROC_FREE, îl trecem în PROC_ZOMBIE
+				// Asta permite părinților să găsească thread-ul și să îi citească rezultatul
+				current_process->state = PROC_ZOMBIE;
+				
+				// Salvăm codul de ieșire primit prin RDI (dacă implementezi un exit(code))
+				current_process->exit_code = (int)regs->rdi; 
+
+				// 2. Trezim orice thread care stătea blocat în "join" așteptând acest PID
+				for (int i = 0; i < MAX_PROCESSES; i++) {
+					if (process_table[i].state == PROC_SLEEPING && 
+						process_table[i].waiting_for_tid == current_process->pid) {
+						
+						// Îl facem READY pentru a fi preluat din nou de scheduler
+						process_table[i].state = PROC_READY;
+						process_table[i].waiting_for_tid = 0;
+					}
+				}
+
+				// ATENȚIE: Nu apelăm free() pe stivă aici, deoarece încă rulăm pe ea!
+				// O lăsăm să fie eliberată curat și sigur de către SYSCALL_THREAD_JOIN.
+			}
+			current_process = NULL;
+			__asm__ volatile ("sti");
+
+			// Forțăm schedulerul să preia un alt task
+			while (1) { __asm__ volatile ("hlt"); }
+			break;
+		}
+		case SYSCALL_YIELD: {
+			// Trebuie OBLIGATORIU să reactivăm întreruperile (sti) înainte de (hlt).
+			// Altfel, timer-ul (IRQ0) nu va putea trezi procesorul!
+			__asm__ volatile ("sti; hlt" ::: "memory");
+			break;
+		}
+		case SYSCALL_THREAD_JOIN: {
+			uint32_t target_tid = (uint32_t)regs->rdi;
+			PCB* target = NULL;
+
+			// 1. Căutăm thread-ul în tabelă
+			for (int i = 0; i < MAX_PROCESSES; i++) {
+				if (process_table[i].pid == target_tid && process_table[i].state != PROC_FREE) {
+					target = &process_table[i];
+					break;
+				}
+			}
+
+			// Dacă nu există sau a fost deja eliberat complet, ieșim cu -1
+			if (!target) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			// 2. Dacă thread-ul încă rulează, îi spunem procesului curent să se culce 
+			// și returnăm -2 ca să știe librăria că trebuie să reapeleze syscall-ul mai târziu.
+			if (target->state != PROC_ZOMBIE) {
+				current_process->state = PROC_SLEEPING;
+				current_process->waiting_for_tid = target_tid;
+				
+				regs->rax = (uint64_t)-2; // -2 înseamnă "Încă rulează, try again"
+				break; // IEȘIM imediat din syscall! Fără bucle while în kernel!
+			}
+
+			// 3. În acest punct, target este 100% ZOMBIE. Preluăm codul returnat.
+			regs->rax = (uint64_t)target->exit_code;
+
+			// 4. ELIBERAREA MEMORIEI
+			if (target->stack_base) {
+				free((void*)target->stack_base); 
+				target->stack_base = 0;
+			}
+
+			// 5. Eliberăm definitiv slotul
+			target->state = PROC_FREE;
+			target->pid = 0;
+			target->name[0] = '\0';
+			break;
+		}
+		case SYSCALL_GETUID:
+			uint32_t user_id = get_uid();
+			
+			// În x86-64, valoarea returnată de syscall se pune în rax pentru părinte.
+			// Pentru copil, sys_fork a setat deja explicit rax = 0 în stiva lui privată!
+			regs->rax = (uint64_t)user_id;
+			break;
+		case SYSCALL_SETUID: {
+            uint32_t new_uid = (uint32_t)regs->rdi; // Primim noul UID ca argument în RDI
+            
+            // Reguli de securitate elementare:
+            // Doar root (UID 0) poate schimba liber UID-ul oricui, 
+            // sau un proces își poate schimba propriul UID.
+            if (current_process->uid == 0 || current_process->uid == new_uid) {
+                current_process->uid = new_uid;
+                
+                // Opțional, actualizăm și GID-ul corespunzător (simplificat: GID = UID)
+                current_process->gid = new_uid; 
+                
+                regs->rax = 0; // Succes
+            } else {
+                regs->rax = (uint64_t)-1; // Eroare de permisiune (EPERM)
+            }
+            break;
+        }
+		case SYSCALL_NET_SEND: {
+			KLOG_INFO("[SYSCALL] Primit SYSCALL_NET_SEND (Ping)\n");
+			
+			uint32_t dest_ip = (uint32_t)regs->rdi;
+
+			// Switch to the kernel page tables before accessing the NIC's MMIO registers.
+			uint64_t old_cr3;
+			__asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+
+			__asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+			net_send_ping(dest_ip);
+
+			__asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+			
+			regs->rax = 0;
+			break;
+		}
+		case SYSCALL_NET_RECV: {
+			uint8_t* user_dest = (uint8_t*)regs->rdi;
+            uint32_t max_len = (uint32_t)regs->rsi;
+
+            // ADAUGĂ 'static' AICI PENTRU A EVITA STACK OVERFLOW!
+            static uint8_t temp_buf[2048]; 
+            
+            uint64_t old_cr3;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3));
+            __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_cr3));
+
+            int len = net_dequeue_packet(temp_buf, max_len);
+
+            __asm__ volatile("mov %0, %%cr3" :: "r"(old_cr3));
+
+			if (len > 0) {
+				// Copiem pachetul în siguranță în bufferul user-space
+				for (int i = 0; i < len; i++) {
+					user_dest[i] = temp_buf[i];
+				}
+				regs->rax = (uint64_t)len;
+			} else {
+				regs->rax = 0; // Nimic primit încă
+			}
+			break;
+		}
+		case SYSCALL_SOCKET: {
+            // RDI = domain, RSI = type, RDX = protocol
+            int domain = (int)regs->rdi;
+            int type = (int)regs->rsi;
+            
+            // Alocăm un socket în tabela de kernel și returnăm descriptorul (fd)
+            int fd = kernel_create_socket(domain, type);
+            regs->rax = (uint64_t)fd;
+            break;
+        }
+
+        case SYSCALL_BIND: {
+            int fd = (int)regs->rdi;
+            uint16_t port = (uint16_t)regs->rsi;
+            
+            int res = kernel_socket_bind(fd, port);
+            regs->rax = (uint64_t)res;
+            break;
+        }
+
+        case SYSCALL_LISTEN: {
+            int fd = (int)regs->rdi;
+            int backlog = (int)regs->rsi;
+            
+            int res = kernel_socket_listen(fd, backlog);
+            regs->rax = (uint64_t)res;
+            break;
+        }
+
+        case SYSCALL_ACCEPT: {
+            int server_fd = (int)regs->rdi;
+            
+            // Această funcție blochează procesul curent (îl pune în PROC_SLEEPING) 
+            // până când uIP acceptă o conexiune nouă pe acel port.
+            int client_fd = kernel_socket_accept(server_fd, current_process);
+            if (client_fd < 0) {
+                // Dacă încă nu e gata, oprim temporar sau lăsăm procesul să astepte
+                regs->rax = (uint64_t)-1;
+            } else {
+                regs->rax = (uint64_t)client_fd;
+            }
+            break;
+        }
+
+        case SYSCALL_SEND: {
+            int fd = (int)regs->rdi;
+            const char* buf = (const char*)regs->rsi;
+            uint32_t len = (uint32_t)regs->rdx;
+
+            int sent = kernel_socket_send(fd, buf, len);
+            regs->rax = (uint64_t)sent;
+            break;
+        }
+
+        case SYSCALL_RECV: {
+            int fd = (int)regs->rdi;
+            char* buf = (char*)regs->rsi;
+            uint32_t max_len = (uint32_t)regs->rdx;
+
+            int received = kernel_socket_recv(fd, buf, max_len);
+            regs->rax = (uint64_t)received;
+            break;
+        }
+		case SYSCALL_CLOSE: {
+            int fd = (int)regs->rdi;
+            regs->rax = (uint64_t)kernel_socket_close(fd);
+            break;
+        }
+		case SYSCALL_TTY_INJECT: {
+            int tty_id = (int)regs->rdi;
+            char c = (char)regs->rsi;
+            
+            if (tty_id >= 0 && tty_id < MAX_TTYS) {
+                TTY* t = &ttys[tty_id];
+                uint8_t next = (t->keyboard_queue_write + 1) % 256;
+                if (next != t->keyboard_queue_read) {
+                    t->keyboard_queue[t->keyboard_queue_write] = (uint8_t)c;
+                    t->keyboard_queue_write = next;
+                    regs->rax = 1; // Succes
+                } else {
+                    regs->rax = 0; // Coada este plină
+                }
+            } else {
+                regs->rax = 0; // TTY ID invalid
+            }
+            break;
+        }
+		case SYSCALL_SET_TTY: {
+            int tty_id = (int)regs->rdi;
+            
+            if (current_process && tty_id >= 0 && tty_id < MAX_TTYS) {
+                current_process->tty_id = tty_id;
+                regs->rax = 1; // Succes
+            } else {
+                regs->rax = 0; // Eroare
+            }
+            break;
+        }
+		case SYSCALL_READ_TTY_OUTPUT: {
+            int tty_id = (int)regs->rdi;
+            char* user_buf = (char*)regs->rsi;
+            uint32_t max_len = (uint32_t)regs->rdx;
+            
+            if (tty_id < 0 || tty_id >= MAX_TTYS) {
+                regs->rax = 0;
+                break;
+            }
+            
+            TTY* t = &ttys[tty_id];
+            uint32_t copied = 0;
+            
+            while (t->output_queue_read != t->output_queue_write && copied < max_len - 1) {
+                user_buf[copied++] = (char)t->output_queue[t->output_queue_read];
+                t->output_queue_read = (t->output_queue_read + 1) % sizeof(t->output_queue);
+            }
+            user_buf[copied] = '\0';
+            regs->rax = copied;
+            break;
+        }
+		
+		case SYSCALL_SET_STDOUT: {
+			const char* path = (const char*)regs->rdi;
+			
+			if (current_process != 0) {
+				if (path == 0 || path[0] == '\0') {
+					// Resetăm la TTY normal
+					current_process->has_stdout_redirect = 0;
+					current_process->stdout_file[0] = '\0';
+				} else {
+					// Activăm redirecționarea către fișierul dat
+					current_process->has_stdout_redirect = 1;
+					int i = 0;
+					while (path[i] != '\0' && i < 63) {
+						current_process->stdout_file[i] = path[i];
+						i++;
+					}
+					current_process->stdout_file[i] = '\0';
+				}
+				regs->rax = 1; // Succes
+			} else {
+				regs->rax = 0; // Eroare (fără context de proces)
+			}
+			break;
+		}
+		case SYSCALL_GFX_PRESENT: {
+			int x = (int)regs->rdi;
+			int y = (int)regs->rsi;
+			int w = (int)regs->rdx;
+			int h = (int)regs->rcx;
+			uint32_t* user_pixels = (uint32_t*)regs->r8;
+
+			// Aflăm pe ce TTY rulează procesul curent!
+			int tty_id = (current_process != 0) ? current_process->tty_id : active_tty;
+			
+			// Dacă procesul nu aparține de TTY-ul activ curent, poate nu vrem să desenăm pe ecran acum, 
+			// sau desenăm oricum în backbuffer-ul global.
+			VideoModeInfo* mode = video_get_info();
+			if (!mode || !mode->back_buffer) {
+				regs->rax = 0;
+				break;
+			}
+
+			uint32_t pitch_pixels = mode->pitch / 4;
+
+			for (int row = 0; row < h; row++) {
+				int target_y = y + row;
+				if (target_y < 0 || target_y >= (int)mode->height) continue;
+
+				int copy_w = w;
+				int start_x = x;
+				int src_offset = 0;
+
+				if (start_x < 0) {
+					src_offset = -start_x;
+					copy_w += start_x;
+					start_x = 0;
+				}
+				if (start_x + copy_w > (int)mode->width) {
+					copy_w = (int)mode->width - start_x;
+				}
+				if (copy_w <= 0) continue;
+
+				uint32_t* dest_row = &mode->back_buffer[(target_y * pitch_pixels) + start_x];
+				uint32_t* src_row  = &user_pixels[(row * w) + src_offset];
+
+				memcpy(dest_row, src_row, copy_w * 4);
+				//video_swap_buffers();
+			}
+
+			// Facem swap doar dacă procesul este pe TTY-ul activ curent!
+			if (tty_id == active_tty) {
+				video_swap_buffers();
+			}
+			
+			regs->rax = 1;
+			break;
+		}
+		case SYSCALL_DESKTOP_MODE: {
+			int mode = (int)regs->rdi; // Preluăm argumentul din RDI
+			desktop_mode = mode;       // Setăm starea (0 sau 1)
+			
+			if (desktop_mode) {
+				KLOG_INFO("Trec in desktop mode (GUI activ)\n");
+			} else {
+				KLOG_INFO("Reviz la mod text TTY\n");
+			}
+			
+			regs->rax = 0; // Returnăm succes
+			break;
+		}
+		case SYSCALL_GET_TTY_BUFFER: {
+			int tty_id = (int)regs->rdi;
+			uint16_t* user_buffer = (uint16_t*)regs->rsi;
+			
+			if (tty_id >= 0 && tty_id < MAX_TTYS && user_buffer != 0) {
+				// Copiem memoria TTY-ului direct în aplicația utilizator!
+				memcpy(user_buffer, ttys[tty_id].screen_buffer, term_cols * term_rows * 2);
+				regs->rax = 1;
+			} else {
+				regs->rax = 0;
+			}
+			break;
+		}
+		/*
+		case SYSCALL_GET_MOUSE_STATE: {
+			// În arhitectura x86_64, primul argument (pointerul) vine în RDI
+			MouseState* user_state = (MouseState*)regs->rdi;
+			
+			if (user_state != 0) {
+				// Preluăm datele globale din mouse.c
+				extern int mouse_x;
+				extern int mouse_y;
+				extern uint8_t mouse_buttons;
+				
+				// Scriem direct în memoria aplicației din User-Space!
+				user_state->x = mouse_x;
+				user_state->y = mouse_y;
+				user_state->buttons = mouse_buttons;
+				
+				regs->rax = 1; // Returnăm 1 pentru succes
+			} else {
+				regs->rax = 0; // Eroare, pointer invalid
+			}
+			break;
+		}
+		*/
+		case SYSCALL_GET_MOUSE_STATE: {
+			// În arhitectura x86_64, primul argument (pointerul) vine în RDI
+			MouseState* user_state = (MouseState*)regs->rdi;
+			
+			if (user_state != 0) {
+				// Apelăm funcția dedicată care conține și printul tău de debug!
+				mouse_get_state(user_state);
+				
+				regs->rax = 1; // Returnăm 1 pentru succes
+			} else {
+				regs->rax = 0; // Eroare, pointer invalid
+			}
+			break;
+		}
+		case SYSCALL_GET_KEY_EVENT: {
+            // RDI va conține un pointer (din Ring 3) către o structură unde să copiem evenimentul
+            key_event_t* user_event = (key_event_t*)regs->rdi;
+            
+            key_event_t temp_event;
+            if (kbd_pop_event(&temp_event)) {
+                // Copiem datele în User-Space
+                user_event->scancode = temp_event.scancode;
+                user_event->pressed = temp_event.pressed;
+                regs->rax = 1; // Succes, avem un eveniment
+            } else {
+                regs->rax = 0; // Nimic apăsat, buffer gol
+            }
+            break;
+        }
+		case SYSCALL_GET_TICKS: { // Alege un număr liber, ex: 22
+            extern volatile uint32_t timer_ticks;
+            regs->rax = timer_ticks;
+            break;
+        }
+		case SYSCALL_GET_USERNAME: {
+            uint32_t uid = (uint32_t)regs->rdi;
+            char* user_buf = (char*)regs->rsi;
+            size_t buf_size = (size_t)regs->rdx;
+
+            if (!user_buf || buf_size == 0) {
+                regs->rax = (uint64_t)-1; // Pointer invalid
+                break;
+            }
+
+            int found = 0;
+            // Căutăm UID-ul în user_database încărcat la boot în Ring 0
+            for (int i = 0; i < user_count; i++) {
+                if (user_database[i].uid == uid) {
+                    size_t len = 0;
+                    while (user_database[i].username[len] != '\0' && len < buf_size - 1) {
+                        user_buf[len] = user_database[i].username[len];
+                        len++;
+                    }
+                    user_buf[len] = '\0';
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (found) {
+                regs->rax = 0; // Succes
+            } else {
+                // Dacă UID-ul nu este găsit în config, punem "unknown"
+                const char* fallback = "unknown";
+                size_t len = 0;
+                while (fallback[len] != '\0' && len < buf_size - 1) {
+                    user_buf[len] = fallback[len];
+                    len++;
+                }
+                user_buf[len] = '\0';
+                regs->rax = (uint64_t)-1; // Indicăm că nu a fost găsit
+            }
+            break;
+        }
+		case SYSCALL_GET_USER_INFO: {
+			const char* uname_input = (const char*)regs->rdi;
+			uint32_t* out_uid = (uint32_t*)regs->rsi;
+			char* out_home = (char*)regs->rdx;
+
+			if (!uname_input || !out_uid) {
+				regs->rax = (uint64_t)-1;
+				break;
+			}
+
+			int found = 0;
+			// Căutăm direct în tabela din Ring 0 încărcată la boot
+			for (int i = 0; i < user_count; i++) {
+				if (string_compare(user_database[i].username, uname_input) == 0) {
+					*out_uid = user_database[i].uid;
+					
+					if (out_home) {
+						string_copy(out_home, user_database[i].home_dir);
+					}
+					found = 1;
+					break;
+				}
+			}
+
+			regs->rax = found ? 0 : (uint64_t)-1;
+			break;
+		}
+		case SYSCALL_CHMOD: {
+            const char* path = (const char*)regs->rdi;
+            uint16_t mode = (uint16_t)regs->rsi;
+            regs->rax = fs_chmod(path, mode);
+            break;
+        }
+
+        case SYSCALL_CHOWN: {
+            const char* path = (const char*)regs->rdi;
+            uint32_t uid = (uint32_t)regs->rsi;
+            uint32_t gid = (uint32_t)regs->rdx;
+            regs->rax = fs_chown(path, uid, gid);
+            break;
+        }
+		default: {
+			char log_msg[128];
+			snprintf(log_msg, sizeof(log_msg), "Syscall necunoscut: RAX=%x, RDI=%p", regs->rax, (void*)regs->rdi);
+			KLOG_WARNING(log_msg);
+            break;
+        }
+    }
+	
+	// 2. Reactivăm întreruperile la ieșire
+    __asm__ volatile("sti");
+}

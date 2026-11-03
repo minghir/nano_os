@@ -1,0 +1,195 @@
+
+
+#include "memory.h"
+#include "io.h"
+#include "syslog.h"
+
+#define HEAP_START 0x01000000 // Începem Heap-ul de la 16 MB (foarte sigur)
+#define HEAP_SIZE  (16 * 1024 * 1024) // Dimensiune 16 MB (deci se termină la 32 MB)
+
+// Antetul fiecărui bloc de memorie din heap
+typedef struct BlockHeader {
+    size_t size;               // Dimensiunea payload-ului (fără antet)
+    int is_free;               // 1 = liber, 0 = ocupat
+    uint32_t owner_pid;        // Procesul care a alocat blocul; 0 pentru kernel
+    struct BlockHeader* next;  // Pointer către următorul bloc din listă
+} BlockHeader;
+
+static uint8_t* heap_start_ptr = (uint8_t*)HEAP_START;
+static uint8_t* heap_end = (uint8_t*)(HEAP_START + HEAP_SIZE);
+static BlockHeader* free_list = 0; // Începutul listei de blocuri
+
+
+// Alocator de pagini fizice (începe exact DUPĂ heap)
+static uint64_t next_free_physical_page = 0x02000000; // Începe de la 32 MB
+
+void memory_init() {
+    free_list = (BlockHeader*)HEAP_START;
+    free_list->size = HEAP_SIZE - sizeof(BlockHeader);
+    free_list->is_free = 1;
+    free_list->owner_pid = 0;
+    free_list->next = 0;
+
+    KLOG_INFO("Advanced Heap Manager initialized. Start: 0x01000000, Size: 16MB\n");
+}
+
+static void* allocate(size_t size, uint32_t owner_pid) {
+    if (size == 0) return 0;
+
+    // Aliniem dimensiunea la multipli de 8 octeți
+    size = (size + 7) & ~7;
+
+    BlockHeader* current = free_list;
+
+    // Căutăm primul bloc liber suficient de mare (First-Fit)
+    while (current != 0) {
+        if (current->is_free && current->size >= size) {
+            // Verificăm dacă putem împărți blocul în două (dacă rămâne loc și pentru un antet nou)
+            if (current->size >= size + sizeof(BlockHeader) + 8) {
+                BlockHeader* next_block = (BlockHeader*)((uint8_t*)(current + 1) + size);
+                
+                next_block->size = current->size - size - sizeof(BlockHeader);
+                next_block->is_free = 1;
+                next_block->owner_pid = 0;
+                next_block->next = current->next;
+
+                current->size = size;
+                current->next = next_block;
+            }
+
+            current->is_free = 0;
+            current->owner_pid = owner_pid;
+            // Returnăm adresa de după antet (payload-ul)
+            return (void*)(current + 1);
+        }
+        current = current->next;
+    }
+
+    // Out of memory în heap
+    return 0;
+}
+
+void* malloc(size_t size) {
+    return allocate(size, 0);
+}
+
+void* malloc_for_process(size_t size, uint32_t pid) {
+    return pid ? allocate(size, pid) : malloc(size);
+}
+
+static void coalesce_free_blocks(void) {
+    BlockHeader* current = free_list;
+    while (current != 0 && current->next != 0) {
+        if (current->is_free && current->next->is_free) {
+            current->size += sizeof(BlockHeader) + current->next->size;
+            current->next = current->next->next;
+        } else {
+            current = current->next;
+        }
+    }
+}
+
+void free(void* ptr) {
+    if (!ptr) return;
+
+    // Obținem antetul blocului situat exact cu un struct BlockHeader înaintea datelor
+    BlockHeader* header = (BlockHeader*)ptr - 1;
+    header->is_free = 1;
+    header->owner_pid = 0;
+    coalesce_free_blocks();
+}
+
+void free_process_allocations(uint32_t pid) {
+    if (pid == 0) return;
+
+    for (BlockHeader* current = free_list; current != 0; current = current->next) {
+        if (!current->is_free && current->owner_pid == pid) {
+            current->is_free = 1;
+            current->owner_pid = 0;
+        }
+    }
+
+    coalesce_free_blocks();
+}
+
+// Funcții pentru statistici
+size_t get_heap_total() {
+    return HEAP_SIZE;
+}
+
+size_t get_heap_used() {
+    size_t used = 0;
+    BlockHeader* current = free_list;
+    while (current != 0) {
+        if (!current->is_free) {
+            used += current->size + sizeof(BlockHeader);
+        }
+        current = current->next;
+    }
+    return used;
+}
+
+size_t get_heap_free() {
+    return HEAP_SIZE - get_heap_used();
+}
+
+// Pointer către vârful stivei de pagini fizice libere
+static void* free_pages_head = 0;
+
+// 1. Funcția îmbunătățită de alocare a unei pagini fizice
+void* alloc_page() {
+    void* page_addr = 0;
+
+    // A. Dacă avem pagini eliberate anterior, le refolosim cu prioritate!
+    if (free_pages_head != 0) {
+        page_addr = free_pages_head;
+        
+        // Următoarea pagină liberă din stivă devine noul "head"
+        // Citim pointerul salvat în primii 8 octeți ai paginii curente
+        free_pages_head = *(void**)free_pages_head;
+    } 
+    else {
+        // B. Dacă stiva e goală, luăm o pagină nouă din zona liniară (bump allocator)
+        // Punem o frână de siguranță la 32MB sau 128MB (în funcție de RAM-ul tău)
+        if (next_free_physical_page >= 0x08000000) { 
+            KLOG_FATAL("FATAL KERNEL PANIC: Out of physical memory (RAM)!\n");
+            while(1) __asm__ volatile("cli; hlt");
+        }
+
+        page_addr = (void*)next_free_physical_page;
+        next_free_physical_page += 4096;
+    }
+
+    // Curățăm complet pagina cu zero înainte de a o returna
+    uint8_t* ptr = (uint8_t*)page_addr;
+    for (int i = 0; i < 4096; i++) {
+        ptr[i] = 0;
+    }
+
+    return page_addr;
+}
+
+// 2. Noua funcție de eliberare a unei pagini fizice
+void free_page(void* ptr) {
+    if (!ptr) return;
+
+    // Verificăm dacă adresa este aliniată la 4096 octeți (securitate)
+    uint64_t addr = (uint64_t)ptr;
+    if (addr & 0xFFF) {
+        KLOG_WARNING("KERNEL WARNING: Tried to free unaligned physical page!\n");
+        return;
+    }
+
+    // Opțional: Curățăm datele vechi din pagină din motive de securitate/curățenie
+    uint8_t* byte_ptr = (uint8_t*)ptr;
+    for (int i = 0; i < 4096; i++) {
+        byte_ptr[i] = 0;
+    }
+
+    // Adăugăm pagina în stiva de pagini libere (LIFO)
+    // În primii 8 octeți ai paginii eliberate, salvăm adresa vechiului head
+    *(void**)ptr = free_pages_head;
+    
+    // Noul head devine pagina curentă pe care o eliberăm
+    free_pages_head = ptr;
+}

@@ -46,7 +46,7 @@ void* fopen(const char* path, const char* mode) {
 
     int bytes = nano_read_file(path, data, (uint32_t)max_size);
     if (bytes <= 0 && is_doom1_wad_name(path)) {
-        bytes = nano_read_file("/hdb/DOOM1.WAD", data, (uint32_t)max_size);
+        bytes = nano_read_file("/hda/data/wad/DOOM1.WAD", data, (uint32_t)max_size);
     }
     if (bytes <= 0) {
         nano_free(data);

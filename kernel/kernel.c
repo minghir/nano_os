@@ -322,8 +322,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
     KLOG_INFO("KERNEL:fs_init() started\n");
   
   
-    fs_create_file("/kernel.log", KERNEL_LOG_SIZE, 0644);
-    KLOG_INFO("KERNEL:Log file created\n");
+    //fs_create_file("/kernel.log", KERNEL_LOG_SIZE, 0644);
+    //KLOG_INFO("KERNEL:Log file created\n");
 
     load_kernel_environment();
     KLOG_INFO("KERNEL:Enviroment loaded.\n");

@@ -421,7 +421,7 @@ int ext2_add_dir_entry(uint32_t dir_inode_num, const char* name, uint32_t inode_
 }
 
 // --- Implementarea funcțiilor pentru FileSystemInterface ---
-
+/*
 void ext2_init(void) {
     // Superblock-ul EXT2 se află MEREU fix la octetul 1024 de la începutul partiției.
     // Un sector are 512 bytes, deci Superblock-ul începe în LBA 2 și se termină în LBA 3.
@@ -438,6 +438,33 @@ void ext2_init(void) {
         //KLOG_INFO("[EXT2] Superblock valid! Sistem de fisiere gata.\n");
     } else {
         KLOG_ERROR("[EXT2] EROARE: Magic number invalid! Acest disc nu este formatat EXT2.\n");
+    }
+}
+*/
+void ext2_init(void) {
+    uint8_t buf[1024]; 
+    // Citim LBA 2 și LBA 3 (exact octetul 1024 de pe disc)
+    disk_read_sector_drive(current_drive_id, 2, buf);
+    disk_read_sector_drive(current_drive_id, 3, buf + 512);
+
+    // Copiem în structură
+    char* dst = (char*)&ext2_superblock;
+    for (uint32_t i = 0; i < sizeof(ext2_superblock_t); i++) {
+        dst[i] = buf[i];
+    }
+
+    // VERIFICARE DIRECTĂ DIN BUFFER (Ocolește orice aliniere ciudată de structură C)
+    // În EXT2, s_magic se află la offset-ul 56 (0x38) sau poți verifica prin structură:
+    uint16_t* magic_ptr = (uint16_t*)(buf + 56); // Offset-ul standard pentru s_magic în ext2 superblock
+
+    if (ext2_superblock.s_magic == EXT2_SUPER_MAGIC || *magic_ptr == 0xEF53) {
+        KLOG_INFO("[EXT2] Superblock valid! Sistem de fisiere gata.\n");
+    } else {
+        // Afișăm valoarea citită ca să vedem ce vine de pe disc
+        char err_msg[64];
+        // (Dacă ai o funcție de afișare hex/număr, poți folosi-o aici)
+        KLOG_ERROR("[EXT2] EROARE: Magic number invalid! Citit pe disc:\n");
+        print_number(*magic_ptr); // Să vedem ce număr găsește acolo
     }
 }
 
