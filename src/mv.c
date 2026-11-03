@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
     }
 
     // 2. Creăm fișierul destinație
-    if (!nano_create_file(dst, bytes_read)) {
+    if (!nano_create_file(dst, bytes_read,0644)) {
         nano_print("mv: nu s-a putut crea destinația\n");
         return 1;
     }

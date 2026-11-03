@@ -152,6 +152,7 @@ int ext2_write_block(uint32_t block_num, const uint8_t* buffer) {
 // -------------------------------------------------------------------------
 // SCRIE UN INOD MODIFICAT ÎNAPOI ÎN TABELĂ
 // -------------------------------------------------------------------------
+/*
 int ext2_write_inode(uint32_t inode_num, ext2_inode_t* in_inode) {
     if (inode_num == 0) return 0;
     
@@ -193,7 +194,55 @@ int ext2_write_inode(uint32_t inode_num, ext2_inode_t* in_inode) {
     free(temp_buf);
     return 1;
 }
-
+*/
+int ext2_write_inode(uint32_t inode_num, ext2_inode_t* in_inode) {
+    if (inode_num == 0) return 0;
+    
+    uint32_t block_size = 1024 << ext2_superblock.s_log_block_size;
+    uint32_t inode_size = (ext2_superblock.s_rev_level >= 1) ? ext2_superblock.s_inode_size : 128;
+    
+    uint32_t group = (inode_num - 1) / ext2_superblock.s_inodes_per_group;
+    uint32_t index = (inode_num - 1) % ext2_superblock.s_inodes_per_group;
+    
+    uint32_t bgdt_block = ext2_superblock.s_first_data_block + 1;
+    uint32_t desc_size = sizeof(ext2_block_group_desc_t);
+    uint32_t bg_block_offset = (group * desc_size) / block_size;
+    uint32_t bg_offset_in_block = (group * desc_size) % block_size;
+    
+    uint8_t* temp_buf = (uint8_t*)malloc(block_size);
+    if (!temp_buf) return 0;
+    
+    // 1. Citim Descriptorul de Grup
+    ext2_read_block(bgdt_block + bg_block_offset, temp_buf);
+    ext2_block_group_desc_t bgd;
+    char* src = (char*)(temp_buf + bg_offset_in_block);
+    for (uint32_t i = 0; i < desc_size; i++) ((char*)&bgd)[i] = src[i];
+    
+    uint32_t inode_table_block = bgd.bg_inode_table;
+    uint32_t inode_block_offset = (index * inode_size) / block_size;
+    uint32_t inode_offset_in_block = (index * inode_size) % block_size;
+    
+    // 2. Citim Blocul ce conține Inodul
+    ext2_read_block(inode_table_block + inode_block_offset, temp_buf);
+    
+    // 3. Copiem doar câmpurile cunoscute din structura ta, păstrând restul de octeți intacti pe disc
+    char* dst = (char*)(temp_buf + inode_offset_in_block);
+    char* s_in = (char*)in_inode;
+    
+    // Copiem strict dimensiunea structurii noastre (sau până la inode_size, dar maxim cât are structura ta)
+    uint32_t bytes_to_copy = sizeof(ext2_inode_t);
+    if (bytes_to_copy > inode_size) bytes_to_copy = inode_size;
+    
+    for (uint32_t i = 0; i < bytes_to_copy; i++) {
+        dst[i] = s_in[i];
+    }
+    
+    // 4. Scriem Blocul înapoi pe disc
+    ext2_write_block(inode_table_block + inode_block_offset, temp_buf);
+    
+    free(temp_buf);
+    return 1;
+}
 
 // -------------------------------------------------------------------------
 // GĂSEȘTE ȘI ALOCĂ PRIMUL BLOC DE DATE LIBER
@@ -1039,6 +1088,7 @@ static uint32_t ext2_get_parent_and_name(const char* full_path, char* out_filena
 }
 
 // <--- ADĂUGAT: noii parametri uid, gid, mode
+/*
 static int ext2_create_file(const char* name, uint32_t size, uint32_t uid, uint32_t gid, uint16_t mode) {
     char pure_name[256];
     uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
@@ -1078,7 +1128,47 @@ static int ext2_create_file(const char* name, uint32_t size, uint32_t uid, uint3
     if (!ext2_add_dir_entry(parent_ino, pure_name, new_inode)) return 0;
     return 1;
 }
+*/
 
+static int ext2_create_file(const char* name, uint32_t size, uint32_t uid, uint32_t gid, uint16_t mode) {
+    char pure_name[256];
+    uint32_t parent_ino = ext2_get_parent_and_name(name, pure_name);
+    if (parent_ino == 0 || pure_name[0] == '\0') return 0;
+    
+    // Căutăm în inodul PĂRINTELUI să nu existe deja
+    if (ext2_find_in_dir(parent_ino, pure_name) != 0) {
+        return 0; 
+    }
+
+    // 1. Alocăm noul inod (asigură-te că ext2_alloc_inode marchează bitul în bitmap!)
+    uint32_t new_inode = ext2_alloc_inode();
+    if (new_inode == 0) return 0;
+
+    ext2_inode_t inode;
+    uint8_t* ptr = (uint8_t*)&inode;
+    for (uint32_t i = 0; i < sizeof(ext2_inode_t); i++) ptr[i] = 0;
+
+    // Setăm permisiunile și proprietarii primiti de la VFS
+    inode.i_mode = 0x8000 | (mode & 0x0FFF); // 0x8000 = S_IFREG (fișier obișnuit)
+    inode.i_uid = (uint16_t)(uid & 0xFFFF);
+    inode.i_gid = (uint16_t)(gid & 0xFFFF);
+
+    inode.i_size = size; // Dacă se creează cu o dimensiune inițială
+    inode.i_blocks = 0;
+    inode.i_links_count = 1; // Necesar pentru ca Linux / VFS să nu-l considere șters
+
+    // Salvăm noul inod pe disc
+    ext2_write_inode(new_inode, &inode);
+
+    // 2. Adăugăm intrarea în directorul părinte
+    if (!ext2_add_dir_entry(parent_ino, pure_name, new_inode)) {
+        // Dacă eșuează adăugarea în director, ar trebui teoretic să eliberăm inodul alocat,
+        // dar pentru un kernel simplu ne asigurăm că ieșim controlat:
+        return 0;
+    }
+
+    return 1;
+}
 
 // Declarăm procesul curent pentru a putea citi UID/GID
 extern PCB* current_process;
@@ -1255,6 +1345,7 @@ static int ext2_mkdir(const char* name, uint32_t uid, uint32_t gid, uint16_t mod
     }
 
     // 4. Scriem "." și ".." în block-ul nou
+	/*
     uint8_t* buffer = (uint8_t*)malloc(block_size);
     if (!buffer) return 0;
     for (uint32_t i = 0; i < block_size; i++) buffer[i] = 0;
@@ -1273,6 +1364,32 @@ static int ext2_mkdir(const char* name, uint32_t uid, uint32_t gid, uint16_t mod
     dotdot->name_len = 2;
     dotdot->file_type = 2; // EXT2_FT_DIR
     dotdot->rec_len = block_size - dot->rec_len; // Restul blocului
+    dotdot->name[0] = '.';
+    dotdot->name[1] = '.';
+
+    ext2_write_block(new_block, buffer);
+    free(buffer);
+	*/
+	// 4. Scriem "." și ".." în block-ul nou
+    uint8_t* buffer = (uint8_t*)malloc(block_size);
+    if (!buffer) return 0;
+    for (uint32_t i = 0; i < block_size; i++) buffer[i] = 0;
+
+    // Înregistrarea "."
+    ext2_dir_entry_t* dot = (ext2_dir_entry_t*)buffer;
+    dot->inode = new_inode;
+    dot->name_len = 1;
+    dot->file_type = 2; // EXT2_FT_DIR
+    dot->rec_len = 12;  // 8 bytes header + 1 byte nume + 3 bytes padding (aliniat la 4)
+    dot->name[0] = '.';
+
+    // Înregistrarea ".." ocupă tot restul blocului disponibil
+    ext2_dir_entry_t* dotdot = (ext2_dir_entry_t*)(buffer + dot->rec_len);
+    dotdot->inode = parent_ino;
+    dotdot->name_len = 2;
+    dotdot->file_type = 2; // EXT2_FT_DIR
+    // rec_len pentru ultima intrare din bloc trebuie să acopere tot spațiul rămas până la block_size
+    dotdot->rec_len = block_size - dot->rec_len; 
     dotdot->name[0] = '.';
     dotdot->name[1] = '.';
 

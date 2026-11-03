@@ -63,7 +63,7 @@ typedef struct {
     uint32_t i_generation;  // File version (NFS)
     uint32_t i_file_acl;    // File ACL
     uint32_t i_dir_acl;     // Directory ACL
-    uint32_t i_fader;       // Fragment address
+    uint32_t i_faddr;       // Fragment address
     uint8_t  osd2[12];      // OS dependent 2
 } __attribute__((packed)) ext2_inode_t;
 

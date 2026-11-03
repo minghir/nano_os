@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
     src_buffer[bytes_read] = '\0';
 
     // 2. Creăm fișierul de asamblor de ieșire (.s)
-    nano_create_file(out_file, 0);
+    nano_create_file(out_file, 0, 0644);
 
     // Buffer în care vom construi tot conținutul fișierului .s
     char asm_out[4096];

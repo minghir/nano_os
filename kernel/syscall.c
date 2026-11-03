@@ -675,16 +675,16 @@ void syscall_handler(SyscallRegisters* regs) {
             break;
         }
         case SYSCALL_MKDIR: {
-            const char* name = (const char*)regs->rdi;
-            uint16_t mode = (uint16_t)regs->rsi; // Extragem mode din rsi (al 2-lea argument)
-            
-            if (mode == 0) {
-                mode = 0755; // Fallback implicit: rwxr-xr-x
-            }
-            
-            regs->rax = fs_mkdir(name, mode); 
-            break;
-        }
+			const char* name = (const char*)regs->rdi;
+			uint16_t mode = (uint16_t)regs->rsi;
+			
+			if (mode == 0 || mode > 0777) {
+				mode = 0755; // Fallback de siguranță
+			}
+			
+			regs->rax = fs_mkdir(name, mode); 
+			break;
+		}
         case SYSCALL_PRINT_INT: {
             uint64_t val = regs->rdi;
             print_number(val);

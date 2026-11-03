@@ -95,7 +95,7 @@ static inline FILE* fopen(const char* path, const char* mode) {
     f->offset = 0;
     f->is_open = 1;
     if (mode && mode[0] == 'w') {
-        nano_create_file(path, 0);
+        nano_create_file(path, 0, 0644);
         f->size = 0;
     }
     return f;

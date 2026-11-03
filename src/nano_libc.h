@@ -248,12 +248,12 @@ static inline void nano_ls(const char* path) {
     );
 }
 
-static inline int nano_create_file(const char* name, uint32_t size) {
+static inline int nano_create_file(const char* name, uint32_t size, uint16_t mode) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)10), "D" ((uint64_t)name), "S" ((uint64_t)size)
+        : "a" ((uint64_t)SYSCALL_CREATE_FILE), "D" ((uint64_t)name), "S" ((uint64_t)size), "d" ((uint64_t)mode)
         : "cc", "memory"
     );
     return (int)ret;
@@ -323,12 +323,12 @@ static inline uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffe
 
 
 
-static inline int nano_mkdir(const char* name) {
+static inline int nano_mkdir(const char* name, uint16_t mode) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)15), "D" ((uint64_t)name)
+        : "a" ((uint64_t)SYSCALL_MKDIR), "D" ((uint64_t)name), "S" ((uint64_t)mode)
         : "cc", "memory"
     );
     return (int)ret;

@@ -312,7 +312,7 @@ void editor_save_file() {
     }
     disk_buffer[offset] = '\0';
     
-    nano_create_file(E.filename, 1024);
+    nano_create_file(E.filename, 0,0644);
 
     if (nano_write_file(E.filename, (uint8_t*)disk_buffer, offset) > 0) {
         E.modified = 0; 
