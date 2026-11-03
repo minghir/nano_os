@@ -4,8 +4,12 @@ set -e
 IMAGE="hda_ext2.img"
 MOUNT_DIR="./mnt_hda"
 #ROOTFS_DIR="./tmp/rootfs"
-ROOTFS_DIR="/home/minghir/nano_os/tmp/rootfs"
+ROOTFS_DIR="./rootfs"
 SIZE="50M"
+
+echo "[+] Compilare init..."
+make -C src init.bin
+install -m 755 src/init.bin "$ROOTFS_DIR/bin/init"
 
 echo "[+] 1. Creare imagine de disc $IMAGE ($SIZE)..."
 rm -f "$IMAGE"

@@ -385,7 +385,13 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         }
 
         KLOG_INFO("[DEBUG] TTY: Citire fs_read_file...\n");
-        int bytes = fs_read_file("/hda/sbin/init", temp_buffer, MAX_PROG_PAGES * 4096);
+        int bytes = fs_read_file("/hda/bin/init", temp_buffer, MAX_PROG_PAGES * 4096);
+        if (bytes <= (int)sizeof(NanoHeader)) {
+            for (uint32_t i = 0; i < MAX_PROG_PAGES * 4096; i++) {
+                temp_buffer[i] = 0;
+            }
+            bytes = fs_read_file("/hda/sbin/init", temp_buffer, MAX_PROG_PAGES * 4096);
+        }
 
         if (bytes > (int)sizeof(NanoHeader)) {
             KLOG_INFO("[DEBUG] TTY: Mapare si copiere in spatiul procesului...\n");
@@ -422,7 +428,7 @@ void kernel_main(unsigned long magic, unsigned long addr) {
             
             ttys[t].foreground_pid = init_pid;
         } else {
-            KLOG_FATAL("FATAL: /hda/sbin/init invalid sau missing!\n");
+            KLOG_FATAL("FATAL: /hda/bin/init și /hda/sbin/init lipsesc sau sunt invalide!\n");
             while(1) __asm__ volatile("cli; hlt");
         }
         

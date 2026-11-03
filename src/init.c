@@ -30,17 +30,18 @@ int main() {
     nano_syslog("[INIT] Nano OS Init daemon started (PID 1).\n");
 
     while (1) {
-        nano_syslog("[INIT] Spawning shell (/hda/sbin/shell)...\n");
+        nano_syslog("[INIT] Spawning shell...\n");
         
-        // Lansăm shell-ul
-        int pid = nano_exec("/sbin/shell");
-        
+        int pid = nano_exec("/hda/bin/shell");
+        if (pid <= 0) pid = nano_exec("/hda/sbin/shell");
+        if (pid <= 0) pid = nano_exec("/sbin/shell");
+
         if (pid > 0) {
             // Așteptăm ca shell-ul să se termine (SYSCALL_WAIT adoarme procesul init)
             nano_wait();
             nano_print("[INIT] Shell terminated. Restarting in 2 seconds...\n");
         } else {
-            nano_print("[INIT] Error: Failed to start /hda/sbin/shell!\n");
+            nano_print("[INIT] Error: Failed to start shell!\n");
         }
         
         // Pauză înainte de respawn

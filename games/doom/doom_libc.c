@@ -315,8 +315,6 @@ int __vsnprintf_chk(char *s, unsigned long size, int flag, unsigned long os, con
 void *__memset_chk(void *dest, int c, unsigned long len, unsigned long destlen) { return memset(dest, c, len); }
 void *__memcpy_chk(void *dest, const void *src, unsigned long len, unsigned long destlen) { return memcpy(dest, src, len); }
 char *__strncpy_chk(char *dest, const char *src, unsigned long len, unsigned long destlen) { return strncpy(dest, src, len); }
-long int __isoc23_strtol(const char *nptr, char **endptr, int base) { return 0; }
-int __isoc23_sscanf(const char *str, const char *format, ...) { return 0; }
 const unsigned short ** __ctype_b_loc(void) { static unsigned short* d=0; return (const unsigned short **)&d; }
 const int ** __ctype_toupper_loc(void) { static int* d=0; return (const int **)&d; }
 
@@ -324,23 +322,152 @@ const int ** __ctype_toupper_loc(void) { static int* d=0; return (const int **)&
 // =========================================================
 // FUNCȚII LIPSĂ PENTRU STRCONV / SSCANF
 // =========================================================
-/*
-long int strtol(const char *nptr, char **endptr, int base) {
-    // O implementare simplă sau un stub care apelează ce ai nevoie
-    long int val = 0;
-    int sign = 1;
-    while (*nptr == ' ' || *nptr == '\t') nptr++;
-    if (*nptr == '-') { sign = -1; nptr++; }
-    else if (*nptr == '+') { nptr++; }
-    while (*nptr >= '0' && *nptr <= '9') {
-        val = val * 10 + (*nptr - '0');
+static int doom_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    return -1;
+}
+
+static long int doom_parse_long(const char *nptr, char **endptr, int base) {
+    const char *start = nptr;
+    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n' ||
+           *nptr == '\r' || *nptr == '\f' || *nptr == '\v') nptr++;
+
+    int negative = 0;
+    if (*nptr == '-' || *nptr == '+') {
+        negative = *nptr == '-';
         nptr++;
     }
-    if (endptr) *endptr = (char*)nptr;
-    return val * sign;
+
+    if (base == 0) {
+        if (nptr[0] == '0' && (nptr[1] == 'x' || nptr[1] == 'X') &&
+            doom_digit_value(nptr[2]) >= 0 && doom_digit_value(nptr[2]) < 16) {
+            base = 16;
+            nptr += 2;
+        } else {
+            base = nptr[0] == '0' ? 8 : 10;
+        }
+    } else if (base == 16 && nptr[0] == '0' &&
+               (nptr[1] == 'x' || nptr[1] == 'X') &&
+               doom_digit_value(nptr[2]) >= 0 && doom_digit_value(nptr[2]) < 16) {
+        nptr += 2;
+    }
+
+    if (base < 2 || base > 36) {
+        if (endptr) *endptr = (char *)start;
+        return 0;
+    }
+
+    unsigned long value = 0;
+    unsigned long limit = (~0UL >> 1) + (unsigned long)negative;
+    int converted = 0;
+    for (;;) {
+        int digit = doom_digit_value(*nptr);
+        if (digit < 0 || digit >= base) break;
+        converted = 1;
+        if (value <= (limit - (unsigned long)digit) / (unsigned long)base) {
+            value = value * (unsigned long)base + (unsigned long)digit;
+        } else {
+            value = limit;
+        }
+        nptr++;
+    }
+
+    if (!converted) {
+        if (endptr) *endptr = (char *)start;
+        return 0;
+    }
+
+    if (endptr) *endptr = (char *)nptr;
+    if (negative) {
+        if (value == ((~0UL >> 1) + 1UL)) return -(long int)(~0UL >> 1) - 1;
+        return -(long int)value;
+    }
+    return (long int)value;
+}
+
+long int strtol(const char *nptr, char **endptr, int base) {
+    return doom_parse_long(nptr, endptr, base);
+}
+
+long int __isoc23_strtol(const char *nptr, char **endptr, int base) {
+    return strtol(nptr, endptr, base);
+}
+
+static int doom_vsscanf(const char *str, const char *format, va_list args) {
+    int assigned = 0;
+
+    while (*format) {
+        if (*format == ' ' || *format == '\t' || *format == '\n' ||
+            *format == '\r' || *format == '\f' || *format == '\v') {
+            while (*format == ' ' || *format == '\t' || *format == '\n' ||
+                   *format == '\r' || *format == '\f' || *format == '\v') format++;
+            while (*str == ' ' || *str == '\t' || *str == '\n' ||
+                   *str == '\r' || *str == '\f' || *str == '\v') str++;
+            continue;
+        }
+
+        if (*format != '%') {
+            if (*str != *format) break;
+            str++;
+            format++;
+            continue;
+        }
+
+        format++;
+        if (*format == '%') {
+            if (*str != '%') break;
+            str++;
+            format++;
+            continue;
+        }
+
+        while (*str == ' ' || *str == '\t' || *str == '\n' ||
+               *str == '\r' || *str == '\f' || *str == '\v') str++;
+
+        int base;
+        switch (*format++) {
+            case 'd': base = 10; break;
+            case 'i': base = 0; break;
+            case 'o': base = 8; break;
+            case 'u': base = 10; break;
+            case 'x':
+            case 'X': base = 16; break;
+            default: return assigned;
+        }
+
+        char *end;
+        long int value = doom_parse_long(str, &end, base);
+        if (end == str) break;
+        *va_arg(args, int *) = (int)value;
+        str = end;
+        assigned++;
+    }
+
+    return assigned;
 }
 
 int __isoc99_sscanf(const char *str, const char *format, ...) {
-    return 0; // Stub simplu ca să treacă de linker
+    va_list args;
+    va_start(args, format);
+    int result = doom_vsscanf(str, format, args);
+    va_end(args);
+    return result;
 }
-*/
+
+int __isoc23_sscanf(const char *str, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = doom_vsscanf(str, format, args);
+    va_end(args);
+    return result;
+}
+
+int sscanf(const char *str, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = doom_vsscanf(str, format, args);
+    va_end(args);
+    return result;
+}
