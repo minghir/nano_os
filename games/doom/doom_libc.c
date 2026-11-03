@@ -391,9 +391,12 @@ long int strtol(const char *nptr, char **endptr, int base) {
     return doom_parse_long(nptr, endptr, base);
 }
 
+/*
 long int __isoc23_strtol(const char *nptr, char **endptr, int base) {
     return strtol(nptr, endptr, base);
 }
+*/
+
 
 static int doom_vsscanf(const char *str, const char *format, va_list args) {
     int assigned = 0;

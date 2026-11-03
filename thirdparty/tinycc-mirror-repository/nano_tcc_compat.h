@@ -41,11 +41,11 @@ static int nano_errno = 0;
 #define assert(x) ((void)0)
 
 #ifndef CONFIG_TCC_SYSINCLUDEPATHS
-#define CONFIG_TCC_SYSINCLUDEPATHS "/hdb/include:/include"
+#define CONFIG_TCC_SYSINCLUDEPATHS "/hda/include:/include"
 #endif
 
 #ifndef CONFIG_TCC_CRT_PREFIX
-#define CONFIG_TCC_CRT_PREFIX "/hdb/lib"
+#define CONFIG_TCC_CRT_PREFIX "/hda/lib"
 #endif
 
 // Variable de mediu
