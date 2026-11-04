@@ -34,10 +34,10 @@ int main(int argc, char** argv) {
     nano_print("'. Se lanseaza subshell-ul...\n");
 
     // 4. ACUM LANSĂM SHELL-UL (după ce UID-ul și CWD-ul sunt setate corect)
-    int child_pid = nano_exec("/sbin/shell");
+    int child_pid = nano_exec("/hda/bin/shell");
     if (child_pid <= 0) {
         // Fallback la calea completă cu mount point dacă VFS-ul o cere
-        child_pid = nano_exec("/hda/sbin/shell");
+        child_pid = nano_exec("/hda/bin/shell");
     }
 
     if (child_pid <= 0) {

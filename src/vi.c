@@ -38,7 +38,8 @@ int cmd_input_len = 0;
 char clipboard[1024];
 int clipboard_len = 0;
 
-static inline int sprintf(char* str, const char* format, ...) {
+//static inline int sprintf(char* str, const char* format, ...) {
+int sprintf(char* str, const char* format, ...){
     va_list args;
     va_start(args, format);
     int i = 0;

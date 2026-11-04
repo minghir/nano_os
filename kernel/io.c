@@ -102,7 +102,7 @@ static void draw_cursor_gfx(int tty_id, int show) {
 
 
 void cursor_blink_tick() {
-    if (!is_gfx_mode) return; // Doar în mod grafic
+    //if (!is_gfx_mode) return; // Doar în mod grafic
     if (desktop_mode) return;
 	
     blink_counter++;
@@ -113,7 +113,36 @@ void cursor_blink_tick() {
     }
 }
 
-
+/*
+void cursor_blink_tick() {
+    if (desktop_mode) return;
+    
+    blink_counter++;
+    if (blink_counter >= BLINK_INTERVAL_MS) { // Pune 40 pentru timer de 100Hz sau 400 pentru timer de 1000Hz
+        blink_counter = 0;
+        cursor_visible = !cursor_visible; 
+        
+        if (is_gfx_mode) {
+            draw_cursor_gfx(active_tty, cursor_visible);
+        } else {
+            // --- MODUL TEXT VGA (Software Underline Blink) ---
+            int pos = ttys[active_tty].cursor;
+            if (pos >= 0 && pos < term_cols * term_rows) {
+                uint16_t cell = ttys[active_tty].screen_buffer[pos];
+                
+                if (cursor_visible) {
+                    // Când e vizibil, înlocuim litera curentă cu '_' păstrând culoarea textului
+                    uint16_t attr = cell & 0xFF00; // Extragem culoarea
+                    physical_vga[pos] = attr | '_';
+                } else {
+                    // Când e "stins", afișăm litera normală aflată în buffer
+                    physical_vga[pos] = cell;
+                }
+            }
+        }
+    }
+}
+*/
 void cursor_update() {
 	if (desktop_mode) return;
     if (is_gfx_mode) {
@@ -129,6 +158,7 @@ void cursor_update() {
     }
 }
 
+
 void cursor_init() {
     if (!is_gfx_mode) {
         outb(0x3D4, 0x0A); outb(0x3D5, 0x00);
@@ -136,6 +166,20 @@ void cursor_init() {
     }
     cursor_update();
 }
+
+void set_cursor_shape(int style) {
+    // style 0 = bloc plin, style 1 = underline
+    outb(0x3D4, 0x0A);
+    if (style == 1) {
+        outb(0x3D5, 12); // Începe de la rândul 12 din 15 (underline)
+    } else {
+        outb(0x3D5, 0);  // Începe de la rândul 0 (bloc)
+    }
+    
+    outb(0x3D4, 0x0B);
+    outb(0x3D5, 15);     // Se termină la rândul 15
+}
+
 
 static uint16_t last_screen_buffer[MAX_TTYS][256 * 128];
 
@@ -356,18 +400,7 @@ void clear_screen() {
     }
 }
 
-void set_cursor_shape(int style) {
-    // style 0 = bloc plin, style 1 = underline
-    outb(0x3D4, 0x0A);
-    if (style == 1) {
-        outb(0x3D5, 12); // Începe de la rândul 12 din 15 (underline)
-    } else {
-        outb(0x3D5, 0);  // Începe de la rândul 0 (bloc)
-    }
-    
-    outb(0x3D4, 0x0B);
-    outb(0x3D5, 15);     // Se termină la rândul 15
-}
+
 
 // Pune asta în src/io.c (și șterge-o pe cea veche)
 static void scroll_screen() {

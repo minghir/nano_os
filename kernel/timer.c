@@ -52,9 +52,9 @@ static uint32_t net_timer_counter = 0;
 void timer_irq() {
     timer_ticks++;
 	
-	if (!desktop_mode) {
-		cursor_blink_tick();
-	}
+	
+	cursor_blink_tick();
+	
 	
 	// 2. DACĂ MOUSE-UL S-A MIȘCAT, REDESENĂM ECRANUL IMEDIAT!
     if (mouse_moved) {

@@ -436,6 +436,8 @@ void kernel_main(unsigned long magic, unsigned long addr) {
         free(temp_buffer);
     }
     
+	
+	
     KLOG_INFO("[DEBUG] Incarcare terminata. Pornim timer-ul!\n");
     // TTY-urile de la indexul 4 în sus rămân libere pentru daemoni de rețea (Telnet/SSH)
 	KLOG_DEBUG("[DEBUG] 4 workspace TTYs created. Network TTYs 4+ reserved.\n");
