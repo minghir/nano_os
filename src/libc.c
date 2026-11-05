@@ -1769,3 +1769,90 @@ __asm__(
     "jmp *%r8\n"
     ".size __longjmp_chk, .-__longjmp_chk\n"
 );
+
+
+// ====================================================================
+// STUBS ȘI FUNCȚII NOI PENTRU KILO
+// ====================================================================
+
+// 1. atexit - Înregistrarea unei funcții de ieșire (stub simplu sau gol)
+int atexit(void (*function)(void)) {
+    (void)function;
+    return 0; // Succes fictiv
+}
+
+// 2. perror - Afișarea unei erori pe stderr
+void perror(const char *s) {
+    if (s) {
+        fprintf(stderr, "%s: error\n", s);
+    } else {
+        fprintf(stderr, "error\n");
+    }
+}
+
+// 3. getline - Citirea unei linii d dintr-un flux (implementare simplă peste fgets)
+ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
+    if (!lineptr || !n || !stream) return -1;
+
+    // Dacă bufferul nu este alocat, alocăm unul de bază (ex: 128 bytes)
+    if (*lineptr == NULL || *n == 0) {
+        *n = 128;
+        *lineptr = (char*)malloc(*n);
+        if (*lineptr == NULL) return -1;
+    }
+
+    size_t i = 0;
+    int c;
+    while ((c = fgetc(stream)) != EOF) {
+        // Dacă nu mai avem loc în buffer, îl mărim (realloc)
+        if (i >= *n - 1) {
+            size_t new_size = *n * 2;
+            char *new_ptr = (char*)realloc(*lineptr, new_size);
+            if (!new_ptr) return -1;
+            *lineptr = new_ptr;
+            *n = new_size;
+        }
+
+        (*lineptr)[i++] = (char)c;
+        if (c == '\n') break;
+    }
+
+    if (i == 0 && c == EOF) return -1;
+
+    (*lineptr)[i] = '\0';
+    return (ssize_t)i;
+}
+
+// ====================================================================
+// STUBS POSIX PENTRU CONTROLUL TERMINALULUI ȘI KILO
+// ====================================================================
+
+int isatty(int fd) {
+    // Returnăm 1 pentru stdin/stdout/stderr (descriptori 0, 1, 2)
+    return (fd >= 0 && fd <= 2) ? 1 : 0;
+}
+
+// Structuri goale pentru compatibilitate termios
+typedef unsigned long tcflag_t;
+
+
+int tcgetattr(int fd, struct termios *termios_p) {
+    (void)fd; (void)termios_p;
+    return 0; // Succes fictiv
+}
+
+int tcsetattr(int fd, int optional_actions, const struct termios *termios_p) {
+    (void)fd; (void)optional_actions; (void)termios_p;
+    return 0; // Succes fictiv (deoarece Nano OS citește oricum brut prin SYSCALL_READ_CHAR)
+}
+
+int ioctl(int d, unsigned long request, ...) {
+    (void)d; (void)request;
+    return -1; // Indică eșec pentru ca Kilo să folosească dimensiunea default a ecranului
+}
+
+int ftruncate(int fd, long length) {
+    (void)fd; 
+    (void)length;
+    return 0; // Succes fictiv
+}
