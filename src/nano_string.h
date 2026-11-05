@@ -32,10 +32,10 @@ void* memcpy(void* dest, const void* src, size_t count);
  void _int_to_dec(int64_t val, char* buf);
     
  void _uint_to_hex(uint64_t val, char* buf, int uppercase);
- int snprintf(char* str, uint32_t size, const char* format, ...);
+ //int snprintf(char* str, uint32_t size, const char* format, ...);
 
-int strncmp(const char* s1, const char* s2, size_t n);
-int strcmp(const char* s1, const char* s2);
+//int strncmp(const char* s1, const char* s2, size_t n);
+//int strcmp(const char* s1, const char* s2);
 
 void nano_printf(const char* format, ...);
 int nano_vprintf(const char* format, va_list args);

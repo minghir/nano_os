@@ -1,4 +1,6 @@
 #include "nano_libc.h"
+#include "stdlib.h"
+#include "string.h"
 
 
 // Structură pentru etichete

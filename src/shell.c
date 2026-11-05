@@ -1,5 +1,6 @@
 
 #include "nano_libc.h"
+#include "string.h"
 
 #define MAX_HISTORY 10
 #define MAX_CMD_LEN 128

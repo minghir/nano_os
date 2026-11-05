@@ -1,4 +1,6 @@
 #include "nano_libc.h"
+#include "stdio.h"
+#include "string.h"
 
 // Adăugăm structura exact cum ai cerut
 
@@ -39,6 +41,7 @@ char clipboard[1024];
 int clipboard_len = 0;
 
 //static inline int sprintf(char* str, const char* format, ...) {
+/*	
 int sprintf(char* str, const char* format, ...){
     va_list args;
     va_start(args, format);
@@ -69,7 +72,7 @@ int sprintf(char* str, const char* format, ...){
     va_end(args);
     return (int)(ptr - str);
 }
-
+*/
 void int_to_str(int n, char* buf) {
     itoa(n, buf, 10);
 }

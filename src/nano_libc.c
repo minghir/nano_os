@@ -10,7 +10,7 @@ size_t strlen(const char* str) {
 
 
 
-
+/*
 int atoi(const char* str) {
     int res = 0;
     int sign = 1;
@@ -37,7 +37,7 @@ int atoi(const char* str) {
 
     return res * sign;
 }
-
+*/
 char* itoa(int value, char* str, int base) {
     char* rc;
     char* ptr;

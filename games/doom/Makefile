@@ -18,6 +18,7 @@ SRC_DIR = ../../src
 
 # Obiectele sistemului de operare
 LIBC_O  = nano_libc.o
+LIBC_STD_O  = libc.o
 STR_O   = nano_string.o
 GFX_O   = libgfx.o
 FONT_O  = gfx_font1.o
@@ -42,6 +43,10 @@ crt0.o: crt0.asm
 $(LIBC_O): $(SRC_DIR)/nano_libc.c
 	$(CC) $(CFLAGS) $(SRC_DIR)/nano_libc.c -o $(LIBC_O) 
 
+$(LIBC_STD_O): $(SRC_DIR)/libc.c
+	$(CC) $(CFLAGS) $(SRC_DIR)/libc.c -o $(LIBC_STD_O) 
+
+	
 $(STR_O): $(SRC_DIR)/nano_string.c
 	$(CC) $(CFLAGS) $(SRC_DIR)/nano_string.c -o $(STR_O) 
 	
@@ -60,9 +65,9 @@ $(DS_O): $(SRC_DIR)/libds.c
 	$(CC) $(CFLAGS) $< -o $@
 
 # 4. Linkare finală (crt0.o trebuie să fie PRIMUL ca să pună headerul NAS1 la offset 0)
-$(TARGET): crt0.o $(LIBC_O) $(STR_O) $(GFX_O) $(FONT_O) $(DS_O) $(OBJS)
+$(TARGET): crt0.o $(LIBC_O) $(STR_O) $(GFX_O) $(FONT_O) $(DS_O) $(OBJS) $(LIBC_STD_O)
 	@echo "=> Linkăm DOOM pentru Nano OS..."
-	$(LD) $(LDFLAGS) crt0.o $(LIBC_O) $(STR_O) $(GFX_O) $(FONT_O) $(DS_O) $(OBJS) -o $@
+	$(LD) $(LDFLAGS) crt0.o $(LIBC_O) $(STR_O) $(GFX_O) $(FONT_O) $(DS_O) $(OBJS) $(LIBC_STD_O)  -o $@
 
 clean:
 	rm -f *.o $(TARGET)

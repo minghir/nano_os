@@ -1,3 +1,6 @@
+#include "../../src/nano_libc.h"
+#include "../../src/nano_string.h"
+
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include "nano_libc.h"
@@ -65,5 +68,85 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
         }
     }
 
+    return 0;
+}
+
+
+void DG_SetWindowTitle(const char *title) { (void)title; }
+
+typedef struct {
+    uint8_t* data;
+    unsigned long size;
+    unsigned long position;
+} NanoFile;
+
+static int is_doom1_wad_name(const char* path) {
+    const char* name = path;
+    const char* current = path;
+    while (*current) {
+        if (*current == '/' || *current == '\\') name = current + 1;
+        current++;
+    }
+    static const char expected[] = "doom1.wad";
+    for (unsigned int i = 0; i < sizeof(expected); i++) {
+        char c = name[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != expected[i]) return 0;
+    }
+    return 1;
+}
+
+static int is_wad_name(const char* path) {
+    unsigned int length = string_length(path);
+    if (length < 4) return 0;
+    const char* extension = path + length - 4;
+    return extension[0] == '.' &&
+           (extension[1] == 'w' || extension[1] == 'W') &&
+           (extension[2] == 'a' || extension[2] == 'A') &&
+           (extension[3] == 'd' || extension[3] == 'D');
+}
+
+// Poți defini aceste funcții specifice DOOM
+void* doom_fopen(const char* path, const char* mode) {
+    if (!path || !mode || mode[0] == 'w' || mode[0] == 'a') return 0;
+    unsigned long max_size = is_wad_name(path) ? 5 * 1024 * 1024 : 65536;
+    uint8_t* data = nano_malloc(max_size);
+    if (!data) return 0;
+
+    int bytes = nano_read_file(path, data, (uint32_t)max_size);
+    if (bytes <= 0 && is_doom1_wad_name(path)) {
+        bytes = nano_read_file("/hda/data/wad/DOOM1.WAD", data, (uint32_t)max_size);
+    }
+    if (bytes <= 0) {
+        nano_free(data);
+        return 0;
+    }
+
+    NanoFile* file = nano_malloc(sizeof(NanoFile));
+    if (!file) {
+        nano_free(data);
+        return 0;
+    }
+    file->data = data;
+    file->size = bytes;
+    file->position = 0;
+    return (void*)file;
+}
+
+
+// =========================================================
+// ENTRY POINT-UL JOCULUI (Apelat de crt0.asm)
+// =========================================================
+int main(int argc, char** argv) {
+    nano_print("=== NANO OS: PORNIRE MOTOR DOOM ===\n");
+    
+    nano_print("[DEBUG] Apelam doomgeneric_Create...\n");
+    doomgeneric_Create(argc, argv);
+    nano_print("[DEBUG] SUCCESS: doomgeneric_Create s-a terminat!\n");
+    
+    while (1) {
+        doomgeneric_Tick();
+        nano_yield();
+    }
     return 0;
 }

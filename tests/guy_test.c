@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "nano_libc.h"
 #include "libgfx.h"
 

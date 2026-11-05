@@ -1,4 +1,5 @@
 #include "nano_libc.h"
+#include "time.h"
 /*
 int main() {
     nano_syslog("[INIT] Nano OS Init daemon started (PID 1).\n");

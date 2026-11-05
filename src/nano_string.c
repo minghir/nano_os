@@ -376,7 +376,7 @@ void _float_to_str(double val, char* buf, int precision) {
     *p = '\0';
 }
 
-
+/*
  int snprintf(char* str, uint32_t size, const char* format, ...) {
     if (!str || size == 0 || !format) return 0;
 
@@ -464,7 +464,7 @@ int strcmp(const char* s1, const char* s2) {
     }
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
-
+*/
 static void append_formatted_char(char* buffer, uint32_t* written, char c) {
     if (*written < 1023) buffer[*written] = c;
     if (*written < 1024) (*written)++;

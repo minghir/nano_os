@@ -1,4 +1,7 @@
 #include "nano_libc.h"
+#include "time.h"
+#include "string.h"
+
 
 // Funcție simplă pentru a transforma un string în număr întreg
 int nano_atoi(const char* s) {

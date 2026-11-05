@@ -41,7 +41,7 @@ typedef struct {
 } ProcessInfo;
 
 size_t strlen(const char* str);
-int atoi(const char* str);
+//int atoi(const char* str);
 char* itoa(int value, char* str, int base);
 
 static inline char* strcpy(char* dest, const char* src) {
@@ -394,9 +394,9 @@ static inline void nano_sleep(uint32_t milliseconds) {
     );
 }
 
-static inline void sleep(uint32_t milliseconds) {
-	return nano_sleep(milliseconds);
-}
+//static inline void sleep(uint32_t milliseconds) {
+//	return nano_sleep(milliseconds);
+//}
 
 static inline char* nano_strcat(char* dest, const char* src) {
     char* ptr = dest + strlen(dest);
