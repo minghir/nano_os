@@ -185,18 +185,9 @@ int rename(const char *oldname, const char *newname) {
 // FUNCTII AJUTĂTOARE PENTRU FORMATĂRI INTERNE
 // ====================================================================
 
-static char* print_num(char* buffer, int64_t num, int base, int is_signed) {
+static char* print_num(char* buffer, uint64_t unum, int base, int is_negative) {
     char temp[64];
     int i = 0;
-    int is_neg = 0;
-    uint64_t unum;
-
-    if (is_signed && base == 10 && num < 0) {
-        is_neg = 1;
-        unum = (uint64_t)(-num);
-    } else {
-        unum = (uint64_t)num;
-    }
 
     do {
         int rem = unum % base;
@@ -204,7 +195,7 @@ static char* print_num(char* buffer, int64_t num, int base, int is_signed) {
         unum /= base;
     } while (unum > 0);
 
-    if (is_neg) {
+    if (is_negative) {
         temp[i++] = '-';
     }
 
@@ -228,6 +219,15 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     while (*format && written < size - 1) {
         if (*format == '%') {
             format++;
+            int length_modifier = 0;
+            if (*format == 'l') {
+                length_modifier = 1;
+                format++;
+                if (*format == 'l') {
+                    length_modifier = 2;
+                    format++;
+                }
+            }
             switch (*format) {
                 case 'c': {
                     char c = (char)va_arg(ap, int);
@@ -244,15 +244,33 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 }
                 case 'd':
                 case 'i': {
-                    int num = va_arg(ap, int);
+                    int64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, long);
+                    } else {
+                        num = va_arg(ap, int);
+                    }
+                    int is_negative = num < 0;
+                    uint64_t magnitude = is_negative
+                                       ? (uint64_t)(-(num + 1)) + 1
+                                       : (uint64_t)num;
                     char buf[32];
-                    print_num(buf, num, 10, 1);
+                    print_num(buf, magnitude, 10, is_negative);
                     char *b = buf;
                     while (*b && written < size - 1) str[written++] = *b++;
                     break;
                 }
                 case 'u': {
-                    unsigned int num = va_arg(ap, unsigned int);
+                    uint64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, unsigned long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, unsigned long);
+                    } else {
+                        num = va_arg(ap, unsigned int);
+                    }
                     char buf[32];
                     print_num(buf, num, 10, 0);
                     char *b = buf;
@@ -261,9 +279,21 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 }
                 case 'x':
                 case 'X': {
-                    unsigned int num = va_arg(ap, unsigned int);
+                    uint64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, unsigned long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, unsigned long);
+                    } else {
+                        num = va_arg(ap, unsigned int);
+                    }
                     char buf[32];
                     print_num(buf, num, 16, 0);
+                    if (*format == 'X') {
+                        for (char *digit = buf; *digit; digit++) {
+                            if (*digit >= 'a' && *digit <= 'f') *digit -= 'a' - 'A';
+                        }
+                    }
                     char *b = buf;
                     while (*b && written < size - 1) str[written++] = *b++;
                     break;
@@ -700,9 +730,7 @@ void *realloc(void *ptr, size_t size) {
         return NULL;
     }
 
-    // În heap-ul tău, antetul blocului (BlockHeader) se află exact cu 32 de octeți înaintea pointerului (ptr - 1)
-    // Putem afla dimensiunea veche direct din antet!
-    typedef struct BlockHeader {
+    typedef struct __attribute__((aligned(16))) BlockHeader {
         size_t size;
         int is_free;
         uint32_t owner_pid;
@@ -1425,11 +1453,10 @@ char *fgets(char *s, int size, FILE *stream) {
     while (count < size - 1) {
         int c = fgetc(stream); // Așteaptă un caracter
 
-        if (c == '\b') { // Handle Backspace (ștergere)
+        if (c == '\b' || c == 0x7f) {
             if (count > 0) {
                 count--;
-                // Dacă ai o funcție de afișare caracter, șterge-l de pe ecran
-                // nano_print("\b \b");
+                fputs("\b", stdout);
             }
         } else if (c == '\r' || c == '\n') { // Enter
             // Afișăm un rând nou pe ecran
@@ -1702,12 +1729,43 @@ sighandler_t __sysv_signal(int signum, sighandler_t handler) {
     return NULL;
 }
 
-// Stubs pentru setjmp / longjmp (Dacă nu folosești implementarea nativă de pe x86_64)
-int _setjmp(void *env) {
-    (void)env;
-    return 0;
-}
-
-void __longjmp_chk(void *env, int val) {
-    (void)env; (void)val;
-}
+__asm__(
+    ".text\n"
+    ".global _setjmp\n"
+    ".type _setjmp,@function\n"
+    "_setjmp:\n"
+    "movq %rbx, 0(%rdi)\n"
+    "movq %rbp, 8(%rdi)\n"
+    "movq %r12, 16(%rdi)\n"
+    "movq %r13, 24(%rdi)\n"
+    "movq %r14, 32(%rdi)\n"
+    "movq %r15, 40(%rdi)\n"
+    "leaq 8(%rsp), %rax\n"
+    "movq %rax, 48(%rdi)\n"
+    "movq (%rsp), %rax\n"
+    "movq %rax, 56(%rdi)\n"
+    "xorl %eax, %eax\n"
+    "ret\n"
+    ".size _setjmp, .-_setjmp\n"
+    "\n"
+    ".global __longjmp_chk\n"
+    ".type __longjmp_chk,@function\n"
+    "__longjmp_chk:\n"
+    "movq %rdi, %rdx\n"
+    "movl %esi, %eax\n"
+    "testl %eax, %eax\n"
+    "jnz 1f\n"
+    "movl $1, %eax\n"
+    "1:\n"
+    "movq 48(%rdx), %rcx\n"
+    "movq 56(%rdx), %r8\n"
+    "movq 0(%rdx), %rbx\n"
+    "movq 8(%rdx), %rbp\n"
+    "movq 16(%rdx), %r12\n"
+    "movq 24(%rdx), %r13\n"
+    "movq 32(%rdx), %r14\n"
+    "movq 40(%rdx), %r15\n"
+    "movq %rcx, %rsp\n"
+    "jmp *%r8\n"
+    ".size __longjmp_chk, .-__longjmp_chk\n"
+);

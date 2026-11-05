@@ -133,6 +133,16 @@ typedef struct {
     uint64_t ss;
 } __attribute__((packed)) FaultRegisters;
 
+static void log_fault_value(const char* label, uint64_t value) {
+    static const char digits[] = "0123456789abcdef";
+    char buffer[19] = "0x";
+    for (int i = 0; i < 16; i++) {
+        buffer[i + 2] = digits[(value >> ((15 - i) * 4)) & 0xF];
+    }
+    buffer[18] = '\0';
+    KLOG_ERROR(label);
+    KLOG_ERROR(buffer);
+}
 
 // Schimbă argumentul din Registers* în FaultRegisters*
 void page_fault_handler(FaultRegisters* regs) {
@@ -140,10 +150,13 @@ void page_fault_handler(FaultRegisters* regs) {
     __asm__ volatile ("mov %%cr2, %0" : "=r"(faulting_address));
 
     KLOG_ERROR("\n--- PAGE FAULT DEBUG ---\n");
-    KLOG_ERROR("CR2 (Memoria accesata gresit): ");
-    print_number(faulting_address); // Poți folosi print_number temporar
-    KLOG_ERROR("\nRIP (Unde a crapat codul): ");
-    print_number(regs->rip);
+    log_fault_value("CR2 (Memoria accesata gresit): ", faulting_address);
+    log_fault_value("\nRIP (Unde a crapat codul): ", regs->rip);
+    log_fault_value("\nCS (Nivel de privilegiu): ", regs->cs);
+    log_fault_value("\nError code: ", regs->error_code);
+    log_fault_value("\nRDI: ", regs->rdi);
+    log_fault_value("\nRSI: ", regs->rsi);
+    log_fault_value("\nRAX: ", regs->rax);
     KLOG_ERROR("\n-------------------------\n");
 
     if (regs->rip >= 0x800000 && regs->rip < 0x900000) {

@@ -8,7 +8,7 @@
 #define HEAP_SIZE  (16 * 1024 * 1024) // Dimensiune 16 MB (deci se termină la 32 MB)
 
 // Antetul fiecărui bloc de memorie din heap
-typedef struct BlockHeader {
+typedef struct __attribute__((aligned(16))) BlockHeader {
     size_t size;               // Dimensiunea payload-ului (fără antet)
     int is_free;               // 1 = liber, 0 = ocupat
     uint32_t owner_pid;        // Procesul care a alocat blocul; 0 pentru kernel
@@ -36,8 +36,8 @@ void memory_init() {
 static void* allocate(size_t size, uint32_t owner_pid) {
     if (size == 0) return 0;
 
-    // Aliniem dimensiunea la multipli de 8 octeți
-    size = (size + 7) & ~7;
+    if (size > (size_t)-1 - 15) return 0;
+    size = (size + 15) & ~(size_t)15;
 
     BlockHeader* current = free_list;
 

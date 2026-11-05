@@ -130,7 +130,9 @@ $(CORE_T): $(CORE_O) $(AUX_O) $(LIB_O)
 	$(RANLIB) $@
 
 
-$(LUA_T): $(LUA_O) $(CORE_T)
+$(LUA_T): $(LUA_O) $(CORE_T) ../../tests/crt0.o ../../src/nano_libc.o \
+	../../src/nano_string.o ../../src/libgfx.o ../../src/gfx_font1.o \
+	../../src/libds.o ../../src/libc.o
 	ld -T ../../tests/app.ld --defsym TEXT_ADDR=0x800000 ../../tests/crt0.o ../../src/nano_libc.o ../../src/nano_string.o ../../src/libgfx.o ../../src/gfx_font1.o ../../src/libds.o ../../src/libc.o $(LUA_O) $(CORE_T) -o $@
 	#$(CC) -o $@ -no-pie $(MYLDFLAGS) $(LUA_O) $(CORE_T) ../../src/libc.o $(LIBS) $(MYLIBS)
 
