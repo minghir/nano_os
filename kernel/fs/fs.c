@@ -4,6 +4,7 @@
 #include "../process.h"
 #include "../io.h"
 #include "../pcb.h"
+#include "../memory.h"
 
 
 // Structura pentru tabela de montare (fstab-ul nostru din memorie)
@@ -381,6 +382,102 @@ int fs_read_file(const char* name, uint8_t* buffer, uint32_t max_size) {
 
     if (target->read_file) return target->read_file(local_path, buffer, max_size);
     return 0;
+}
+
+int fs_get_file_size(const char* name, uint32_t* size) {
+    if (!name || !size) return 0;
+    char local_path[128];
+    FileSystemInterface* target = vfs_route(name, local_path);
+    if (!target || !target->stat) return 0;
+
+    fs_stat_t st;
+    if (!target->stat(local_path, &st)) return 0;
+    *size = st.size;
+    return 1;
+}
+
+int fs_read_file_at(const char* name, uint8_t* buffer, uint32_t offset, uint32_t size) {
+    if (!name || (!buffer && size != 0)) return -1;
+    if (size == 0) return 0;
+
+    uint32_t file_size;
+    if (!fs_get_file_size(name, &file_size)) return -1;
+    if (offset >= file_size) return 0;
+
+    uint32_t bytes_to_read = file_size - offset;
+    if (bytes_to_read > size) bytes_to_read = size;
+
+    uint8_t* contents = (uint8_t*)malloc(file_size);
+    if (!contents) return -1;
+    int bytes_read = fs_read_file(name, contents, file_size);
+    if (bytes_read < 0 || (uint32_t)bytes_read < file_size) {
+        free(contents);
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < bytes_to_read; i++) {
+        buffer[i] = contents[offset + i];
+    }
+    free(contents);
+    return (int)bytes_to_read;
+}
+
+int fs_write_file_at(const char* name, const uint8_t* data, uint32_t offset, uint32_t size) {
+    if (!name || (!data && size != 0) || offset > 0xFFFFFFFFu - size) return -1;
+    if (size == 0) return 0;
+
+    uint32_t old_size;
+    if (!fs_get_file_size(name, &old_size)) return -1;
+    uint32_t end_offset = offset + size;
+    uint32_t new_size = old_size > end_offset ? old_size : end_offset;
+
+    uint8_t* contents = (uint8_t*)malloc(new_size);
+    if (!contents) return -1;
+
+    if (old_size != 0) {
+        int bytes_read = fs_read_file(name, contents, old_size);
+        if (bytes_read < 0 || (uint32_t)bytes_read < old_size) {
+            free(contents);
+            return -1;
+        }
+    }
+    for (uint32_t i = old_size; i < new_size; i++) contents[i] = 0;
+    for (uint32_t i = 0; i < size; i++) contents[offset + i] = data[i];
+
+    int write_result = fs_write_file(name, contents, new_size);
+    free(contents);
+    if (write_result <= 0) return -1;
+
+    uint32_t final_size;
+    if (!fs_get_file_size(name, &final_size) || final_size != new_size) return -1;
+    return (int)size;
+}
+
+int fs_truncate_file(const char* name, uint32_t size) {
+    if (!name) return 0;
+    uint32_t old_size;
+    if (!fs_get_file_size(name, &old_size)) return 0;
+    if (size == old_size) return 1;
+
+    uint8_t* contents = size ? (uint8_t*)malloc(size) : 0;
+    if (size && !contents) return 0;
+
+    uint32_t bytes_to_keep = old_size < size ? old_size : size;
+    if (bytes_to_keep != 0) {
+        int bytes_read = fs_read_file(name, contents, bytes_to_keep);
+        if (bytes_read < 0 || (uint32_t)bytes_read < bytes_to_keep) {
+            free(contents);
+            return 0;
+        }
+    }
+    for (uint32_t i = bytes_to_keep; i < size; i++) contents[i] = 0;
+
+    int write_result = fs_write_file(name, contents, size);
+    free(contents);
+
+    uint32_t final_size;
+    return (write_result > 0 || size == 0) &&
+           fs_get_file_size(name, &final_size) && final_size == size;
 }
 // -------------------------------------------------------------------------
 // CREARE FIȘIER (Verifică MAY_WRITE pe folderul părinte și aplică UID/GID)

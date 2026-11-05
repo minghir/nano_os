@@ -746,14 +746,22 @@ int nfs3_append_file(const char* name, const char* data) {
 }
 
 static int nfs3_stat(const char* path, fs_stat_t* out_stat) {
-    (void)path;
-    if (!out_stat) return 0;
+    if (!path || !out_stat) return 0;
 
-    // NFS3 nu stochează permisiuni pe disc, deci oferim acces total (rwxrwxrwx)
-    out_stat->size = 0;    // Sau mărimea reală a fișierului dacă ai funcție de citit marimea
-    out_stat->uid  = 0;    // Root
-    out_stat->gid  = 0;    // Root
-    out_stat->mode = 0777; // Permisiuni universale
+    char target_filename[64];
+    uint32_t parent_inode = nfs3_resolve_path(path, target_filename);
+    if (parent_inode == 0xFFFFFFFF || target_filename[0] == '\0') return 0;
+
+    uint32_t inode_index = nfs3_find_in_dir(parent_inode, target_filename);
+    if (inode_index == 0xFFFFFFFF) return 0;
+
+    InodeV3 inode;
+    if (!nfs3_read_inode(inode_index, &inode) || inode.flags == INODE_FLAG_UNUSED) return 0;
+
+    out_stat->size = inode.size;
+    out_stat->uid = inode.uid;
+    out_stat->gid = inode.gid;
+    out_stat->mode = 0777;
     return 1;
 }
 

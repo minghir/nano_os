@@ -674,6 +674,34 @@ void syscall_handler(SyscallRegisters* regs) {
             regs->rax = fs_read_file(name, buffer, max_size); // Returnează numărul de octeți citiți
             break;
         }
+        case SYSCALL_READ_FILE_AT: {
+            const char* name = (const char*)regs->rdi;
+            uint8_t* buffer = (uint8_t*)regs->rsi;
+            uint32_t offset = (uint32_t)regs->rdx;
+            uint32_t size = (uint32_t)regs->rcx;
+            regs->rax = fs_read_file_at(name, buffer, offset, size);
+            break;
+        }
+        case SYSCALL_WRITE_FILE_AT: {
+            const char* name = (const char*)regs->rdi;
+            const uint8_t* buffer = (const uint8_t*)regs->rsi;
+            uint32_t offset = (uint32_t)regs->rdx;
+            uint32_t size = (uint32_t)regs->rcx;
+            regs->rax = fs_write_file_at(name, buffer, offset, size);
+            break;
+        }
+        case SYSCALL_GET_FILE_SIZE: {
+            const char* name = (const char*)regs->rdi;
+            uint32_t size;
+            regs->rax = fs_get_file_size(name, &size) ? size : (uint64_t)-1;
+            break;
+        }
+        case SYSCALL_TRUNCATE_FILE: {
+            const char* name = (const char*)regs->rdi;
+            uint32_t size = (uint32_t)regs->rsi;
+            regs->rax = fs_truncate_file(name, size);
+            break;
+        }
         case SYSCALL_MKDIR: {
 			const char* name = (const char*)regs->rdi;
 			uint16_t mode = (uint16_t)regs->rsi;

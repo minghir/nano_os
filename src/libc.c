@@ -4,6 +4,7 @@
 #include "time.h"
 #include "math.h"
 #include "string.h"
+#include "ctype.h"
 #include <stdarg.h>
 
 // ====================================================================
@@ -11,9 +12,11 @@
 // ====================================================================
 
 #define MAX_OPEN_FILES 16
+#define NANO_O_APPEND 0x40000000
 
 typedef struct {
     int active;
+    int flags;
     char path[128];
     uint32_t offset;
     uint32_t size;
@@ -35,7 +38,13 @@ FILE *stderr = &_stderr;
 // ====================================================================
 
 int open(const char *pathname, int flags, ...) {
-    (void)flags;
+    if (!pathname || strlen(pathname) >= sizeof(file_table[0].path)) return -1;
+
+    int64_t file_size = nano_get_file_size(pathname);
+    if (file_size < 0) {
+        if (!(flags & 1) || !nano_create_file(pathname, 0, 0666)) return -1;
+    }
+
     int fd = -1;
     // Căutăm un slot liber începând de la 3 (0, 1, 2 sunt rezervate pentru stdin, stdout, stderr)
     for (int i = 3; i < MAX_OPEN_FILES; i++) {
@@ -46,14 +55,8 @@ int open(const char *pathname, int flags, ...) {
     }
     if (fd == -1) return -1; // Prea multe fișiere deschise
 
-    // Verificăm dacă fișierul există sau îl creăm dacă e mod de scriere
-    uint8_t dummy[1];
-    int res = nano_read_file(pathname, dummy, 0);
-    if (res < 0 && (flags & 1)) { 
-        nano_create_file(pathname, 0, 0666);
-    }
-
     file_table[fd].active = 1;
+    file_table[fd].flags = flags;
     strcpy(file_table[fd].path, pathname);
     file_table[fd].offset = 0;
     
@@ -69,18 +72,21 @@ int close(int fd) {
 ssize_t read(int fd, void *buf, size_t count) {
     if (fd == 0) return 0; // stdin
     if (fd < 3 || fd >= MAX_OPEN_FILES || !file_table[fd].active) return -1;
+    if (count == 0) return 0;
+    if (!buf) return -1;
+    if (count > 0xFFFFFFFFu) count = 0xFFFFFFFFu;
 
     OpenFileEntry *entry = &file_table[fd];
-    
-    // Citim din fișier folosind syscall-ul tău nativ
-    int bytes = nano_read_file(entry->path, (uint8_t*)buf, (uint32_t)count);
-    if (bytes > 0) {
-        entry->offset += bytes;
-    }
+    if ((uint64_t)entry->offset + count > 0xFFFFFFFFu) return -1;
+    int bytes = nano_read_file_at(entry->path, (uint8_t*)buf, entry->offset, (uint32_t)count);
+    if (bytes < 0) return -1;
+    entry->offset += (uint32_t)bytes;
     return bytes;
 }
 
 ssize_t write(int fd, const void *buf, size_t count) {
+    if (count == 0) return 0;
+    if (!buf || count > 0xFFFFFFFFu) return -1;
     if (fd == 1 || fd == 2) {
         nano_print((const char*)buf);
         return count;
@@ -88,26 +94,38 @@ ssize_t write(int fd, const void *buf, size_t count) {
     if (fd < 3 || fd >= MAX_OPEN_FILES || !file_table[fd].active) return -1;
 
     OpenFileEntry *entry = &file_table[fd];
-    int res = nano_write_file(entry->path, (const uint8_t*)buf, (uint32_t)count);
-    if (res >= 0) {
-        entry->offset += count;
-        return count;
+    if (entry->flags & NANO_O_APPEND) {
+        int64_t file_size = nano_get_file_size(entry->path);
+        if (file_size < 0 || file_size > 0xFFFFFFFFu) return -1;
+        entry->offset = (uint32_t)file_size;
     }
-    return -1;
+    if ((uint64_t)entry->offset + count > 0xFFFFFFFFu) return -1;
+    int bytes = nano_write_file_at(entry->path, (const uint8_t*)buf, entry->offset, (uint32_t)count);
+    if (bytes < 0) return -1;
+    entry->offset += (uint32_t)bytes;
+    return bytes;
 }
 
 long lseek(int fd, long offset, int whence) {
     if (fd < 3 || fd >= MAX_OPEN_FILES || !file_table[fd].active) return -1;
     OpenFileEntry *entry = &file_table[fd];
+    int64_t new_offset;
 
     if (whence == SEEK_SET) {
-        entry->offset = offset;
+        new_offset = offset;
     } else if (whence == SEEK_CUR) {
-        entry->offset += offset;
+        new_offset = (int64_t)entry->offset + offset;
     } else if (whence == SEEK_END) {
-        entry->offset = offset; 
+        int64_t file_size = nano_get_file_size(entry->path);
+        if (file_size < 0) return -1;
+        new_offset = file_size + offset;
+    } else {
+        return -1;
     }
-    return entry->offset;
+
+    if (new_offset < 0 || new_offset > 0xFFFFFFFFu) return -1;
+    entry->offset = (uint32_t)new_offset;
+    return (long)new_offset;
 }
 
 // ====================================================================
@@ -115,8 +133,11 @@ long lseek(int fd, long offset, int whence) {
 // ====================================================================
 
 FILE *fopen(const char *filename, const char *mode) {
-    int flags = 0;
-    if (mode[0] == 'w' || mode[0] == 'a') flags = 1; // Scriere
+    if (!filename || !mode || (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a')) {
+        return NULL;
+    }
+
+    int flags = mode[0] == 'w' ? 1 : mode[0] == 'a' ? 1 | NANO_O_APPEND : 0;
 
     int fd = open(filename, flags);
     if (fd < 0) return NULL;
@@ -130,32 +151,78 @@ FILE *fopen(const char *filename, const char *mode) {
     stream->fd = fd;
     stream->flags = flags;
     stream->offset = 0;
+    if (mode[0] == 'w' && !nano_truncate_file(filename, 0)) {
+        close(fd);
+        nano_free(stream);
+        return NULL;
+    }
+    if (mode[0] == 'a') {
+        int64_t file_size = nano_get_file_size(filename);
+        if (file_size < 0 || file_size > 0xFFFFFFFFu) {
+            close(fd);
+            nano_free(stream);
+            return NULL;
+        }
+        file_table[fd].offset = (uint32_t)file_size;
+        stream->offset = (long)file_size;
+    }
     return stream;
 }
 
 int fclose(FILE *stream) {
     if (!stream) return -1;
-    if (stream->fd >= 3) {
-        close(stream->fd);
-    }
+    if (stream == stdin || stream == stdout || stream == stderr) return -1;
+    if (stream->fd >= 3 && close(stream->fd) < 0) return -1;
     nano_free(stream);
     return 0;
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    if (size == 0 || nmemb == 0) return 0;
     if (!stream || !ptr || stream->fd < 0) return 0;
+    if (nmemb > (size_t)-1 / size) {
+        stream->flags |= 0x20;
+        return 0;
+    }
+
     size_t total = size * nmemb;
+    if (stream == stdin) {
+        size_t bytes = 0;
+        while (bytes < total) {
+            int c = fgetc(stream);
+            if (c == EOF) break;
+            ((unsigned char*)ptr)[bytes++] = (unsigned char)c;
+        }
+        return bytes / size;
+    }
+
     ssize_t bytes = read(stream->fd, ptr, total);
-    if (bytes <= 0) return 0;
-    return bytes / (size > 0 ? size : 1);
+    if (bytes < 0) {
+        stream->flags |= 0x20;
+        return 0;
+    }
+    if ((size_t)bytes < total) stream->flags |= 0x10;
+    if (bytes > 0) stream->offset += bytes;
+    return (size_t)bytes / size;
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    if (size == 0 || nmemb == 0) return 0;
     if (!stream || !ptr || stream->fd < 0) return 0;
+    if (nmemb > (size_t)-1 / size) {
+        stream->flags |= 0x20;
+        return 0;
+    }
+
     size_t total = size * nmemb;
     ssize_t bytes = write(stream->fd, ptr, total);
-    if (bytes <= 0) return 0;
-    return nmemb;
+    if (bytes < 0) {
+        stream->flags |= 0x20;
+        return 0;
+    }
+    if ((size_t)bytes < total) stream->flags |= 0x20;
+    stream->offset += bytes;
+    return (size_t)bytes / size;
 }
 
 long ftell(FILE *stream) {
@@ -168,6 +235,7 @@ int fseek(FILE *stream, long offset, int whence) {
     long res = lseek(stream->fd, offset, whence);
     if (res < 0) return -1;
     stream->offset = res;
+    stream->flags &= ~0x10;
     return 0;
 }
 
@@ -178,7 +246,7 @@ int remove(const char *filename) {
 int rename(const char *oldname, const char *newname) {
     (void)oldname;
     (void)newname;
-    return 0;
+    return -1;
 }
 
 // ====================================================================
@@ -352,6 +420,7 @@ int printf(const char *format, ...) {
 }
 
 int fprintf(FILE *stream, const char *format, ...) {
+    if (!stream) return -1;
     char buf[1024];
     va_list ap;
 
@@ -359,27 +428,26 @@ int fprintf(FILE *stream, const char *format, ...) {
     int len = vsnprintf(buf, sizeof(buf), format, ap);
     va_end(ap);
 
-    if (stream == stderr || stream == stdout || !stream) {
+    if (stream == stderr || stream == stdout) {
         nano_print(buf);
     } else {
-        // Dacă este un fișier normal deschis pe disc
-        write(stream->fd, buf, len);
+        if (fwrite(buf, 1, (size_t)len, stream) != (size_t)len) return -1;
     }
 
     return len;
 }
 
 int vfprintf(FILE *stream, const char *format, va_list ap) {
+    if (!stream) return -1;
     char buf[1024];
     int len = vsnprintf(buf, sizeof(buf), format, ap);
     if (len < 0) return -1;
 
     // Dacă stream-ul este stdout, stderr sau NULL, afișăm pe ecranul Nano OS
-    if (!stream || stream == stdout || stream == stderr || stream->fd == 1 || stream->fd == 2) {
+    if (stream == stdout || stream == stderr || stream->fd == 1 || stream->fd == 2) {
         nano_print(buf);
     } else {
-        // Dacă este un fișier normal deschis pe disc, scriem prin descriptorul lui de fișier
-        write(stream->fd, buf, len);
+        if (fwrite(buf, 1, (size_t)len, stream) != (size_t)len) return -1;
     }
 
     return len;
@@ -412,63 +480,99 @@ int putchar(int c) {
 // IMPLEMENTARE SIMPLIFICATĂ SCANF (Pentru sscanf)
 // ====================================================================
 
-int sscanf(const char *str, const char *format, ...) {
-    va_list ap;
-    va_start(ap, format);
+static long int libc_parse_long(const char *nptr, char **endptr, int base);
+
+static int libc_vsscanf(const char *str, const char *format, va_list ap) {
+    if (!str || !format) return EOF;
+    const char *input = str;
     int assigned = 0;
 
-    while (*format && *str) {
-        if (*format == ' ') {
-            while (*str == ' ' || *str == '\t' || *str == '\n') str++;
+    while (*format) {
+        if (isspace((unsigned char)*format)) {
+            while (isspace((unsigned char)*format)) format++;
+            while (isspace((unsigned char)*input)) input++;
+            continue;
+        }
+        if (*format != '%') {
+            if (*input != *format) break;
+            input++;
             format++;
             continue;
         }
 
+        format++;
         if (*format == '%') {
+            if (*input != '%') break;
+            input++;
             format++;
-            if (*format == 'd' || *format == 'i') {
-                int *val = va_arg(ap, int *);
-                *val = (int)parse_int64(str);
-                if (*str == '-' || *str == '+') str++;
-                while (*str >= '0' && *str <= '9') str++;
-                assigned++;
-            } else if (*format == 'x' || *format == 'X') {
-                int *val = va_arg(ap, int *);
-                if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
-                    str += 2;
-                }
-                int res = 0;
-                while (1) {
-                    char c = *str;
-                    int digit = -1;
-                    if (c >= '0' && c <= '9') digit = c - '0';
-                    else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
-                    else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
-                    else break;
-                    res = res * 16 + digit;
-                    str++;
-                }
-                *val = res;
-                assigned++;
-            } else if (*format == 's') {
-                char *buf = va_arg(ap, char *);
-                while (*str && *str != ' ' && *str != '\t' && *str != '\n') {
-                    *buf++ = *str++;
-                }
-                *buf = '\0';
+            continue;
+        }
+
+        int suppress = 0;
+        if (*format == '*') {
+            suppress = 1;
+            format++;
+        }
+        size_t width = 0;
+        while (isdigit((unsigned char)*format)) {
+            width = width * 10 + (size_t)(*format++ - '0');
+        }
+        if (width == 0) width = (size_t)-1;
+
+        char conversion = *format++;
+        if (conversion != 'c') {
+            while (isspace((unsigned char)*input)) input++;
+        }
+
+        if (conversion == 'd' || conversion == 'i' || conversion == 'u' ||
+            conversion == 'x' || conversion == 'X') {
+            int base = conversion == 'i' ? 0 :
+                       (conversion == 'x' || conversion == 'X') ? 16 : 10;
+            char *end;
+            long int value = libc_parse_long(input, &end, base);
+            if (end == input) break;
+            if (!suppress) {
+                if (conversion == 'u') *va_arg(ap, unsigned int *) = (unsigned int)value;
+                else *va_arg(ap, int *) = (int)value;
                 assigned++;
             }
-            format++;
+            input = end;
+        } else if (conversion == 's') {
+            if (!*input) break;
+            char *dest = suppress ? NULL : va_arg(ap, char *);
+            size_t copied = 0;
+            while (*input && !isspace((unsigned char)*input) && copied < width) {
+                if (dest) dest[copied] = *input;
+                input++;
+                copied++;
+            }
+            if (dest) dest[copied] = '\0';
+            if (!suppress) assigned++;
+        } else if (conversion == 'c') {
+            size_t count = width == (size_t)-1 ? 1 : width;
+            char *dest = suppress ? NULL : va_arg(ap, char *);
+            size_t copied = 0;
+            while (copied < count && *input) {
+                if (dest) dest[copied] = *input;
+                input++;
+                copied++;
+            }
+            if (copied != count) break;
+            if (!suppress) assigned++;
+        } else if (conversion == 'n') {
+            if (!suppress) *va_arg(ap, int *) = (int)(input - str);
         } else {
-            if (*str == *format) {
-                str++;
-                format++;
-            } else {
-                break;
-            }
+            break;
         }
     }
 
+    return assigned;
+}
+
+int sscanf(const char *str, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int assigned = libc_vsscanf(str, format, ap);
     va_end(ap);
     return assigned;
 }
@@ -660,39 +764,7 @@ int system(const char *command) {
 // ====================================================================
 
 double atof(const char *nptr) {
-    if (!nptr) return 0.0;
-    
-    // Sărim spațiile albe
-    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n' || *nptr == '\r') {
-        nptr++;
-    }
-
-    int sign = 1;
-    if (*nptr == '-') {
-        sign = -1;
-        nptr++;
-    } else if (*nptr == '+') {
-        nptr++;
-    }
-
-    double int_part = 0.0;
-    while (*nptr >= '0' && *nptr <= '9') {
-        int_part = int_part * 10.0 + (*nptr - '0');
-        nptr++;
-    }
-
-    double frac_part = 0.0;
-    if (*nptr == '.') {
-        nptr++;
-        double divisor = 10.0;
-        while (*nptr >= '0' && *nptr <= '9') {
-            frac_part += (*nptr - '0') / divisor;
-            divisor *= 10.0;
-            nptr++;
-        }
-    }
-
-    return sign * (int_part + frac_part);
+    return strtod(nptr, NULL);
 }
 
 
@@ -711,6 +783,7 @@ void free(void *ptr) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
+    if (size != 0 && nmemb > (size_t)-1 / size) return NULL;
     size_t total = nmemb * size;
     void *ptr = nano_malloc(total);
     if (ptr) {
@@ -1163,6 +1236,7 @@ double ldexp(double x, int exp) {
 }
 
 double frexp(double value, int *exp) {
+    if (!exp) return value;
     if (value == 0.0) {
         *exp = 0;
         return 0.0;
@@ -1326,18 +1400,7 @@ long int strtol(const char *nptr, char **endptr, int base) {
 int __isoc23_sscanf(const char *str, const char *format, ...) {
     va_list args;
     va_start(args, format);
-    
-    // Deoarece sscanf-ul tău folosește va_start intern, putem implementa un vsscanf intern 
-    // sau folosi o buclă simplă. O variantă rapidă și sigură este să parsim direct cu un buffer:
-    char buf_fmt[256];
-    strncpy(buf_fmt, format, sizeof(buf_fmt));
-    
-    // Alternativ, dacă vrei să redirecționezi sigur spre sscanf-ul tău existent:
-    int result = sscanf(str, format, 
-        va_arg(args, void*), va_arg(args, void*), va_arg(args, void*), 
-        va_arg(args, void*), va_arg(args, void*), va_arg(args, void*)
-    );
-    
+    int result = libc_vsscanf(str, format, args);
     va_end(args);
     return result;
 }
@@ -1356,10 +1419,10 @@ double strtod(const char *nptr, char **endptr) {
         if (endptr) *endptr = NULL;
         return 0.0;
     }
-    
-    // Sărim spațiile albe
+
+    const char *start = nptr;
     const char *p = nptr;
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v') {
+    while (isspace((unsigned char)*p)) {
         p++;
     }
 
@@ -1372,9 +1435,11 @@ double strtod(const char *nptr, char **endptr) {
     }
 
     double int_part = 0.0;
+    int converted = 0;
     while (*p >= '0' && *p <= '9') {
         int_part = int_part * 10.0 + (*p - '0');
         p++;
+        converted = 1;
     }
 
     double frac_part = 0.0;
@@ -1385,6 +1450,36 @@ double strtod(const char *nptr, char **endptr) {
             frac_part += (*p - '0') / divisor;
             divisor *= 10.0;
             p++;
+            converted = 1;
+        }
+    }
+
+    if (!converted) {
+        if (endptr) *endptr = (char *)start;
+        return 0.0;
+    }
+
+    double value = int_part + frac_part;
+    if (*p == 'e' || *p == 'E') {
+        const char *exponent_start = p;
+        p++;
+        int exponent_sign = 1;
+        if (*p == '-' || *p == '+') {
+            if (*p == '-') exponent_sign = -1;
+            p++;
+        }
+        if (*p >= '0' && *p <= '9') {
+            unsigned int exponent = 0;
+            while (*p >= '0' && *p <= '9') {
+                if (exponent < 1000) exponent = exponent * 10 + (unsigned int)(*p - '0');
+                p++;
+            }
+            if (exponent > 400) exponent = 400;
+            while (exponent--) {
+                value = exponent_sign > 0 ? value * 10.0 : value / 10.0;
+            }
+        } else {
+            p = exponent_start;
         }
     }
 
@@ -1392,7 +1487,7 @@ double strtod(const char *nptr, char **endptr) {
         *endptr = (char *)p;
     }
 
-    return sign * (int_part + frac_part);
+    return sign * value;
 }
 
 char *strpbrk(const char *s, const char *accept) {
@@ -1447,47 +1542,61 @@ FILE *freopen(const char *filename, const char *mode, FILE *stream) {
 // ====================================================================
 
 char *fgets(char *s, int size, FILE *stream) {
-    if (stream != stdin || size <= 1) return NULL;
+    if (!s || !stream || size <= 0) return NULL;
+    if (size == 1) {
+        s[0] = '\0';
+        return s;
+    }
 
     int count = 0;
     while (count < size - 1) {
-        int c = fgetc(stream); // Așteaptă un caracter
+        int c = fgetc(stream);
+        if (c == EOF) break;
 
-        if (c == '\b' || c == 0x7f) {
+        if (stream == stdin && (c == '\b' || c == 0x7f)) {
             if (count > 0) {
                 count--;
                 fputs("\b", stdout);
             }
-        } else if (c == '\r' || c == '\n') { // Enter
-            // Afișăm un rând nou pe ecran
+        } else if (stream == stdin && (c == '\r' || c == '\n')) {
             char nl[2] = {'\n', 0};
             fputs(nl, stdout);
-            
             s[count++] = '\n';
             break;
         } else {
-            // Afișăm litera pe ecran ca să o vadă utilizatorul (Echo)
-            char buf[2] = {(char)c, 0};
-            fputs(buf, stdout);
-            
+            if (stream == stdin) {
+                char buf[2] = {(char)c, 0};
+                fputs(buf, stdout);
+            }
             s[count++] = (char)c;
+            if (c == '\n') break;
         }
     }
     
     s[count] = '\0';
-    return (count > 0) ? s : NULL;
+    return (count > 0 || size == 1) ? s : NULL;
 }
 
 int fgetc(FILE *stream) {
-    if (stream != stdin) return EOF;
+    if (!stream) return EOF;
 
-    int c = 0;
-    // Blocăm (așteptăm) până când utilizatorul apasă o tastă validă
-    while (c == 0) {
-        c = nano_read_char();
-        // Poți pune un mic yield() aici dacă OS-ul suportă, ca să nu stresezi CPU-ul
+    if (stream == stdin) {
+        int c = 0;
+        while (c == 0) c = nano_read_char();
+        return c;
     }
-    
+
+    unsigned char c;
+    ssize_t bytes = read(stream->fd, &c, 1);
+    if (bytes < 0) {
+        stream->flags |= 0x20;
+        return EOF;
+    }
+    if (bytes == 0) {
+        stream->flags |= 0x10;
+        return EOF;
+    }
+    stream->offset++;
     return c;
 }
 
@@ -1502,14 +1611,11 @@ FILE *tmpfile(void) {
 
 int ungetc(int c, FILE *stream) {
     if (c == EOF || !stream) return EOF;
-    // Stub simplu sau pushback dacă structura FILE suportă
-    return c;
+    return EOF;
 }
 
 void clearerr(FILE *stream) {
-    if (stream) {
-        // Resetează flag-urile de eroare/eof dacă există în structura FILE
-    }
+    if (stream) stream->flags &= ~(0x10 | 0x20);
 }
 
 int setvbuf(FILE *stream, char *buf, int mode, size_t size) {
@@ -1832,10 +1938,6 @@ int isatty(int fd) {
     return (fd >= 0 && fd <= 2) ? 1 : 0;
 }
 
-// Structuri goale pentru compatibilitate termios
-typedef unsigned long tcflag_t;
-
-
 int tcgetattr(int fd, struct termios *termios_p) {
     (void)fd; (void)termios_p;
     return 0; // Succes fictiv
@@ -1854,5 +1956,5 @@ int ioctl(int d, unsigned long request, ...) {
 int ftruncate(int fd, long length) {
     (void)fd; 
     (void)length;
-    return 0; // Succes fictiv
+    return -1;
 }

@@ -305,6 +305,53 @@ static inline int nano_read_file(const char* name, uint8_t* buffer, uint32_t max
     return (int)ret;
 }
 
+static inline int nano_read_file_at(const char* name, uint8_t* buffer, uint32_t offset, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_READ_FILE_AT), "D" ((uint64_t)name),
+          "S" ((uint64_t)buffer), "d" ((uint64_t)offset), "c" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_write_file_at(const char* name, const uint8_t* buffer, uint32_t offset, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_WRITE_FILE_AT), "D" ((uint64_t)name),
+          "S" ((uint64_t)buffer), "d" ((uint64_t)offset), "c" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int64_t nano_get_file_size(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_GET_FILE_SIZE), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int64_t)ret;
+}
+
+static inline int nano_truncate_file(const char* name, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_TRUNCATE_FILE), "D" ((uint64_t)name),
+          "S" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
 static inline uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer) {
     // Alocăm un buffer generos pentru fișierul MP3 (ex: 2MB, cât maximul heap-ului sau cât permite fișierul)
     uint32_t max_size = 2 * 1024 * 1024; // 2 MB
@@ -1041,4 +1088,3 @@ static inline int nano_chown(const char* path, uint32_t uid, uint32_t gid) {
 }
 
 #endif
-
