@@ -39,4 +39,8 @@ char *ctime(const time_t *timer);
 struct tm *localtime(const time_t *timer);
 struct tm *gmtime(const time_t *timer);
 
+size_t strftime(char *s, size_t max, const char *format, const struct tm *tm);
+time_t mktime(struct tm *timeptr);
+double difftime(time_t time1, time_t time0);
+
 #endif // _TIME_H

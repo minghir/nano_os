@@ -10,6 +10,7 @@
 #include "../kernel/mouse.h"
 #include "../kernel/keyboard.h"
 #include "nano_string.h"
+#include "string.h"
 
 // Tipul de date pentru mutex (volatile ca să nu îl optimizeze compilatorul)
 typedef volatile int nano_mutex_t;
@@ -40,15 +41,17 @@ typedef struct {
     char name[32];
 } ProcessInfo;
 
-size_t strlen(const char* str);
+//size_t strlen(const char* str);
 //int atoi(const char* str);
 char* itoa(int value, char* str, int base);
 
+/*
 static inline char* strcpy(char* dest, const char* src) {
     char* saved_dest = dest;
     while ((*dest++ = *src++) != '\0');
     return saved_dest;
 }
+*/
 
 // --- CONVERSII ---
 
@@ -72,6 +75,7 @@ static inline int64_t parse_int64(const char* str) {
     return res * sign;
 }
 
+/*
 static inline void* memmove(void* dest, const void* src, size_t n) {
     unsigned char* d = (unsigned char*)dest;
     const unsigned char* s = (const unsigned char*)src;
@@ -87,7 +91,7 @@ static inline void* memmove(void* dest, const void* src, size_t n) {
     }
     return dest;
 }
-
+*/
 
 static inline int nano_kill(int pid) {
     uint64_t ret;

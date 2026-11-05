@@ -23,6 +23,8 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *s);
+char *strpbrk(const char *s, const char *accept);
+int strcoll(const char *s1, const char *s2);
 
 size_t strspn(const char *s, const char *accept);
 size_t strcspn(const char *s, const char *reject);

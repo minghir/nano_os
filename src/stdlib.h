@@ -21,8 +21,8 @@ void *realloc(void *ptr, size_t size);
 int atoi(const char *nptr);
 long atol(const char *nptr);
 double atof(const char *nptr);
-long strtol(const char *nptr, char **endptr, int base);
-
+double strtod(const char *nptr, char **endptr);
+long int strtol(const char *nptr, char **endptr, int base);
 // --- Numere aleatoare (RNG) ---
 int rand(void);
 void srand(unsigned int seed);
@@ -34,5 +34,6 @@ int abs(int j);
 long labs(long j);
 
 int system(const char *command);
+void abort(void);
 
 #endif // _STDLIB_H

@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include "nano_string.h"
 #include "nano_libc.h"
+#include "string.h"
 // O funcție simplă de conversie string -> integer
  int simple_atoi(const char* str) {
     if (!str) return 0;
@@ -130,7 +131,7 @@
 }
 */
 
-
+/*
 void* memset(void* dest, int val, size_t count) {
     char* d = (char*)dest;
     uint8_t v = (uint8_t)val;
@@ -215,7 +216,7 @@ void* memcpy(void* dest, const void* src, size_t count) {
 
     return dest;
 }
-
+*/
 
  char* string_copy(char* dest, const char* src) {
     char* original_dest = dest;

@@ -5,7 +5,7 @@
 
 //PCB (Process Control Block)
 #define MAX_GROUPS 8
-#define MAX_PROG_PAGES 256
+#define MAX_PROG_PAGES 512
 // Stările posibile ale unui proces
 typedef enum {
     PROC_FREE = 0,    // Slot liber în memorie

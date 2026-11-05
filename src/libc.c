@@ -2,6 +2,8 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"
+#include "math.h"
+#include "string.h"
 #include <stdarg.h>
 
 // ====================================================================
@@ -141,7 +143,7 @@ int fclose(FILE *stream) {
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    if (!stream || !ptr) return 0;
+    if (!stream || !ptr || stream->fd < 0) return 0;
     size_t total = size * nmemb;
     ssize_t bytes = read(stream->fd, ptr, total);
     if (bytes <= 0) return 0;
@@ -149,7 +151,7 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    if (!stream || !ptr) return 0;
+    if (!stream || !ptr || stream->fd < 0) return 0;
     size_t total = size * nmemb;
     ssize_t bytes = write(stream->fd, ptr, total);
     if (bytes <= 0) return 0;
@@ -320,24 +322,36 @@ int printf(const char *format, ...) {
 }
 
 int fprintf(FILE *stream, const char *format, ...) {
-    (void)stream;
     char buf[1024];
     va_list ap;
-    
+
     va_start(ap, format);
     int len = vsnprintf(buf, sizeof(buf), format, ap);
     va_end(ap);
-    
-    nano_print(buf);
-    
+
+    if (stream == stderr || stream == stdout || !stream) {
+        nano_print(buf);
+    } else {
+        // Dacă este un fișier normal deschis pe disc
+        write(stream->fd, buf, len);
+    }
+
     return len;
 }
 
 int vfprintf(FILE *stream, const char *format, va_list ap) {
-    (void)stream;
     char buf[1024];
     int len = vsnprintf(buf, sizeof(buf), format, ap);
-    nano_print(buf);
+    if (len < 0) return -1;
+
+    // Dacă stream-ul este stdout, stderr sau NULL, afișăm pe ecranul Nano OS
+    if (!stream || stream == stdout || stream == stderr || stream->fd == 1 || stream->fd == 2) {
+        nano_print(buf);
+    } else {
+        // Dacă este un fișier normal deschis pe disc, scriem prin descriptorul lui de fișier
+        write(stream->fd, buf, len);
+    }
+
     return len;
 }
 
@@ -653,7 +667,13 @@ double atof(const char *nptr) {
 
 
 void *malloc(size_t size) {
-    return nano_malloc(size);
+    void *ptr = nano_malloc(size);
+    if (!ptr) {
+        // Dacă vezi asta pe ecran, înseamnă că heap-ul a rămas fără memorie!
+        // (Sau heap_init nu a fost apelat cum trebuie pentru procese)
+		printf("Sunt in malloc!\n");
+    }
+    return ptr;
 }
 
 void free(void *ptr) {
@@ -672,20 +692,47 @@ void *calloc(size_t nmemb, size_t size) {
 }
 
 void *realloc(void *ptr, size_t size) {
-    if (!ptr) return nano_malloc(size);
+    if (!ptr) {
+        return malloc(size);
+    }
     if (size == 0) {
-        nano_free(ptr);
+        free(ptr);
         return NULL;
     }
-    void *new_ptr = nano_malloc(size);
-    if (new_ptr) {
-        // Copiem datele vechi (copiem o dimensiune sigură, ex: 1024 sau cât era bufferul - sau implementezi un memmove/memcpy)
-        // O variantă simplă sigură pentru DOOM:
-        char *src = (char *)ptr;
-        char *dst = (char *)new_ptr;
-        for (size_t i = 0; i < size; i++) dst[i] = src[i]; // Notă ideal ar fi să știm mărimea veche, dar pentru DOOM merge
-        nano_free(ptr);
+
+    // În heap-ul tău, antetul blocului (BlockHeader) se află exact cu 32 de octeți înaintea pointerului (ptr - 1)
+    // Putem afla dimensiunea veche direct din antet!
+    typedef struct BlockHeader {
+        size_t size;
+        int is_free;
+        uint32_t owner_pid;
+        struct BlockHeader* next;
+    } BlockHeader;
+
+    BlockHeader* header = (BlockHeader*)ptr - 1;
+    size_t old_size = header->size;
+
+    // Dacă noua dimensiune este mai mică sau egală cu cea veche, putem returna direct același bloc
+    if (size <= old_size) {
+        return ptr;
     }
+
+    // Alocăm un nou bloc de memorie cu dimensiunea cerută
+    void *new_ptr = malloc(size);
+    if (!new_ptr) {
+        return NULL; // Out of memory
+    }
+
+    // Copiem doar vechea dimensiune (evitând citirea în afara limitelor!)
+    unsigned char *src = (unsigned char *)ptr;
+    unsigned char *dst = (unsigned char *)new_ptr;
+    for (size_t i = 0; i < old_size; i++) {
+        dst[i] = src[i];
+    }
+
+    // Eliberăm vechiul bloc
+    free(ptr);
+
     return new_ptr;
 }
 
@@ -784,11 +831,33 @@ void *__memcpy_chk(void *dest, const void *src, size_t n, size_t destlen) {
     for (size_t i = 0; i < n; i++) d[i] = s[i];
     return dest;
 }
+// ====================================================================
+// MEMMOVE (Copiere sigură cu suprapunere de memorie)
+// ====================================================================
 
-double fabs(double x) {
-    return (x < 0.0) ? -x : x;
+void *memmove(void *dest, const void *src, size_t n) {
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+
+    if (d == s) {
+        return dest;
+    }
+
+    if (d < s) {
+        // Dacă destinația e înaintea sursei, copiem normal (înainte)
+        for (size_t i = 0; i < n; i++) {
+            d[i] = s[i];
+        }
+    } else {
+        // Dacă destinația e după sursă, copiem de la coadă la cap
+        // pentru a nu suprascrie datele din sursă înainte de a le citi
+        for (size_t i = n; i > 0; i--) {
+            d[i - 1] = s[i - 1];
+        }
+    }
+
+    return dest;
 }
-
 
 // ====================================================================
 // IMPLEMENTARE TIME.H (Timp, Ceas și Pauze)
@@ -891,5 +960,754 @@ void *memchr(const void *s, int c, size_t n) {
 
 char *strerror(int errnum) {
     (void)errnum;
-    return "Unknown error";
+ 
+   return "Unknown error";
+}
+
+// ====================================================================
+// IMPLEMENTARE MATH.H (Matematică în virgulă mobilă)
+// ====================================================================
+
+int isnan(double x) {
+    return x != x;
+}
+
+int isinf(double x) {
+    return !isnan(x) && (x + x == x);
+}
+
+int finite(double x) {
+    return !isnan(x) && !isinf(x);
+}
+
+double fabs(double x) {
+    return (x < 0.0) ? -x : x;
+}
+
+double ceil(double x) {
+    long long int_part = (long long)x;
+    if (x > 0.0 && x != (double)int_part) {
+        return (double)(int_part + 1);
+    }
+    return (double)int_part;
+}
+
+double floor(double x) {
+    long long int_part = (long long)x;
+    if (x < 0.0 && x != (double)int_part) {
+        return (double)(int_part - 1);
+    }
+    return (double)int_part;
+}
+
+// Rădăcina pătrată folosind metoda lui Newton-Raphson
+double sqrt(double x) {
+    if (x < 0.0) return NAN;
+    if (x == 0.0 || x == 1.0) return x;
+    
+    double guess = x / 2.0;
+    double prev = 0.0;
+    
+    while (guess != prev) {
+        prev = guess;
+        guess = (guess + x / guess) / 2.0;
+    }
+    return guess;
+}
+
+// Restul împărțirii (fmod)
+double fmod(double x, double y) {
+    if (y == 0.0) return NAN;
+    long long quot = (long long)(x / y);
+    return x - (double)quot * y;
+}
+
+// Normalizarea unghiului în intervalul [-PI, PI] pentru aproximări trigonometrice
+static double normalize_angle(double x) {
+    while (x > M_PI) x -= 2.0 * M_PI;
+    while (x < -M_PI) x += 2.0 * M_PI;
+    return x;
+}
+
+// Aproximare eficientă pentru sine (Seria Taylor / Bhaskara I)
+double sin(double x) {
+    x = normalize_angle(x);
+    // Taylor: x - x^3/3! + x^5/5! - x^7/7!
+    double x2 = x * x;
+    double term = x;
+    double sum = term;
+    
+    term *= -x2 / (2.0 * 3.0);
+    sum += term;
+    term *= -x2 / (4.0 * 5.0);
+    sum += term;
+    term *= -x2 / (6.0 * 7.0);
+    sum += term;
+    term *= -x2 / (8.0 * 9.0);
+    sum += term;
+    
+    return sum;
+}
+
+// Cosinus bazat pe identitatea cos(x) = sin(x + PI/2)
+double cos(double x) {
+    return sin(x + M_PI_2);
+}
+
+// Tangentă
+double tan(double x) {
+    double c = cos(x);
+    if (c == 0.0) return INFINITY;
+    return sin(x) / c;
+}
+
+// Aproximare pentru atan2
+double atan2(double y, double x) {
+    if (x == 0.0) {
+        if (y > 0.0) return M_PI_2;
+        if (y < 0.0) return -M_PI_2;
+        return 0.0;
+    }
+    double atan = y / x;
+    // Aproximare simplă bazată pe polinomiale
+    if (x > 0.0) {
+        return atan / (1.0 + 0.28 * atan * atan);
+    } else if (y >= 0.0) {
+        return atan / (1.0 + 0.28 * atan * atan) + M_PI;
+    } else {
+        return atan / (1.0 + 0.28 * atan * atan) - M_PI;
+    }
+}
+
+double asin(double x) {
+    if (x < -1.0 || x > 1.0) return NAN;
+    return atan2(x, sqrt(1.0 - x * x));
+}
+
+double acos(double x) {
+    if (x < -1.0 || x > 1.0) return NAN;
+    return M_PI_2 - asin(x);
+}
+
+
+double log(double x) {
+    if (x <= 0.0) return NAN;
+    // Aproximare simplă pentru logaritm natural
+    double val = (x - 1.0) / (x + 1.0);
+    double val2 = val * val;
+    double sum = 0.0;
+    double denom = 1.0;
+    for (int i = 1; i < 30; i += 2) {
+        sum += val / denom;
+        val *= val2;
+        denom += 2.0;
+    }
+    return 2.0 * sum;
+}
+
+double log10(double x) {
+    return log(x) / 2.30258509299404568402; // ln(10)
+}
+
+// Puteri și exponențiale elementare (bazate pe logaritmi și exp)
+double exp(double x) {
+    // e^x = limită (1 + x/n)^n, aproximare prin serie Taylor
+    double sum = 1.0;
+    double term = 1.0;
+    for (int i = 1; i < 20; i++) {
+        term *= x / i;
+        sum += term;
+    }
+    return sum;
+}
+
+double pow(double base, double exponent) {
+    if (exponent == 0.0) return 1.0;
+    if (base == 0.0) return 0.0;
+    if (base < 0.0) {
+        return exp(exponent * log(-base));
+    }
+    return exp(exponent * log(base));
+}
+
+double ldexp(double x, int exp) {
+    return x * pow(2.0, (double)exp);
+}
+
+double frexp(double value, int *exp) {
+    if (value == 0.0) {
+        *exp = 0;
+        return 0.0;
+    }
+    int e = 0;
+    double abs_val = fabs(value);
+    while (abs_val >= 1.0) {
+        abs_val /= 2.0;
+        e++;
+    }
+    while (abs_val < 0.5) {
+        abs_val *= 2.0;
+        e--;
+    }
+    *exp = e;
+    return (value < 0.0) ? -abs_val : abs_val;
+}
+
+// ====================================================================
+// HACK-URI DE SECURITATE ȘI COMPATIBILITATE GCC (_chk & C23)
+// ====================================================================
+
+int __printf_chk(int flag, const char *format, ...) {
+    (void)flag;
+    va_list args;
+    va_start(args, format);
+    int result = vfprintf(stdout, format, args);
+    va_end(args);
+    return result;
+}
+
+int __fprintf_chk(void *stream, int flag, const char *format, ...) {
+    (void)flag;
+    va_list args;
+    va_start(args, format);
+    int result = vfprintf((FILE*)stream, format, args);
+    va_end(args);
+    return result;
+}
+
+int __snprintf_chk(char *s, size_t maxlen, int flag, size_t os, const char *format, ...) {
+    (void)flag; (void)os;
+    va_list args;
+    va_start(args, format);
+    int result = vsnprintf(s, maxlen, format, args);
+    va_end(args);
+    return result;
+}
+
+int __vfprintf_chk(void *stream, int flag, const char *format, va_list args) {
+    (void)flag;
+    return vfprintf((FILE*)stream, format, args);
+}
+
+int __vsnprintf_chk(char *s, size_t size, int flag, size_t os, const char *format, va_list args) {
+    (void)flag; (void)os;
+    return vsnprintf(s, size, format, args);
+}
+
+char *__strncpy_chk(char *dest, const char *src, size_t n, size_t destlen) {
+    (void)destlen;
+    return strncpy(dest, src, n);
+}
+
+// Wrapper-e pentru C23 strtol / sscanf
+long int __isoc23_strtol(const char *nptr, char **endptr, int base) {
+    return strtol(nptr, endptr, base);
+}
+
+
+
+// Tabele locale GCC / Glibc
+const unsigned short **__ctype_b_loc(void) {
+    static const unsigned short *b = NULL;
+    return &b;
+}
+
+const int **__ctype_toupper_loc(void) {
+    static const int *t = NULL;
+    return &t;
+}
+
+// ====================================================================
+// PARSARE NUMERE (Suport pentru strtol și sscanf)
+// ====================================================================
+
+static int libc_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    return -1;
+}
+
+static long int libc_parse_long(const char *nptr, char **endptr, int base) {
+    const char *start = nptr;
+    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n' ||
+           *nptr == '\r' || *nptr == '\f' || *nptr == '\v') nptr++;
+
+    int negative = 0;
+    if (*nptr == '-' || *nptr == '+') {
+        negative = *nptr == '-';
+        nptr++;
+    }
+
+    if (base == 0) {
+        if (nptr[0] == '0' && (nptr[1] == 'x' || nptr[1] == 'X') &&
+            libc_digit_value(nptr[2]) >= 0 && libc_digit_value(nptr[2]) < 16) {
+            base = 16;
+            nptr += 2;
+        } else {
+            base = nptr[0] == '0' ? 8 : 10;
+        }
+    } else if (base == 16 && nptr[0] == '0' &&
+               (nptr[1] == 'x' || nptr[1] == 'X') &&
+               libc_digit_value(nptr[2]) >= 0 && libc_digit_value(nptr[2]) < 16) {
+        nptr += 2;
+    }
+
+    if (base < 2 || base > 36) {
+        if (endptr) *endptr = (char *)start;
+        return 0;
+    }
+
+    unsigned long value = 0;
+    unsigned long limit = (~0UL >> 1) + (unsigned long)negative;
+    int converted = 0;
+    for (;;) {
+        int digit = libc_digit_value(*nptr);
+        if (digit < 0 || digit >= base) break;
+        converted = 1;
+        if (value <= (limit - (unsigned long)digit) / (unsigned long)base) {
+            value = value * (unsigned long)base + (unsigned long)digit;
+        } else {
+            value = limit;
+        }
+        nptr++;
+    }
+
+    if (!converted) {
+        if (endptr) *endptr = (char *)start;
+        return 0;
+    }
+
+    if (endptr) *endptr = (char *)nptr;
+    if (negative) {
+        if (value == ((~0UL >> 1) + 1UL)) return -(long int)(~0UL >> 1) - 1;
+        return -(long int)value;
+    }
+    return (long int)value;
+}
+
+// Funcția publică strtol cerută de linker
+long int strtol(const char *nptr, char **endptr, int base) {
+    return libc_parse_long(nptr, endptr, base);
+}
+
+
+
+// Corectare avertisment parametru nefolosit pentru __isoc23_sscanf
+// Corectare pentru __isoc23_sscanf
+int __isoc23_sscanf(const char *str, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    
+    // Deoarece sscanf-ul tău folosește va_start intern, putem implementa un vsscanf intern 
+    // sau folosi o buclă simplă. O variantă rapidă și sigură este să parsim direct cu un buffer:
+    char buf_fmt[256];
+    strncpy(buf_fmt, format, sizeof(buf_fmt));
+    
+    // Alternativ, dacă vrei să redirecționezi sigur spre sscanf-ul tău existent:
+    int result = sscanf(str, format, 
+        va_arg(args, void*), va_arg(args, void*), va_arg(args, void*), 
+        va_arg(args, void*), va_arg(args, void*), va_arg(args, void*)
+    );
+    
+    va_end(args);
+    return result;
+}
+
+void abort(void) {
+    fprintf(stderr, "Abort called! Programul se opreste.\n");
+    exit(1);
+}
+
+// ====================================================================
+// STRNOD & STRPBRK (Compatibilitate suplimentară pentru Lua)
+// ====================================================================
+
+double strtod(const char *nptr, char **endptr) {
+    if (!nptr) {
+        if (endptr) *endptr = NULL;
+        return 0.0;
+    }
+    
+    // Sărim spațiile albe
+    const char *p = nptr;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v') {
+        p++;
+    }
+
+    int sign = 1;
+    if (*p == '-') {
+        sign = -1;
+        p++;
+    } else if (*p == '+') {
+        p++;
+    }
+
+    double int_part = 0.0;
+    while (*p >= '0' && *p <= '9') {
+        int_part = int_part * 10.0 + (*p - '0');
+        p++;
+    }
+
+    double frac_part = 0.0;
+    if (*p == '.') {
+        p++;
+        double divisor = 10.0;
+        while (*p >= '0' && *p <= '9') {
+            frac_part += (*p - '0') / divisor;
+            divisor *= 10.0;
+            p++;
+        }
+    }
+
+    if (endptr) {
+        *endptr = (char *)p;
+    }
+
+    return sign * (int_part + frac_part);
+}
+
+char *strpbrk(const char *s, const char *accept) {
+    if (!s || !accept) return NULL;
+    while (*s) {
+        const char *a = accept;
+        while (*a) {
+            if (*s == *a) {
+                return (char *)s;
+            }
+            a++;
+        }
+        s++;
+    }
+    return NULL;
+}
+
+int strcoll(const char *s1, const char *s2) {
+    return strcmp(s1, s2);
+}
+
+// ====================================================================
+// FUNCȚII I/O SUPLIMENTARE PENTRU FILE STREAM-URI (Lua)
+// ====================================================================
+
+int feof(FILE *stream) {
+    if (!stream) return 1;
+    // Dacă ai un flag de EOF în structura ta FILE, returnează-l. 
+    // Altfel, o verificare simplă sau un stub bazat pe starea stream-ului:
+    return (stream->flags & 0x10) != 0; // Adaptează în funcție de structura ta FILE, sau return 0 dacă e minimal
+}
+
+int ferror(FILE *stream) {
+    if (!stream) return 1;
+    return (stream->flags & 0x20) != 0;
+}
+
+int getc(FILE *stream) {
+    return fgetc(stream);
+}
+
+FILE *freopen(const char *filename, const char *mode, FILE *stream) {
+    if (stream) {
+        fclose(stream);
+    }
+    return fopen(filename, mode);
+}
+
+
+// ====================================================================
+// FGETS (Citire linii din stream)
+// ====================================================================
+
+char *fgets(char *s, int size, FILE *stream) {
+    if (stream != stdin || size <= 1) return NULL;
+
+    int count = 0;
+    while (count < size - 1) {
+        int c = fgetc(stream); // Așteaptă un caracter
+
+        if (c == '\b') { // Handle Backspace (ștergere)
+            if (count > 0) {
+                count--;
+                // Dacă ai o funcție de afișare caracter, șterge-l de pe ecran
+                // nano_print("\b \b");
+            }
+        } else if (c == '\r' || c == '\n') { // Enter
+            // Afișăm un rând nou pe ecran
+            char nl[2] = {'\n', 0};
+            fputs(nl, stdout);
+            
+            s[count++] = '\n';
+            break;
+        } else {
+            // Afișăm litera pe ecran ca să o vadă utilizatorul (Echo)
+            char buf[2] = {(char)c, 0};
+            fputs(buf, stdout);
+            
+            s[count++] = (char)c;
+        }
+    }
+    
+    s[count] = '\0';
+    return (count > 0) ? s : NULL;
+}
+
+int fgetc(FILE *stream) {
+    if (stream != stdin) return EOF;
+
+    int c = 0;
+    // Blocăm (așteptăm) până când utilizatorul apasă o tastă validă
+    while (c == 0) {
+        c = nano_read_char();
+        // Poți pune un mic yield() aici dacă OS-ul suportă, ca să nu stresezi CPU-ul
+    }
+    
+    return c;
+}
+
+// ====================================================================
+// FUNCȚII I/O AVANSATE (Lua liolib)
+// ====================================================================
+
+FILE *tmpfile(void) {
+    // Nano OS nu are un director temporar dedicat momentan; returnăm NULL
+    return NULL;
+}
+
+int ungetc(int c, FILE *stream) {
+    if (c == EOF || !stream) return EOF;
+    // Stub simplu sau pushback dacă structura FILE suportă
+    return c;
+}
+
+void clearerr(FILE *stream) {
+    if (stream) {
+        // Resetează flag-urile de eroare/eof dacă există în structura FILE
+    }
+}
+
+int setvbuf(FILE *stream, char *buf, int mode, size_t size) {
+    (void)buf; 
+    (void)mode; 
+    (void)size;
+    if (!stream) return -1;
+    return 0; // Succes fictiv pentru compatibilitate
+}
+
+// ====================================================================
+// LOG2 (Compatibilitate Lua mathlib)
+// ====================================================================
+
+double log2(double x) {
+    return log(x) / 0.693147180559945309417; // ln(x) / ln(2)
+}
+
+// ====================================================================
+// TMPNAM (Stub pentru fișiere temporare)
+// ====================================================================
+
+char *tmpnam(char *s) {
+    static char tmp_buf[L_tmpnam];
+    char *target = s ? s : tmp_buf;
+    // Generăm un nume simplu de fișier temporar
+    sprintf(target, "/tmp/lua_%u", (unsigned int)(rand() % 10000));
+    return target;
+}
+
+// ====================================================================
+// COMPLETĂRI TIME.H (strftime, mktime, difftime)
+// ====================================================================
+
+size_t strftime(char *s, size_t max, const char *format, const struct tm *tm) {
+    if (!s || max == 0 || !format || !tm) return 0;
+    
+    // O implementare simplificată de bază pentru formatele comune folosite de Lua
+    size_t written = 0;
+    while (*format && written < max - 1) {
+        if (*format == '%') {
+            format++;
+            char buf[16] = "";
+            switch (*format) {
+                case 'Y': sprintf(buf, "%04d", 1900 + tm->tm_year); break;
+                case 'm': sprintf(buf, "%02d", tm->tm_mon + 1); break;
+                case 'd': sprintf(buf, "%02d", tm->tm_mday); break;
+                case 'H': sprintf(buf, "%02d", tm->tm_hour); break;
+                case 'M': sprintf(buf, "%02d", tm->tm_min); break;
+                case 'S': sprintf(buf, "%02d", tm->tm_sec); break;
+                case '%': sprintf(buf, "%%"); break;
+                default: buf[0] = *format; buf[1] = '\0'; break;
+            }
+            char *b = buf;
+            while (*b && written < max - 1) {
+                s[written++] = *b++;
+            }
+        } else {
+            s[written++] = *format;
+        }
+        format++;
+    }
+    s[written] = '\0';
+    return written;
+}
+
+time_t mktime(struct tm *timeptr) {
+    if (!timeptr) return (time_t)-1;
+    // Calcul simplificat bazat pe anii scurși (aproximare sigură pentru freestanding)
+    int year = 1900 + timeptr->tm_year;
+    time_t days = (year - 1970) * 365 + (year - 1969) / 4;
+    days += timeptr->tm_mday;
+    return days * 86400 + timeptr->tm_hour * 3600 + timeptr->tm_min * 60 + timeptr->tm_sec;
+}
+
+double difftime(time_t time1, time_t time0) {
+    return (double)(time1 - time0);
+}
+
+// ====================================================================
+// COMPLETĂRI CTYPE.H (iscntrl, isgraph)
+// ====================================================================
+
+int iscntrl(int c) {
+    return (c >= 0 && c <= 31) || (c == 127);
+}
+
+int isgraph(int c) {
+    return (c > 32 && c <= 126);
+}
+
+// ====================================================================
+// FPUTS (Scriere șir în stream)
+// ====================================================================
+
+int fputs(const char *s, FILE *stream) {
+    if (!s || !stream) return -1;
+    size_t len = strlen(s);
+    size_t written = fwrite(s, 1, len, stream);
+    return (written == len) ? 0 : -1;
+}
+
+
+// ====================================================================
+// FUNCȚII DE BAZĂ STRING & MEMORY (Lipsă la linkare)
+// ====================================================================
+
+size_t strlen(const char *s) {
+    size_t len = 0;
+    while (s && s[len]) len++;
+    return len;
+}
+
+char *strcpy(char *dest, const char *src) {
+    char *d = dest;
+    while ((*d++ = *src++));
+    return dest;
+}
+
+void *memcpy(void *dest, const void *src, size_t n) {
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+    for (size_t i = 0; i < n; i++) d[i] = s[i];
+    return dest;
+}
+
+void *memset(void *s, int c, size_t n) {
+    unsigned char *p = s;
+    for (size_t i = 0; i < n; i++) p[i] = (unsigned char)c;
+    return s;
+}
+
+int memcmp(const void *s1, const void *s2, size_t n) {
+    const unsigned char *p1 = s1, *p2 = s2;
+    for (size_t i = 0; i < n; i++) {
+        if (p1[i] != p2[i]) return p1[i] - p2[i];
+    }
+    return 0;
+}
+
+size_t strspn(const char *s, const char *accept) {
+    size_t count = 0;
+    while (*s) {
+        const char *a = accept;
+        int found = 0;
+        while (*a) {
+            if (*s == *a) { found = 1; break; }
+            a++;
+        }
+        if (!found) break;
+        count++;
+        s++;
+    }
+    return count;
+}
+
+// ====================================================================
+// STUBS PENTRU LOCALE, SIGNAL ȘI SETJMP
+// ====================================================================
+// ====================================================================
+// STRUCTURA LCONV ȘI LOCALE (Compatibilitate Lua)
+// ====================================================================
+
+struct lconv {
+    char *decimal_point;
+    char *thousands_sep;
+    char *grouping;
+    char *int_curr_symbol;
+    char *currency_symbol;
+    char *mon_decimal_point;
+    char *mon_thousands_sep;
+    char *mon_grouping;
+    char *positive_sign;
+    char *negative_sign;
+    char int_frac_digits;
+    char frac_digits;
+    char p_cs_precedes;
+    char p_sep_by_space;
+    char n_cs_precedes;
+    char n_sep_by_space;
+    char p_sign_posn;
+    char n_sign_posn;
+};
+
+char *setlocale(int category, const char *locale) {
+    (void)category;
+    return (char *)locale;
+}
+
+struct lconv *localeconv(void) {
+    static struct lconv lc = {
+        .decimal_point = ".",
+        .thousands_sep = "",
+        .grouping = "",
+        .int_curr_symbol = "",
+        .currency_symbol = "",
+        .mon_decimal_point = "",
+        .mon_thousands_sep = "",
+        .mon_grouping = "",
+        .positive_sign = "",
+        .negative_sign = "",
+        .int_frac_digits = 127,
+        .frac_digits = 127,
+        .p_cs_precedes = 127,
+        .p_sep_by_space = 127,
+        .n_cs_precedes = 127,
+        .n_sep_by_space = 127,
+        .p_sign_posn = 127,
+        .n_sign_posn = 127
+    };
+    return &lc;
+}
+
+typedef void (*sighandler_t)(int);
+sighandler_t __sysv_signal(int signum, sighandler_t handler) {
+    (void)signum; (void)handler;
+    return NULL;
+}
+
+// Stubs pentru setjmp / longjmp (Dacă nu folosești implementarea nativă de pe x86_64)
+int _setjmp(void *env) {
+    (void)env;
+    return 0;
+}
+
+void __longjmp_chk(void *env, int val) {
+    (void)env; (void)val;
 }
