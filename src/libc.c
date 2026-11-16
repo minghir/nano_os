@@ -249,6 +249,13 @@ int rename(const char *oldname, const char *newname) {
     return -1;
 }
 
+void rewind(FILE *stream) {
+    if (stream) {
+        fseek(stream, 0L, SEEK_SET);
+    }
+}
+
+
 // ====================================================================
 // FUNCTII AJUTĂTOARE PENTRU FORMATĂRI INTERNE
 // ====================================================================
@@ -1948,13 +1955,48 @@ int tcsetattr(int fd, int optional_actions, const struct termios *termios_p) {
     return 0; // Succes fictiv (deoarece Nano OS citește oricum brut prin SYSCALL_READ_CHAR)
 }
 
+// Definiție standard POSIX pentru structura de dimensiune a terminalului
+struct winsize {
+    unsigned short ws_row;
+    unsigned short ws_col;
+    unsigned short ws_xpixel;
+    unsigned short ws_ypixel;
+};
+
+#define TIOCGWINSZ 0x5413 // Codul standard POSIX pentru Get Window Size
+
 int ioctl(int d, unsigned long request, ...) {
-    (void)d; (void)request;
-    return -1; // Indică eșec pentru ca Kilo să folosească dimensiunea default a ecranului
+    if (d < 0 || d > 2) return -1; // Doar pentru stdout/stderr/stdin
+    
+    if (request == TIOCGWINSZ) {
+        va_list args;
+        va_start(args, request);
+        struct winsize *ws = va_arg(args, struct winsize *);
+        va_end(args);
+
+        VideoModeInfo vinfo;
+        if (ws && nano_get_video_info(&vinfo) == 1) {
+            ws->ws_row = (unsigned short)vinfo.rows;
+            ws->ws_col = (unsigned short)vinfo.cols;
+            ws->ws_xpixel = 0;
+            ws->ws_ypixel = 0;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 int ftruncate(int fd, long length) {
-    (void)fd; 
-    (void)length;
+    if (fd < 3 || fd >= MAX_OPEN_FILES || !file_table[fd].active) return -1;
+    if (length < 0 || length > 0xFFFFFFFFu) return -1;
+    
+    OpenFileEntry *entry = &file_table[fd];
+    if (nano_truncate_file(entry->path, (uint32_t)length)) {
+        entry->size = (uint32_t)length;
+        if (entry->offset > (uint32_t)length) {
+            entry->offset = (uint32_t)length;
+        }
+        return 0;
+    }
     return -1;
 }
