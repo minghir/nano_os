@@ -200,7 +200,7 @@ static inline FILE* fopen(const char* path, const char* mode) {
     f->offset = 0;
     f->is_open = 1;
     if (mode && mode[0] == 'w') {
-        nano_create_file(path, 0);
+        nano_create_file(path, 0, 0644);
         f->size = 0;
     }
     return f;
@@ -244,7 +244,7 @@ static inline int fclose(FILE* stream) {
     if (stream && stream != stdout && stream != stderr) {
         int result = 0;
         if (stream->is_output) {
-            if (!nano_create_file(stream->output_path, stream->size) ||
+            if (!nano_create_file(stream->output_path, stream->size, 0644) ||
                 !nano_write_file(stream->output_path, stream->output_data, stream->size))
                 result = -1;
             nano_free(stream->output_data);
@@ -462,13 +462,13 @@ static inline char* realpath(const char* path, char* resolved_path) {
     return resolved_path;
 }
 
-static inline char* strcat(char* dest, const char* src) {
+char* strcat(char* dest, const char* src) {
     char* ptr = dest + strlen(dest);
     while ((*ptr++ = *src++));
     return dest;
 }
 
-static inline char* strpbrk(const char* s, const char* accept) {
+char* strpbrk(const char* s, const char* accept) {
     while (*s) {
         const char* a = accept;
         while (*a) {
@@ -480,7 +480,7 @@ static inline char* strpbrk(const char* s, const char* accept) {
     return NULL;
 }
 
-static inline char* strchr(const char* s, int c) {
+char* strchr(const char* s, int c) {
     while (*s) {
         if (*s == (char)c) return (char*)s;
         s++;
@@ -488,7 +488,7 @@ static inline char* strchr(const char* s, int c) {
     return (c == 0) ? (char*)s : NULL;
 }
 
-static inline char* strrchr(const char* s, int c) {
+char* strrchr(const char* s, int c) {
     const char* last = NULL;
     do {
         if (*s == (char)c) last = s;
@@ -496,7 +496,7 @@ static inline char* strrchr(const char* s, int c) {
     return (char*)last;
 }
 
-static inline char* strstr(const char* haystack, const char* needle) {
+char* strstr(const char* haystack, const char* needle) {
     if (!*needle) return (char*)haystack;
     for (; *haystack; haystack++) {
         if (*haystack == *needle) {
@@ -508,7 +508,7 @@ static inline char* strstr(const char* haystack, const char* needle) {
     return NULL;
 }
 
-static inline int memcmp(const void* s1, const void* s2, size_t n) {
+int memcmp(const void* s1, const void* s2, size_t n) {
     const uint8_t *p1 = (const uint8_t*)s1, *p2 = (const uint8_t*)s2;
     for (size_t i = 0; i < n; i++) {
         if (p1[i] != p2[i]) return p1[i] - p2[i];
@@ -516,9 +516,87 @@ static inline int memcmp(const void* s1, const void* s2, size_t n) {
     return 0;
 }
 
-static inline char* strerror(int errnum) {
+char* strerror(int errnum) {
     (void)errnum;
     return "Unknown error";
+}
+
+size_t strlen(const char* s) {
+    const char* p = s;
+    while (*p)
+        p++;
+    return (size_t)(p - s);
+}
+
+int strcmp(const char* s1, const char* s2) {
+    while (*s1 && *s1 == *s2) {
+        s1++;
+        s2++;
+    }
+    return (unsigned char)*s1 - (unsigned char)*s2;
+}
+
+int strncmp(const char* s1, const char* s2, size_t n) {
+    while (n && *s1 && *s1 == *s2) {
+        s1++;
+        s2++;
+        n--;
+    }
+    return n ? (unsigned char)*s1 - (unsigned char)*s2 : 0;
+}
+
+char* strcpy(char* dest, const char* src) {
+    char* result = dest;
+    while ((*dest++ = *src++))
+        ;
+    return result;
+}
+
+void* memcpy(void* dest, const void* src, size_t n) {
+    unsigned char* d = (unsigned char*)dest;
+    const unsigned char* s = (const unsigned char*)src;
+    void* result = dest;
+    while (n--)
+        *d++ = *s++;
+    return result;
+}
+
+void* memset(void* dest, int value, size_t n) {
+    unsigned char* d = (unsigned char*)dest;
+    void* result = dest;
+    while (n--)
+        *d++ = (unsigned char)value;
+    return result;
+}
+
+void* memmove(void* dest, const void* src, size_t n) {
+    unsigned char* d = (unsigned char*)dest;
+    const unsigned char* s = (const unsigned char*)src;
+    void* result = dest;
+    if ((uintptr_t)d <= (uintptr_t)s || (uintptr_t)d - (uintptr_t)s >= n) {
+        while (n--)
+            *d++ = *s++;
+    } else {
+        d += n;
+        s += n;
+        while (n--)
+            *--d = *--s;
+    }
+    return result;
+}
+
+int atoi(const char* s) {
+    int sign = 1;
+    int value = 0;
+    while (*s == ' ' || (*s >= '\t' && *s <= '\r'))
+        s++;
+    if (*s == '+' || *s == '-') {
+        if (*s++ == '-')
+            sign = -1;
+    }
+    while (*s >= '0' && *s <= '9')
+        value = value * 10 + (*s++ - '0');
+    return sign * value;
 }
 
 static inline unsigned long long nano_strtoull(const char* nptr, char** endptr, int base) {
@@ -603,6 +681,14 @@ static inline int sprintf(char* str, const char* format, ...) {
     va_list args;
     va_start(args, format);
     int res = nano_vsnprintf(str, 4096, format, args);
+    va_end(args);
+    return res;
+}
+
+int snprintf(char* str, size_t size, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int res = nano_vsnprintf(str, size, format, args);
     va_end(args);
     return res;
 }

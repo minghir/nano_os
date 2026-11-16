@@ -23,7 +23,11 @@
 
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
-#include "config.h"
+#ifdef CONFIG_TCC_NANO
+# define TCC_VERSION "0.9.28rc"
+#else
+# include "config.h"
+#endif
 
 #include <stdarg.h>
 #include <stdlib.h>
