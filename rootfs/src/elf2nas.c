@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     }
 
     // 7. Salvăm rezultatul plat pe disc folosind syscall-urile Nano OS
-    nano_create_file(argv[2], output_size);
+    nano_create_file(argv[2], output_size,0644);
     nano_write_file(argv[2], output_data, output_size);
 
     nano_print("[elf2nas] Binarul NAS1 a fost generat cu succes!\n");

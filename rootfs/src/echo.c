@@ -1,5 +1,6 @@
 #include "nano_libc.h"
 #include "nano_string.h"
+#include "string.h"
 
 int main(int argc, char** argv) {
     int print_newline = 1;

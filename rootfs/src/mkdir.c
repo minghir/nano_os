@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Apelăm syscall-ul de mkdir
-    if (nano_mkdir(dirname)) {
+    if (nano_mkdir(dirname,0755)) {
         nano_print("Director creat cu succes: ");
         nano_print(dirname);
         nano_print("\n");

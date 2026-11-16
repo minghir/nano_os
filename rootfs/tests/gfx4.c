@@ -1,5 +1,6 @@
 #include "nano_libc.h"
 #include "nano_string.h"
+#include <stdio.h>
 #include "libgfx.h"
 
 int main(int argc, char** argv) {

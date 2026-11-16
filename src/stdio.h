@@ -11,6 +11,8 @@
 #define EOF (-1)
 
 
+
+
 // --- DESCRIPTORI DE FIȘIERE POSIX (Nivel Jos) ---
 typedef long ssize_t;
 
@@ -91,5 +93,26 @@ int setvbuf(FILE *stream, char *buf, int mode, size_t size);
 char *tmpnam(char *s);
 
 int fputs(const char *s, FILE *stream);
+
+
+
+#ifndef NO_NANO_PRINT
+static inline void _nano_print_str(const char* s) { fputs(s, stdout); }
+static inline void _nano_print_int(long long v)   { printf("%lld\n", v); }
+static inline void _nano_print_flt(double v)      { printf("%.2f\n", v); }
+
+#define _NANO_PRINT_1(x) _Generic((x), \
+    char*:       _nano_print_str,      \
+    const char*: _nano_print_str,      \
+    float:       _nano_print_flt,      \
+    double:      _nano_print_flt,      \
+    default:     _nano_print_int       \
+)(x)
+
+#define _GET_PRINT_MACRO(_1, _2, NAME, ...) NAME
+#define print(...) _GET_PRINT_MACRO(__VA_ARGS__, printf, _NANO_PRINT_1)(__VA_ARGS__)
+#endif
+
+
 
 #endif // _STDIO_H

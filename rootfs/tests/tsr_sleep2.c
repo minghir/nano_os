@@ -1,4 +1,5 @@
 #include "nano_libc.h"
+#include <time.h>
 
 int main() {
     //nano_print("Pornesc...\n");

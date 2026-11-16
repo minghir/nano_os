@@ -10,6 +10,7 @@
 #include "../kernel/mouse.h"
 #include "../kernel/keyboard.h"
 #include "nano_string.h"
+#include "string.h"
 
 // Tipul de date pentru mutex (volatile ca să nu îl optimizeze compilatorul)
 typedef volatile int nano_mutex_t;
@@ -40,15 +41,17 @@ typedef struct {
     char name[32];
 } ProcessInfo;
 
-size_t strlen(const char* str);
-int atoi(const char* str);
+//size_t strlen(const char* str);
+//int atoi(const char* str);
 char* itoa(int value, char* str, int base);
 
+/*
 static inline char* strcpy(char* dest, const char* src) {
     char* saved_dest = dest;
     while ((*dest++ = *src++) != '\0');
     return saved_dest;
 }
+*/
 
 // --- CONVERSII ---
 
@@ -72,6 +75,7 @@ static inline int64_t parse_int64(const char* str) {
     return res * sign;
 }
 
+/*
 static inline void* memmove(void* dest, const void* src, size_t n) {
     unsigned char* d = (unsigned char*)dest;
     const unsigned char* s = (const unsigned char*)src;
@@ -87,7 +91,7 @@ static inline void* memmove(void* dest, const void* src, size_t n) {
     }
     return dest;
 }
-
+*/
 
 static inline int nano_kill(int pid) {
     uint64_t ret;
@@ -122,12 +126,12 @@ static inline int nano_getcwd(char* buf, int max_len) {
     return (int)ret;
 }
 
-static inline int nano_wait() {
+static inline int nano_wait(void) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)22) // Numărul syscall-ului SYSCALL_WAIT
+        : "a" ((uint64_t)SYSCALL_WAIT) // Folosim constanta din syscall.h!
         : "memory"
     );
     return (int)ret;
@@ -208,6 +212,8 @@ static inline void nano_print(const char* str) {
 }
 
 
+
+
 static inline int nano_cd(const char* path) {
     int ret;
     __asm__ volatile(
@@ -248,12 +254,12 @@ static inline void nano_ls(const char* path) {
     );
 }
 
-static inline int nano_create_file(const char* name, uint32_t size) {
+static inline int nano_create_file(const char* name, uint32_t size, uint16_t mode) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)10), "D" ((uint64_t)name), "S" ((uint64_t)size)
+        : "a" ((uint64_t)SYSCALL_CREATE_FILE), "D" ((uint64_t)name), "S" ((uint64_t)size), "d" ((uint64_t)mode)
         : "cc", "memory"
     );
     return (int)ret;
@@ -301,6 +307,53 @@ static inline int nano_read_file(const char* name, uint8_t* buffer, uint32_t max
     return (int)ret;
 }
 
+static inline int nano_read_file_at(const char* name, uint8_t* buffer, uint32_t offset, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_READ_FILE_AT), "D" ((uint64_t)name),
+          "S" ((uint64_t)buffer), "d" ((uint64_t)offset), "c" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int nano_write_file_at(const char* name, const uint8_t* buffer, uint32_t offset, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_WRITE_FILE_AT), "D" ((uint64_t)name),
+          "S" ((uint64_t)buffer), "d" ((uint64_t)offset), "c" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
+static inline int64_t nano_get_file_size(const char* name) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_GET_FILE_SIZE), "D" ((uint64_t)name)
+        : "cc", "memory"
+    );
+    return (int64_t)ret;
+}
+
+static inline int nano_truncate_file(const char* name, uint32_t size) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" ((uint64_t)SYSCALL_TRUNCATE_FILE), "D" ((uint64_t)name),
+          "S" ((uint64_t)size)
+        : "cc", "memory"
+    );
+    return (int)ret;
+}
+
 static inline uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffer) {
     // Alocăm un buffer generos pentru fișierul MP3 (ex: 2MB, cât maximul heap-ului sau cât permite fișierul)
     uint32_t max_size = 2 * 1024 * 1024; // 2 MB
@@ -323,12 +376,12 @@ static inline uint32_t read_file_to_buffer(const char* path, uint8_t** out_buffe
 
 
 
-static inline int nano_mkdir(const char* name) {
+static inline int nano_mkdir(const char* name, uint16_t mode) {
     uint64_t ret;
     __asm__ volatile (
         "int $0x80"
         : "=a" (ret)
-        : "a" ((uint64_t)15), "D" ((uint64_t)name)
+        : "a" ((uint64_t)SYSCALL_MKDIR), "D" ((uint64_t)name), "S" ((uint64_t)mode)
         : "cc", "memory"
     );
     return (int)ret;
@@ -394,9 +447,9 @@ static inline void nano_sleep(uint32_t milliseconds) {
     );
 }
 
-static inline void sleep(uint32_t milliseconds) {
-	return nano_sleep(milliseconds);
-}
+//static inline void sleep(uint32_t milliseconds) {
+//	return nano_sleep(milliseconds);
+//}
 
 static inline char* nano_strcat(char* dest, const char* src) {
     char* ptr = dest + strlen(dest);
@@ -717,10 +770,15 @@ static inline int nano_thread_join(uint32_t tid) {
 
 
 
-static inline uint32_t nano_getuid() {
-    register long rax_val __asm__("rax") = 48; // sau următorul număr liber de syscall
-    __asm__ volatile ("int $0x80\n\t" : "+r" (rax_val) : : "memory");
-    return (uint32_t)rax_val;
+static inline uint32_t nano_getuid(void) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GETUID) // Folosește macro-ul din syscall.h
+        : "memory"
+    );
+    return (uint32_t)ret;
 }
 
 static inline int nano_setuid(uint32_t uid) {
@@ -978,5 +1036,57 @@ static inline uint32_t nano_get_ticks(void) {
     return ticks;
 }
 
-#endif
+static inline int nano_get_username(uint32_t uid, char* buf, size_t max_len) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GET_USERNAME), "D" ((uint64_t)uid), "S" ((uint64_t)buf), "d" ((uint64_t)max_len)
+        : "memory"
+    );
+    return ret;
+}
 
+static inline int nano_get_user_info(const char* username, uint32_t* out_uid, char* out_home) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYSCALL_GET_USER_INFO), "D" ((uint64_t)username), "S" ((uint64_t)out_uid), "d" ((uint64_t)out_home)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int nano_chmod(const char* path, uint16_t mode) {
+    uint64_t res;
+    __asm__ volatile (
+        "mov $25, %%rax\n"     // IMPORTANT: Înlocuiește 25 cu numărul tău real pentru SYSCALL_CHMOD
+        "mov %1, %%rdi\n"
+        "mov %2, %%rsi\n"
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r" (res)
+        : "r" ((uint64_t)path), "r" ((uint64_t)mode)
+        : "rax", "rdi", "rsi"
+    );
+    return (int)res;
+}
+
+static inline int nano_chown(const char* path, uint32_t uid, uint32_t gid) {
+    uint64_t res;
+    __asm__ volatile (
+        "mov $26, %%rax\n"     // IMPORTANT: Înlocuiește 26 cu numărul tău real pentru SYSCALL_CHOWN
+        "mov %1, %%rdi\n"
+        "mov %2, %%rsi\n"
+        "mov %3, %%rdx\n"      // GID-ul se duce în rdx
+        "int $0x80\n"
+        "mov %%rax, %0\n"
+        : "=r" (res)
+        : "r" ((uint64_t)path), "r" ((uint64_t)uid), "r" ((uint64_t)gid)
+        : "rax", "rdi", "rsi", "rdx"
+    );
+    return (int)res;
+}
+
+#endif

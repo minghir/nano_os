@@ -9,7 +9,7 @@ int main(int argc, char* argv[]) {
     char* filename = argv[1];
 
     // Creăm un fișier cu dimensiunea inițială de 512 octeți (sau 0, în funcție de cum e scris FS-ul tău)
-    int success = nano_create_file(filename, 512); 
+    int success = nano_create_file(filename, 512,0644); 
 
     if (!success) {
         nano_print("touch: nu se poate crea fisierul '");

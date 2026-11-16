@@ -1,5 +1,5 @@
 #include "nano_libc.h"
-
+/*
 size_t strlen(const char* str) {
     size_t len = 0;
     while (str[len] != '\0') {
@@ -7,10 +7,10 @@ size_t strlen(const char* str) {
     }
     return len;
 }
+*/
 
 
-
-
+/*
 int atoi(const char* str) {
     int res = 0;
     int sign = 1;
@@ -37,7 +37,7 @@ int atoi(const char* str) {
 
     return res * sign;
 }
-
+*/
 char* itoa(int value, char* str, int base) {
     char* rc;
     char* ptr;

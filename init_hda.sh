@@ -24,6 +24,7 @@ sudo mount -o loop "$IMAGE" "$MOUNT_DIR"
 
 echo "[+] 4. Copiere integrală a structurii din $ROOTFS_DIR în imaginea ext2..."
 # Folosim -a (archive) ca să păstrăm permisiunile, structura și atributele fișierelor
+
 sudo cp -a "$ROOTFS_DIR/." "$MOUNT_DIR/"
 
 echo "[+] 5. Setare permisiuni corecte (root:root)..."

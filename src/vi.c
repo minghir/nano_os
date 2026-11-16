@@ -40,42 +40,38 @@ int cmd_input_len = 0;
 char clipboard[1024];
 int clipboard_len = 0;
 
-//static inline int sprintf(char* str, const char* format, ...) {
-/*	
-int sprintf(char* str, const char* format, ...){
-    va_list args;
-    va_start(args, format);
-    int i = 0;
-    char* ptr = str;
-    
-    while (format[i] != '\0') {
-        if (format[i] == '%' && format[i+1] == 'd') {
-            int val = va_arg(args, int);
-            char buf[16];
-            itoa(val, buf, 10);
-            char* b = buf;
-            while (*b) *ptr++ = *b++;
-            i += 2;
-        } else if (format[i] == '%' && format[i+1] == 's') {
-            char* s = va_arg(args, char*);
-            while (*s) *ptr++ = *s++;
-            i += 2;
-        } else if (format[i] == '%' && format[i+1] == 'c') {
-            char c = (char)va_arg(args, int);
-            *ptr++ = c;
-            i += 2;
-        } else {
-            *ptr++ = format[i++];
-        }
-    }
-    *ptr = '\0';
-    va_end(args);
-    return (int)(ptr - str);
-}
-*/
 void int_to_str(int n, char* buf) {
     itoa(n, buf, 10);
 }
+
+/*
+void editor_insert_row(int at, const char* s) {
+    if (at < 0 || at > E.num_lines) return;
+
+    if (E.num_lines >= E.capacity) {
+        E.capacity = E.capacity == 0 ? 16 : E.capacity * 2;
+        char** new_lines = (char**)nano_malloc(E.capacity * sizeof(char*));
+        
+        for (int i = 0; i < E.num_lines; i++) {
+            new_lines[i] = E.lines[i];
+        }
+        
+        if (E.lines) nano_free(E.lines);
+        E.lines = new_lines;
+    }
+
+    for (int i = E.num_lines; i > at; i--) {
+        E.lines[i] = E.lines[i - 1];
+    }
+
+    int len = (int)strlen(s);
+    E.lines[at] = (char*)nano_malloc(len + 1);
+    strcpy(E.lines[at], s);
+    
+    E.num_lines++;
+    E.modified = 1;
+}
+*/
 
 void editor_insert_row(int at, const char* s) {
     if (at < 0 || at > E.num_lines) return;
@@ -137,6 +133,7 @@ void editor_row_delete_char(int row, int at) {
     E.modified = 1;
 }
 
+/*
 void editor_insert_newline() {
     char* line = E.lines[E.cy];
     char left_part[256];
@@ -155,6 +152,42 @@ void editor_insert_newline() {
     E.lines[E.cy] = new_left;
 
     editor_insert_row(E.cy + 1, right_part);
+    E.cy++;
+    E.cx = 0;
+    E.modified = 1;
+}
+*/
+
+void editor_insert_newline() {
+    if (E.cy < 0 || E.cy >= E.num_lines) return;
+
+    char* line = E.lines[E.cy];
+    int len = (int)strlen(line);
+    
+    if (E.cx > len) E.cx = len;
+    if (E.cx < 0) E.cx = 0;
+
+    // 1. Alocăm spațiu sigur pentru partea stângă (până la cursor)
+    char* left_part = (char*)nano_malloc(E.cx + 1);
+    memcpy(left_part, line, E.cx);
+    left_part[E.cx] = '\0';
+
+    // 2. Alocăm spațiu sigur pentru partea dreaptă (de la cursor la final)
+    int right_len = len - E.cx;
+    char* right_part = (char*)nano_malloc(right_len + 1);
+    memcpy(right_part, &line[E.cx], right_len);
+    right_part[right_len] = '\0';
+
+    // 3. Eliberăm linia veche și o înlocuim cu partea stângă
+    nano_free(E.lines[E.cy]);
+    E.lines[E.cy] = left_part;
+
+    // 4. Inserăm linia nouă dedesubt cu partea dreaptă
+    editor_insert_row(E.cy + 1, right_part);
+    
+    // 5. Eliberăm buffer-ul temporar din dreapta (editor_insert_row își face propria copie)
+    nano_free(right_part);
+
     E.cy++;
     E.cx = 0;
     E.modified = 1;
@@ -229,8 +262,18 @@ void editor_refresh_screen() {
                 uint16_t attr = should_highlight ? invert_attr : default_attr;
 
                 if (j < len) {
-                    screen_buffer[row_start_idx + col] = attr | (unsigned char)E.lines[file_row][j];
-                    col++;
+                    char ch = E.lines[file_row][j];
+                    
+                    if (ch == '\t') {
+                        // Extinde tab-ul la 4 spații pe ecran
+                        do {
+                            screen_buffer[row_start_idx + col] = attr | ' ';
+                            col++;
+                        } while (col % 4 != 0 && col < SCREEN_COLS);
+                    } else {
+                        screen_buffer[row_start_idx + col] = attr | (unsigned char)ch;
+                        col++;
+                    }
                 }
             }
         } else {
@@ -620,7 +663,14 @@ int main(int argc, char* argv[]) {
                     editor_row_delete_char(E.cy, E.cx);
                     E.cx--;
                 }
-            } else {
+            } else if (c == '\t' || c == 9) { 
+                int spaces = 4 - (E.cx % 4); // Aliniere la oprirea de tab (tab stop)
+                for (int i = 0; i < spaces; i++) {
+                    editor_row_insert_char(E.cy, E.cx, ' ');
+                    E.cx++;
+                }
+            }
+			else {
                 editor_row_insert_char(E.cy, E.cx, c);
                 E.cx++;
             }

@@ -1,5 +1,6 @@
 
 #include "nano_libc.h"
+#include "string.h"
 
 #define MAX_HISTORY 10
 #define MAX_CMD_LEN 128
@@ -431,7 +432,7 @@ int main() {
         }
 
         if (redirect_file != NULL && redirect_file[0] != '\0') {
-            nano_create_file(redirect_file, 0);
+            nano_create_file(redirect_file, 0,0644);
             nano_set_stdout_file(redirect_file);
         } else {
             nano_set_stdout_file(NULL);
@@ -597,7 +598,7 @@ int main() {
         }
         else if (strcmp(cmd, "mkdir") == 0) {
             if (argc > 1) {
-                if (!nano_mkdir(argv[1])) {
+                if (!nano_mkdir(argv[1],0755)) {
                     nano_print("mkdir: failed to create directory: ");
                     nano_print(argv[1]);
                     nano_print("\n");
@@ -608,7 +609,7 @@ int main() {
         }
         else if (strcmp(cmd, "touch") == 0) {
             if (argc > 1) {
-                if (!nano_create_file(argv[1], 0)) {
+                if (!nano_create_file(argv[1], 0,0644)) {
                     nano_print("touch: failed to create file: ");
                     nano_print(argv[1]);
                     nano_print("\n");

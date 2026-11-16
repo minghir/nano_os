@@ -1,5 +1,5 @@
 #include "nano_libc.h"
-#include "nano_string.h"
+#include <stdio.h>
 #include "libgfx.h"
 
 
