@@ -63,6 +63,7 @@ int fgetc(FILE *stream);
 int fseek(FILE *stream, long offset, int whence);
 int remove(const char *filename);
 int rename(const char *oldname, const char *newname);
+void rewind(FILE *stream);
 
 #ifndef BUFSIZ
 #define BUFSIZ 8192

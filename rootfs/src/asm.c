@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "nano_libc.h"
 #include "elf.h"
 
@@ -1730,7 +1731,7 @@ int main(int argc, char* argv[]) {
     }
 
     // --- PASUL 3: Salvare fișier pe disc ---
-    int create_res = nano_create_file(out_file, bin_idx);
+    int create_res = nano_create_file(out_file, bin_idx,0755);
     nano_print("  [DEBUG] nano_create_file a returnat: ");
     char res_buf[16];
     itoa(create_res, res_buf, 10);

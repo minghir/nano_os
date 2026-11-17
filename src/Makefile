@@ -24,9 +24,21 @@ FONT_O      = gfx_font1.o
 DS_O        = libds.o
 
 all: $(BINS)
+	@mkdir -p ../rootfs/bin
+	@mkdir -p ../rootfs/lib
+	@mkdir -p ../rootfs/include
+	@mkdir -p ../rootfs/src
+	@for bin in $(BINS); do \
+		target_name=$$(basename $$bin .bin); \
+		cp $$bin ../rootfs/bin/$$target_name; \
+		echo "Copiat și redenumit: $$bin -> ../rootfs/bin/$$target_name"; \
+	done
+	@cp *.h ../rootfs/include/
+	@cp *.c ../rootfs/src/
+	@cp crt0.o gfx_font1.o libc.o libds.o libgfx.o nano_libc.o nano_string.o ../rootfs/lib/ 2>/dev/null || true
 	@echo "========================================="
-	@echo " Toate aplicațiile din src au fost"
-	@echo " compiliate cu succes în fișiere .bin! "
+	@echo " Toate aplicațiile au fost compiliate"
+	@echo " și copiate în ../rootfs/bin/ cu succes! "
 	@echo "========================================="
 
 # 1. Compilare C Runtime Zero

@@ -1,31 +1,5 @@
 #include "nano_libc.h"
 #include "time.h"
-/*
-int main() {
-    nano_syslog("[INIT] Nano OS Init daemon started (PID 1).\n");
-
-    while (1) {
-        nano_syslog("[INIT] Spawning shell (/sbin/shell)...\n");
-        
-        // Lansăm shell-ul
-        int success = nano_exec("/sbin/shell");
-        
-        if (success) {
-            // Așteptăm ca shell-ul să iasă (când utilizatorul dă 'exit')
-            nano_wait();
-            nano_print("[INIT] Shell terminated. Restarting in 2 seconds...\n");
-        } else {
-            nano_print("[INIT] Error: Failed to start /sbin/shell!\n");
-        }
-        
-        // O scurtă pauză înainte de respawn pentru a evita o buclă de erori infinită
-        sleep(2000);
-    }
-
-    return 0;
-}
-*/
-
 
 int main() {
     nano_syslog("[INIT] Nano OS Init daemon started (PID 1).\n");
@@ -34,8 +8,8 @@ int main() {
         nano_syslog("[INIT] Spawning shell...\n");
         
         int pid = nano_exec("/hda/bin/shell");
-        if (pid <= 0) pid = nano_exec("/hda/sbin/shell");
-        if (pid <= 0) pid = nano_exec("/sbin/shell");
+        if (pid <= 0) pid = nano_exec("/hda/bin/shell");
+        if (pid <= 0) pid = nano_exec("/bin/shell");
 
         if (pid > 0) {
             // Așteptăm ca shell-ul să se termine (SYSCALL_WAIT adoarme procesul init)
@@ -46,7 +20,7 @@ int main() {
         }
         
         // Pauză înainte de respawn
-        sleep(2000);
+        sleep(2);
     }
 
     return 0;

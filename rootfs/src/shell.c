@@ -1,6 +1,7 @@
 
 #include "nano_libc.h"
 #include "string.h"
+#include "stdio.h"
 
 #define MAX_HISTORY 10
 #define MAX_CMD_LEN 128
@@ -589,13 +590,6 @@ int main() {
                 nano_print("mount: missing argument\n");
             }
         }
-        else if (strcmp(cmd, "ls") == 0) {
-            if (argc > 1) {
-                nano_ls(argv[1]);
-            } else {
-                nano_ls("");
-            }
-        }
         else if (strcmp(cmd, "mkdir") == 0) {
             if (argc > 1) {
                 if (!nano_mkdir(argv[1],0755)) {
@@ -685,18 +679,45 @@ int main() {
             }
         }
         else {
-            int child_pid = nano_exec(raw_buffer);
-			if (child_pid <= 0) {
-				nano_print("Unknown command: ");
-				nano_print(cmd);
-				nano_print("\n");
-                last_exit_code = 127; // Comandă negăsită (standard POSIX)
-			} else {
-				if (!background) {
-					last_exit_code = nano_wait(); // Așteptăm DOAR dacă s-a creat un copil valid
+            // Verificăm dacă comandă sau primul argument se termină în .sh
+			int is_script = 0;
+			int cmd_len = strlen(cmd);
+			if (cmd_len > 3 && strcmp(cmd + cmd_len - 3, ".sh") == 0) {
+				is_script = 1;
+			}
+
+			if (is_script) {
+				// Indiferent că e "test.sh" sau "./test.sh", trimitem la script
+				char script_cmd[MAX_CMD_LEN];
+				snprintf(script_cmd, sizeof(script_cmd), "sh %s", raw_buffer);
+				
+				int child_pid = nano_exec(script_cmd);
+				if (child_pid <= 0) {
+					nano_print("script: nu s-a putut rula scriptul\n");
+					last_exit_code = 127;
 				} else {
-					nano_print("[Background task started]\n");
-                    last_exit_code = 0;
+					if (!background) {
+						last_exit_code = nano_wait();
+					} else {
+						nano_print("[Background script started]\n");
+						last_exit_code = 0;
+					}
+				}
+			} else {
+				// Execuție normală pentru binare (ls, vi, tcc, etc.)
+				int child_pid = nano_exec(raw_buffer);
+				if (child_pid <= 0) {
+					nano_print("Unknown command: ");
+					nano_print(cmd);
+					nano_print("\n");
+					last_exit_code = 127;
+				} else {
+					if (!background) {
+						last_exit_code = nano_wait();
+					} else {
+						nano_print("[Background task started]\n");
+						last_exit_code = 0;
+					}
 				}
 			}
         }
