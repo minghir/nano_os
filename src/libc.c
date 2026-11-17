@@ -286,7 +286,7 @@ static char* print_num(char* buffer, uint64_t unum, int base, int is_negative) {
 // ====================================================================
 // NUCLEUL DE FORMATARE: vsnprintf
 // ====================================================================
-
+/*
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     size_t written = 0;
     if (size == 0) return 0;
@@ -392,6 +392,177 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     str[written] = '\0';
     return written;
 }
+*/
+
+// ====================================================================
+// NUCLEUL DE FORMATARE: vsnprintf (cu suport pentru lățime, ex: %4d)
+// ====================================================================
+
+int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
+    size_t written = 0;
+    if (size == 0) return 0;
+
+    while (*format && written < size - 1) {
+        if (*format == '%') {
+            format++;
+            
+            // 1. Parsare Lățime (ex: 4 din %4d)
+            int width = 0;
+            while (*format >= '0' && *format <= '9') {
+                width = width * 10 + (*format - '0');
+                format++;
+            }
+
+            int length_modifier = 0;
+            if (*format == 'l') {
+                length_modifier = 1;
+                format++;
+                if (*format == 'l') {
+                    length_modifier = 2;
+                    format++;
+                }
+            }
+            switch (*format) {
+                case 'c': {
+                    char c = (char)va_arg(ap, int);
+                    int padding = (width > 1) ? (width - 1) : 0;
+                    while (padding > 0 && written < size - 1) {
+                        str[written++] = ' ';
+                        padding--;
+                    }
+                    if (written < size - 1) {
+                        str[written++] = c;
+                    }
+                    break;
+                }
+                case 's': {
+                    char *s = va_arg(ap, char*);
+                    if (!s) s = "(null)";
+                    
+                    int len = 0;
+                    char *temp = s;
+                    while (*temp++) len++;
+                    
+                    int padding = (width > len) ? (width - len) : 0;
+                    while (padding > 0 && written < size - 1) {
+                        str[written++] = ' ';
+                        padding--;
+                    }
+                    
+                    while (*s && written < size - 1) {
+                        str[written++] = *s++;
+                    }
+                    break;
+                }
+                case 'd':
+                case 'i': {
+                    int64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, long);
+                    } else {
+                        num = va_arg(ap, int);
+                    }
+                    int is_negative = num < 0;
+                    uint64_t magnitude = is_negative
+                                        ? (uint64_t)(-(num + 1)) + 1
+                                        : (uint64_t)num;
+                    char buf[32];
+                    print_num(buf, magnitude, 10, is_negative);
+                    
+                    int len = 0;
+                    char *b_len = buf;
+                    while (*b_len++) len++;
+
+                    int padding = (width > len) ? (width - len) : 0;
+                    while (padding > 0 && written < size - 1) {
+                        str[written++] = ' ';
+                        padding--;
+                    }
+
+                    char *b = buf;
+                    while (*b && written < size - 1) str[written++] = *b++;
+                    break;
+                }
+                case 'u': {
+                    uint64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, unsigned long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, unsigned long);
+                    } else {
+                        num = va_arg(ap, unsigned int);
+                    }
+                    char buf[32];
+                    print_num(buf, num, 10, 0);
+
+                    int len = 0;
+                    char *b_len = buf;
+                    while (*b_len++) len++;
+
+                    int padding = (width > len) ? (width - len) : 0;
+                    while (padding > 0 && written < size - 1) {
+                        str[written++] = ' ';
+                        padding--;
+                    }
+
+                    char *b = buf;
+                    while (*b && written < size - 1) str[written++] = *b++;
+                    break;
+                }
+                case 'x':
+                case 'X': {
+                    uint64_t num;
+                    if (length_modifier == 2) {
+                        num = va_arg(ap, unsigned long long);
+                    } else if (length_modifier == 1) {
+                        num = va_arg(ap, unsigned long);
+                    } else {
+                        num = va_arg(ap, unsigned int);
+                    }
+                    char buf[32];
+                    print_num(buf, num, 16, 0);
+                    if (*format == 'X') {
+                        for (char *digit = buf; *digit; digit++) {
+                            if (*digit >= 'a' && *digit <= 'f') *digit -= 'a' - 'A';
+                        }
+                    }
+
+                    int len = 0;
+                    char *b_len = buf;
+                    while (*b_len++) len++;
+
+                    int padding = (width > len) ? (width - len) : 0;
+                    while (padding > 0 && written < size - 1) {
+                        str[written++] = ' ';
+                        padding--;
+                    }
+
+                    char *b = buf;
+                    while (*b && written < size - 1) str[written++] = *b++;
+                    break;
+                }
+                case '%': {
+                    str[written++] = '%';
+                    break;
+                }
+                default: {
+                    str[written++] = '%';
+                    if (written < size - 1) str[written++] = *format;
+                    break;
+                }
+            }
+        } else {
+            str[written++] = *format;
+        }
+        format++;
+    }
+    
+    str[written] = '\0';
+    return written;
+}
+
 
 // ====================================================================
 // WRAPPERS STANDARD PENTRU FORMATARE ȘI AFIȘARE
@@ -1043,6 +1214,15 @@ int strncmp(const char *s1, const char *s2, size_t n) {
         s2++;
     }
     return *(unsigned char *)s1 - *(unsigned char *)s2;
+}
+
+char *strcat(char *dest, const char *src) {
+    char *ptr = dest + strlen(dest);
+    while (*src != '\0') {
+        *ptr++ = *src++;
+    }
+    *ptr = '\0';
+    return dest;
 }
 
 char *strncat(char *dest, const char *src, size_t n) {
@@ -1999,4 +2179,9 @@ int ftruncate(int fd, long length) {
         return 0;
     }
     return -1;
+}
+
+char *__strcat_chk(char *dest, const char *src, size_t destlen) {
+    (void)destlen;
+    return strcat(dest, src);
 }
